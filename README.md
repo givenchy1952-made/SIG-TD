@@ -1,2 +1,152 @@
-# SIG-TD
-생산관리
+# SIG SAMPLE MANAGEMENT
+
+FIVE SPACE / SIG의 샘플 진행, 메인 생산, 일정 및 업체 결제 마감을 함께 관리하는 React + TypeScript 웹 애플리케이션입니다. 한국어 UI를 기본으로 제공하며 Tailwind CSS, Supabase Auth·Postgres·Realtime·Storage를 사용합니다.
+
+이 저장소의 기존 파일은 `README.md` 한 개뿐이었습니다. 기존 SIG HTML 및 프로젝트는 포함되어 있지 않아 과거의 빈 화면 오류를 재현하거나 기존 코드를 재사용할 수 없었습니다. 이번 버전은 실행 진입점과 데이터 계층을 새로 구현했습니다. 연결 정보 누락·접근 거부·저장 충돌은 안내 메시지로 처리합니다.
+
+[대시보드 화면](docs/screenshots/dashboard.png) · [생산 상세](docs/screenshots/production.png) · [캘린더](docs/screenshots/calendar.png) · [모바일](docs/screenshots/mobile.png)
+
+## 빠른 실행
+
+Node.js 22 이상과 npm을 권장합니다. 개발 환경에서 다음 명령을 실행하세요.
+
+```bash
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+터미널에 표시된 로컬 개발 주소로 접속합니다. Supabase URL·키를 비워 두면 **개발 서버에서 체험 모드**를 사용할 수 있습니다. 처음 접속하면 예시 데이터 대시보드가 열립니다. 로그아웃 후에는 로그인 화면의 체험 시작 버튼으로 다시 들어갈 수 있습니다. 예시 스타일·공장·담당자·수량은 실제 업무 데이터가 아닙니다.
+
+체험 모드는 브라우저 저장소를 사용합니다. 같은 브라우저의 탭 사이에는 변경 사항을 반영하고 버전 충돌을 감지하지만, 서로 다른 컴퓨터·브라우저·사용자 간 공유는 지원하지 않습니다. 체험 계정의 역할 선택은 권한 화면을 확인하기 위한 기능이며 실제 사용자 인증이 아닙니다. 첨부파일은 해당 브라우저의 IndexedDB에 저장됩니다.
+
+공유 시안 배포에서 체험 모드를 공개하려면 `VITE_ENABLE_DEMO=true`를 명시해야 합니다. 이 경우 누구나 예시 환경을 열 수 있으므로 실제 업무·개인정보를 넣지 마세요. 운영 배포에서는 `VITE_ENABLE_DEMO=false`를 유지하고 Supabase를 연결하세요. 개발 서버와 localhost를 제외한 운영 배포에서 연결 정보와 체험 허용 설정이 모두 없으면 설정 안내 화면을 표시합니다.
+
+## 구현 기능
+
+| 메뉴 | 주요 기능 |
+| --- | --- |
+| 대시보드 | 스타일·프로젝트·공장별 현황, 오더·출고·입고 수량, 진행 단계, 지연 및 7일 일정 |
+| 스타일·샘플 | 스타일 등록·수정, 시즌·프로젝트·공장·담당자 배정, 차수 누적, PP 승인, 요청·제작·입출고·리뷰 날짜, 운송장·수정 요청 |
+| 메인 생산 | 컬러별 품번 자동 조합, TP·PP 전달·GB·라벨·케어·원부자재·패킹·메인 수납·에이블 검사·패킹리스트, XXS~XL 오더·패킹·출고·입고 수량 |
+| 정산 | 세금계산서 상태, 원화 정산 금액, 결제 마감일·결제 상태 |
+| 검색·내보내기 | 시즌·프로젝트·공장·담당자·스타일·컬러·상태 필터, 검색, 납기 정렬, CSV 및 다중 시트 Excel |
+| 캘린더 | 월간·주간 보기, 공장·프로젝트 필터, 제작·기준 납기·출고·입고·컨펌·결제 일정, 지연 표시 |
+| 협업 | 코멘트, 이미지·PDF 첨부, 수정자·시간·사유·이전 값 이력, 버전 기반 동시 수정 충돌 감지 |
+| 관리자 | 가입 승인, 사용자 역할·공장 배정·활성 상태, 공장 및 프로젝트 등록·수정, 스타일 보존 삭제 |
+
+전체 범위와 1차 구현의 제한은 [구현 범위 문서](docs/IMPLEMENTATION.md), 실행한 검증 결과는 [테스트 결과](docs/TEST_RESULTS.md)를 참고하세요.
+
+## Supabase 실제 연결
+
+1. Supabase 프로젝트를 생성합니다. 프로젝트의 SQL Editor에서 [001_initial.sql](supabase/migrations/001_initial.sql)을 실행합니다. 최초 적용용 마이그레이션이며 기존 테이블 위에 반복 실행하지 마세요.
+2. 아래 환경변수를 `.env.local` 또는 호스팅 환경에 입력합니다.
+3. Supabase Auth의 **Site URL**과 **Redirect URLs**에 실제 접속 주소를 등록합니다. 로컬 개발 주소와 배포 주소가 다르면 각각 추가하세요. 운영에서는 이메일 확인을 활성화하고, 팀 정책에 맞는 이메일 발송 설정을 확인하세요.
+4. 앱을 다시 실행하거나 다시 빌드한 후 첫 관리자 계정으로 회원가입하고 이메일 확인을 완료합니다. 첫 가입은 승인 대기 상태입니다.
+5. 아래의 첫 관리자 설정 SQL을 Supabase SQL Editor에서 실행합니다. 그다음 다시 로그인하거나 화면을 새로고침합니다.
+6. 관리자 화면에서 공장·프로젝트를 등록합니다. 다른 담당자가 회원가입하면 관리자가 역할·담당 공장을 지정하고 승인합니다. 이후 실제 스타일을 등록합니다.
+
+```dotenv
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_OR_PUBLISHABLE_KEY
+VITE_ENABLE_DEMO=false
+```
+
+`VITE_` 값은 클라이언트 번들에 포함됩니다. 공개 `anon` 또는 `publishable` 키만 사용하세요. `service_role`, Supabase secret 키, 데이터베이스 비밀번호는 브라우저 환경변수에 넣지 마세요. 실제 접근 제한은 데이터베이스의 RLS와 RPC에서 적용합니다.
+
+네트워크 제한이 있는 환경에서는 해당 Supabase 프로젝트 호스트에 대한 HTTPS와 WebSocket 연결이 필요합니다. 선택 사항인 `supabase/seed.sql`은 EXAMPLE 표시가 있는 공장·프로젝트 기준 정보를 추가하고, 첫 관리자가 이미 있으면 명시적으로 표시된 예시 스타일 1개를 추가합니다. 실제 사용자·비밀번호는 만들지 않습니다. 운영 프로젝트에는 필요할 때만 검토 후 적용하세요. 브라우저 예시 스타일은 `src/lib/seed.ts`에 있으며 클라우드로 자동 이관하지 않습니다.
+
+이 저장소에는 실제 Supabase 계정·키가 제공되지 않았습니다. 실제 Auth, 원격 저장, Storage, 서로 다른 사용자 간 Realtime 동작은 프로젝트 연결 후 확인해야 합니다.
+
+### 첫 관리자 계정 설정
+
+마이그레이션을 적용한 **후** 앱에서 가입한 실제 이메일로 바꿔 실행하세요. 기존 계정의 비밀번호나 관리자 키를 코드에 저장할 필요가 없습니다.
+
+```sql
+do $$
+declare
+  first_admin_id uuid;
+begin
+  select id into first_admin_id
+    from auth.users
+   where lower(email) = lower('YOUR_CONFIRMED_EMAIL@example.com');
+  if first_admin_id is null then
+    raise exception '먼저 앱에서 회원가입하고 이메일을 확인해 주세요.';
+  end if;
+
+  update public.profiles
+     set role = 'admin', approved = true, active = true, factory_id = null
+   where id = first_admin_id;
+  if not found then
+    raise exception '가입 프로필이 없습니다. 마이그레이션과 가입 시점을 확인해 주세요.';
+  end if;
+end $$;
+```
+
+첫 관리자 등록은 신뢰할 수 있는 SQL Editor에서만 수행합니다. 이후 사용자 관리는 앱의 관리자 메뉴를 사용하세요. 프론트엔드에서 다른 사람의 Auth 계정·비밀번호를 직접 생성하지 않습니다. 계정 비활성화는 업무 접근을 차단하고 과거 기록을 남기는 방식입니다.
+
+### 기본 권한
+
+요청서의 수량 입력 원칙에 따라 출고 수량은 외부 공장 또는 관리자, 입고 수량은 관리자만 입력합니다. 실 출고일·실 입고일·세금계산서 상태는 해당 스타일에 접근 가능한 담당자가 변경할 수 있습니다.
+
+| 작업 | 관리자 | 본사 직원 | 외부 공장 |
+| --- | --- | --- | --- |
+| 스타일 조회 | 전체 | 전체 | 배정 공장만 |
+| 스타일·공장 배정·기준 납기·본사 요청 수정 | 가능 | 가능 | 불가 |
+| 샘플 추가·PP·최종 컨펌 | 가능 | 가능 | 불가 |
+| 샘플 제작·발송 진행·운송장·공장 코멘트 | 가능 | 가능 | 배정 스타일만 |
+| 메인 체크리스트·오더·패킹 수량 | 가능 | 가능 | 조회만 |
+| 실 출고 수량 | 가능 | 조회만 | 배정 스타일만 |
+| 실 입고 수량 | 가능 | 조회만 | 조회만 |
+| 실제 입출고일·컨펌 예정일·세금계산서 상태 | 가능 | 가능 | 배정 스타일만 |
+| 정산 금액·결제 상태·결제 마감 | 가능 | 가능 | 조회만 |
+| 사용자 승인·역할·공장·프로젝트 관리 | 가능 | 불가 | 불가 |
+| 스타일 삭제 | 보존 삭제 | 불가 | 불가 |
+
+승인 전 또는 비활성 계정은 업무 데이터에 접근할 수 없습니다. 공장 계정은 본사 요청·기준 납기·검사 및 최종 컨펌을 수정할 수 없으며 다른 공장 데이터와 첨부파일에 접근할 수 없습니다. 관리자도 기존 샘플 차수·컬러 생산 기록을 제거하지 않고 누적합니다.
+
+### 데이터와 파일
+
+`styles`에는 스타일·샘플·컬러 생산을 하나의 버전 관리 단위로 저장합니다. 프로필, 공장, 프로젝트, 코멘트, 첨부파일, 감사 이력은 별도 테이블입니다. `save_style` RPC는 현재 버전을 확인한 후 권한별 필드를 검증하고 수정 이력을 남깁니다. 다른 사용자가 먼저 저장했으면 저장을 거부하며 현재 편집 내용을 즉시 덮어쓰지 않습니다. 최신 데이터를 확인하고 변경 사항을 다시 반영하세요.
+
+첨부파일은 공개 URL 없이 비공개 `sig-files` 버킷에 저장합니다. JPG·PNG·WEBP·PDF만 파일당 10MB까지 허용합니다. 조회·업로드 권한은 스타일 배정과 계정 상태에 따라 검증합니다. 파일·코멘트는 스타일 또는 특정 샘플 차수에 연결할 수 있습니다.
+
+클라우드 모드의 실시간 이벤트는 Supabase Realtime으로 구독합니다. 브라우저에 표시되는 연결 상태를 확인하세요. 네트워크가 끊긴 동안의 쓰기를 자동 대기열에 저장하거나 재전송하지 않습니다. 실패한 작업은 연결을 회복한 후 다시 실행해야 합니다.
+
+## 테스트와 빌드
+
+```bash
+npm run typecheck
+npm test
+npx playwright install chromium
+npm run test:e2e
+npm run build
+npm run preview
+```
+
+단위·데이터베이스 테스트와 브라우저 테스트는 서로 다른 범위를 검증합니다. PGlite 기반 SQL 테스트는 실제 마이그레이션을 로컬 PostgreSQL 엔진에서 실행해 정책과 RPC를 검증하지만, Supabase 운영 서비스의 Auth 이메일·Storage API·WebSocket까지 검증한 결과는 아닙니다. 실제로 실행한 테스트 수와 한계는 `docs/TEST_RESULTS.md`를 확인하세요.
+
+## Vercel 배포
+
+1. 저장소를 Vercel에 연결하고 Framework Preset을 **Vite**로 선택합니다.
+2. Install Command는 `npm ci`, Build Command는 `npm run build`, Output Directory는 `dist`로 설정합니다.
+3. `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ENABLE_DEMO=false`를 배포 환경변수에 등록합니다.
+4. 빌드·배포 후 실제 도메인을 Supabase Auth Site URL·Redirect URLs에 추가합니다.
+5. 관리자·본사·서로 다른 두 공장·미승인 계정으로 [운영 전 확인 목록](docs/IMPLEMENTATION.md#운영-전-실제-서비스-확인)을 수행합니다.
+
+Vite 환경변수는 빌드 시 주입되므로 변경할 때마다 다시 배포해야 합니다. `vercel.json`에는 SPA 경로 처리와 기본 보안 헤더가 포함되어 있습니다. 이 작업에서 원격 배포는 수행하지 않았습니다.
+
+## 주요 파일
+
+```text
+src/                        React 화면, 타입, 권한, 데이터 계층
+src/lib/seed.ts             브라우저 체험용 예시 데이터
+supabase/migrations/        데이터베이스·RLS·RPC·Storage·Realtime 설정
+.env.example                공개 클라이언트 환경변수 예시
+vercel.json                 Vercel 배포 설정
+tests/                      자동화 검증
+docs/IMPLEMENTATION.md      범위, 권한 해석, 제한, 수동 검증 절차
+docs/TEST_RESULTS.md        실제 실행 결과
+```
+
+실제 업무 전에는 회사의 보안·백업·보존 정책과 데이터 구조를 검토하고, 별도 Supabase 테스트 프로젝트에서 사용자별 승인·배정·동시 수정·파일 권한을 확인하세요. 체험 데이터를 운영 데이터로 가져오지 않습니다.
