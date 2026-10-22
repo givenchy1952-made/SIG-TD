@@ -3,6 +3,7 @@ import type { ChangeEvent, ReactNode } from 'react'
 import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, Clock3, FileImage, FileText, History, LockKeyhole, MessageSquare, Package, Paperclip, Plus, Save, Send, ShieldCheck, Trash2, X } from 'lucide-react'
 import type { Attachment, Audit, ProductionLine, Profile, Quantities, Sample, Stage, Status, Style, Workspace } from '../lib/types'
 import { blankProduction, blankSample, CHECKS, quantityTotal, ROLE_LABEL, SIZES, STAGE_LABEL, STATUS_LABEL } from '../lib/types'
+import StyleImageManager from './StyleImageManager'
 import './style-detail.css'
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   onComment: (styleId: string, body: string, sampleId?: string) => Promise<void>
   onUpload: (styleId: string, file: File, sampleId?: string) => Promise<void>
   onDownload: (attachment: Attachment) => Promise<void>
+  onSetImage: (styleId: string, color: string, attachmentId: string | null, expectedVersion: number, reason: string) => Promise<void>
+  onUploadImage: (styleId: string, color: string, file: File, expectedVersion: number, reason: string) => Promise<void>
 }
 const copy = <T,>(value: T): T => structuredClone(value)
 const timeLabel = (value: string) => value ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
@@ -60,7 +63,7 @@ function diffSummary(audit: Audit): string[] {
   return changes.slice(0, 20)
 }
 
-export default function StyleDetail({ style, workspace, profile, onClose, onSave, onDelete, onComment, onUpload, onDownload }: Props) {
+export default function StyleDetail({ style, workspace, profile, onClose, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage }: Props) {
   const [base, setBase] = useState(() => copy(style))
   const [draft, setDraft] = useState(() => copy(style))
   const [tab, setTab] = useState('samples')
@@ -199,6 +202,7 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
       {error && <div className="error-message" role="alert">{error}<button className="icon-button" onClick={() => setError('')} aria-label="오류 안내 닫기"><X size={14} /></button></div>}
       {success && <div className="success-message" role="status"><Check size={15} /> {success}</div>}
       <div className="detail-scroll">
+        <StyleImageManager style={style} workspace={workspace} profile={profile} onSetImage={onSetImage} onUploadImage={onUploadImage} />
         {infoOpen && <section className="detail-info panel"><div className="section-heading"><h2>스타일 기본 정보</h2>{!hq && <span className="muted"><LockKeyhole size={12} /> 본사 관리 항목</span>}</div><div className="form-grid">
           <Field label="스타일 품번" locked={!hq}><input className="input" aria-label="스타일 품번" value={draft.code} maxLength={60} onChange={event => update('code', event.target.value.toUpperCase())} disabled={!hq} /></Field>
           <Field label="스타일명" locked={!hq}><input className="input" value={draft.name} maxLength={120} onChange={event => update('name', event.target.value)} disabled={!hq} /></Field>

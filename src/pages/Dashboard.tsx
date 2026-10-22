@@ -4,9 +4,11 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Factory as FactoryIcon,
   Filter, Layers3, PackageCheck, Plus, Search, Shirt, SlidersHorizontal, X,
 } from 'lucide-react'
-import { Badge } from '../components/ui'
+import { Badge, Modal } from '../components/ui'
+import PrivateImage from '../components/PrivateImage'
+import { resolveStyleImage } from '../lib/style-images'
 import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '../lib/types'
-import type { CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
+import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
 import { exportWorkspace } from '../lib/export'
 import './dashboard.css'
 
@@ -44,6 +46,8 @@ function datesFor(style: Style, field: DateField): string[] {
 }
 
 export default function Dashboard({ workspace, profile, view, onOpenStyle, onCreate, query, onQueryChange }: Props) {
+  const [imagePreview, setImagePreview] = useState<{ attachment: Attachment; styleId: string; alt: string } | null>(null)
+  const imageScope = `${profile.id}:${profile.role}:${profile.factoryId || ''}`
   const [season, setSeason] = useState('')
   const [project, setProject] = useState('')
   const [factory, setFactory] = useState('')
@@ -143,7 +147,14 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const filteredOrders = rows.reduce((sum, { style, line }) => sum + (line ? quantityTotal(line.order) : style.production.reduce((n, l) => n + quantityTotal(l.order), 0)), 0)
   const pageLabel = productionMode ? '컬러' : '스타일'
 
+  function thumbnail(style: Style, line?: ProductionLine) {
+    const attachment = resolveStyleImage(workspace, style.id, line?.color)
+    const alt = `${style.code}${line?.color || ''} 대표 이미지`
+    return <button type="button" className={`garment-icon ${attachment ? 'garment-photo cutout-background' : ''}`} aria-label={attachment ? `${alt} 크게 보기` : `${style.code} 대표 이미지 등록`} title={attachment ? '대표 이미지 크게 보기' : '스타일 상세에서 대표 이미지 등록'} onClick={event => { event.stopPropagation(); if (attachment) setImagePreview({ attachment, styleId: style.id, alt }); else onOpenStyle(style.id) }}>{attachment ? <PrivateImage attachment={attachment} scope={imageScope} alt={alt}/> : <Shirt size={21} strokeWidth={1.15}/>}</button>
+  }
   return <div className="dashboard-page">
+    {imagePreview && <Modal title={imagePreview.alt} wide onClose={() => setImagePreview(null)}><div className="modal-body"><div className="style-image-zoom cutout-background"><PrivateImage attachment={imagePreview.attachment} scope={imageScope} alt={imagePreview.alt}/></div><div className="modal-footer"><button className="button" onClick={() => { onOpenStyle(imagePreview.styleId); setImagePreview(null) }}>{profile.role === 'factory' ? '스타일 상세' : '이미지 관리'}</button><button className="button button-primary" onClick={() => setImagePreview(null)}>닫기</button></div></div></Modal>}
+
     <div className="dashboard-page-heading">
       <div><div className="page-eyebrow">{eyebrow}</div><h1>{title}<span className="heading-period">.</span></h1><p>{subtitle}</p></div>
       <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
@@ -224,7 +235,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
         const shipment = line ? quantityTotal(line.shipped) : 0
         return <tr key={line?.id || style.id} onClick={() => onOpenStyle(style.id)} className={isLate ? 'row-overdue' : ''}>
           <td className="number-cell">{String((currentPage - 1) * pageSize + index + 1).padStart(2, '0')}</td>
-          <td className="style-cell"><div className="style-identity"><div className={`garment-icon garment-${style.category.toLowerCase().includes('pant') || style.category.includes('팬츠') ? 'pants' : 'top'}`}><Shirt size={21} strokeWidth={1.15}/></div><div><button className="style-code" onClick={e => { e.stopPropagation(); onOpenStyle(style.id) }}>{style.code}{line?.color || ''}</button><span className="style-name">{style.name}</span></div></div></td>
+          <td className="style-cell"><div className="style-identity">{thumbnail(style, line)}<div><button className="style-code" onClick={e => { e.stopPropagation(); onOpenStyle(style.id) }}>{style.code}{line?.color || ''}</button><span className="style-name">{style.name}</span></div></div></td>
           <td><span className="cell-main project-cell" title={projectName(style.projectId)}>{projectName(style.projectId)}</span><span className="cell-sub">{style.season}</span></td>
           <td><span className="cell-main">{factoryName(style.factoryId)}</span><span className="cell-sub">{workspace.factories.find(f => f.id === style.factoryId)?.country || '미배정'}</span></td>
           {productionMode && line ? view === 'settlement' ? <><td><span className="color-tag"><i style={{ background: colorHex(line.color) }}/>{line.color}</span></td><td><Badge status={line.invoice}/></td><td className="numeric amount">{number(line.invoiceAmount)}</td><td className={line.paymentDue && line.paymentDue < today && line.paymentStatus !== 'done' ? 'text-danger' : ''}>{shortDate(line.paymentDue)}</td><td><Badge status={line.paymentStatus}/></td><td className="numeric">{number(shipment)}<span className="muted"> / {number(received)}</span></td></> : <><td><span className="color-tag"><i style={{ background: colorHex(line.color) }}/>{line.color}</span></td><td className="numeric amount">{number(order)}<span className="quantity-unit">pcs</span></td>{(['materials', 'gb', 'labels', 'packing', 'main', 'quality'] as CheckKey[]).map(key => <td key={key}><Badge status={line.checks[key]}/></td>)}<td className="numeric">{number(shipment)}</td><td className="numeric">{number(received)}</td><td><Badge status={line.invoice}/></td></> : <>

@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { Attachment, Profile, Style, Workspace, Factory, Project } from './types'
+import type { Attachment, Profile, Style, Workspace, Factory, Project, StyleImage } from './types'
 import { createSeed } from './seed'
 import { assertActive, assertStyleSave, canViewStyle } from './permissions'
+import { STYLE_IMAGE_MIME } from './style-images'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 const url = import.meta.env.VITE_SUPABASE_URL?.trim(), key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 let configurationError = ''
@@ -13,7 +14,7 @@ let supabase: SupabaseClient | null = null
 if (url && key && !configurationError) { try { supabase = createClient(url, key) } catch { configurationError = 'Supabase 연결 정보를 초기화할 수 없습니다. URL과 공개 키 형식을 확인해 주세요.' } }
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
-export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) return parsed } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const seed = createSeed(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
+export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) return { ...parsed, styleImages: parsed.styleImages || [], styleImagesAvailable: true } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const seed = { ...createSeed(), styleImages: [], styleImagesAvailable: true }; localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
 function persist(workspace: Workspace) { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); window.dispatchEvent(new Event('sig-workspace-change')) }
 async function locked<T>(fn: () => T | Promise<T>): Promise<T> { if (!navigator.locks) throw new Error('안전한 동시 저장을 위해 최신 Chrome, Edge 또는 Safari를 사용해 주세요.'); return navigator.locks.request('sig-workspace-write', fn) }
 function check<T extends { error: unknown; data: unknown }>(result: T): T['data'] { if (result.error) throw result.error; return result.data }
@@ -34,7 +35,18 @@ export async function loadWorkspace(): Promise<Workspace> {
   const owners = await supabase.rpc('visible_style_owners')
   check(owners)
   for (const owner of owners.data || []) if (!rows.profiles.some(p => p.id === owner.id)) rows.profiles.push({ ...owner, email: '', approved: true, active: true, factory_id: null })
+  const styleImages: StyleImage[] = []
+  let styleImagesAvailable = true
+  for (let from = 0; ; from += 500) {
+    const result = await supabase.from('style_images').select('*').order('style_id').order('color').range(from, from + 499)
+    if (result.error && ['PGRST205', '42P01'].includes(result.error.code)) { styleImagesAvailable = false; break }
+    check(result)
+    const page = result.data || []
+    styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
+    if (page.length < 500) break
+  }
   return {
+    styleImages, styleImagesAvailable,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),
     attachments: rows.attachments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, name: r.name, path: r.path, mime: r.mime, size: r.size, uploadedBy: r.uploaded_by, createdAt: r.created_at })),
@@ -73,16 +85,76 @@ const messageForUpload = (error: { message: string }) => error.message
 const MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 async function blobDb(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const request = indexedDB.open('sig-demo-files', 1); request.onupgradeneeded = () => request.result.createObjectStore('files'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error) }) }
 async function putBlob(path: string, file: File) { const db = await blobDb(); try { await new Promise<void>((resolve, reject) => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(file, path); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error) }) } finally { db.close() } }
-export async function uploadFile(styleId: string, file: File, profile: Profile, sampleId?: string) {
+export async function uploadFile(styleId: string, file: File, profile: Profile, sampleId?: string): Promise<Attachment> {
   if (!MIME.includes(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) throw new Error('JPG·PNG·WEBP·PDF 파일만 10MB까지 첨부할 수 있습니다.')
   const path = `${styleId}/${crypto.randomUUID()}.${file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1]}`
-  if (supabase) { check(await supabase.storage.from('sig-files').upload(path, file, { contentType: file.type, upsert: false })); const result = await supabase.from('attachments').insert({ style_id: styleId, sample_id: sampleId || null, name: file.name, path, mime: file.type, size: file.size, uploaded_by: profile.id }); if (result.error) { throw new Error(`파일은 업로드되었지만 목록 등록에 실패했습니다. 다시 첨부하기 전에 관리자에게 저장소 정리를 요청해 주세요. ${messageForUpload(result.error)}`) }; return }
-  await locked(async () => { assertActive(profile); const w = getDemoWorkspace(), s = w.styles.find(s => s.id === styleId); if (!s || !canViewStyle(profile, s)) throw new Error('접근할 수 없습니다.'); if (sampleId && !s.samples.some(sample => sample.id === sampleId)) throw new Error('샘플 차수를 먼저 저장해 주세요.'); await putBlob(path, file); w.attachments.push({ id: crypto.randomUUID(), styleId, sampleId: sampleId || null, name: file.name, path, mime: file.type, size: file.size, uploadedBy: profile.id, createdAt: new Date().toISOString() }); persist(w) })
+  if (supabase) {
+    check(await supabase.storage.from('sig-files').upload(path, file, { contentType: file.type, upsert: false }))
+    const result = await supabase.from('attachments').insert({ style_id: styleId, sample_id: sampleId || null, name: file.name, path, mime: file.type, size: file.size, uploaded_by: profile.id }).select('*').single()
+    if (result.error) throw new Error(`파일은 업로드되었지만 목록 등록에 실패했습니다. 관리자에게 저장소 정리를 요청해 주세요. ${messageForUpload(result.error)}`)
+    const r = result.data
+    return { id: r.id, styleId: r.style_id, sampleId: r.sample_id, name: r.name, path: r.path, mime: r.mime, size: r.size, uploadedBy: r.uploaded_by, createdAt: r.created_at }
+  }
+  return locked(async () => {
+    assertActive(profile)
+    const w = getDemoWorkspace(), style = w.styles.find(s => s.id === styleId)
+    if (!style || !canViewStyle(profile, style)) throw new Error('접근할 수 없습니다.')
+    if (sampleId && !style.samples.some(sample => sample.id === sampleId)) throw new Error('샘플 차수를 먼저 저장해 주세요.')
+    await putBlob(path, file)
+    const attachment: Attachment = { id: crypto.randomUUID(), styleId, sampleId: sampleId || null, name: file.name, path, mime: file.type, size: file.size, uploadedBy: profile.id, createdAt: new Date().toISOString() }
+    w.attachments.push(attachment); persist(w); return attachment
+  })
+}
+export async function loadAttachmentBlob(attachment: Attachment): Promise<Blob> {
+  if (supabase) { const { data, error } = await supabase.storage.from('sig-files').download(attachment.path); if (error) throw error; return data }
+  const db = await blobDb()
+  try { return await new Promise<Blob>((resolve, reject) => {
+    const req = db.transaction('files').objectStore('files').get(attachment.path)
+    req.onsuccess = () => req.result ? resolve(req.result) : reject(new Error('이 브라우저에 첨부파일이 없습니다.'))
+    req.onerror = () => reject(req.error)
+  }) } finally { db.close() }
 }
 export async function downloadFile(attachment: Attachment) {
-  let blob: Blob
-  if (supabase) { const { data, error } = await supabase.storage.from('sig-files').download(attachment.path); if (error) throw error; blob = data }
-  else { const db = await blobDb(); try { blob = await new Promise<Blob>((resolve, reject) => { const req = db.transaction('files').objectStore('files').get(attachment.path); req.onsuccess = () => req.result ? resolve(req.result) : reject(new Error('이 브라우저에 첨부파일이 없습니다.')); req.onerror = () => reject(req.error) }) } finally { db.close() } }
+  const blob = await loadAttachmentBlob(attachment)
   const href = URL.createObjectURL(blob), a = document.createElement('a'); a.href = href; a.download = attachment.name; a.click(); setTimeout(() => URL.revokeObjectURL(href), 10000)
+}
+export async function setStyleImage(styleId: string, color: string, attachmentId: string | null, expectedVersion: number, reason: string, profile: Profile) {
+  assertActive(profile)
+  if (profile.role === 'factory') throw new Error('대표 이미지는 관리자·본사 직원만 변경할 수 있습니다.')
+  if (reason.trim().length < 2 || reason.trim().length > 1000) throw new Error('이미지 변경 사유를 2~1,000자로 입력해 주세요.')
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('이미지 버전을 확인해 주세요.')
+  if (supabase) {
+    const result = await supabase.rpc('set_style_image', { p_style_id: styleId, p_color: color, p_attachment_id: attachmentId, p_expected_version: expectedVersion, p_reason: reason.trim() })
+    if (result.error && ['PGRST202', 'PGRST205', '42P01'].includes(result.error.code)) throw new Error('대표 이미지 기능 설정이 필요합니다. Supabase에서 002_style_images.sql을 적용해 주세요.')
+    check(result); return
+  }
+  await locked(() => {
+    const w = getDemoWorkspace(), style = w.styles.find(s => s.id === styleId)
+    if (!style || !canViewStyle(profile, style)) throw new Error('접근할 수 없습니다.')
+    if (color !== '' && !style.colors.includes(color)) throw new Error('먼저 저장된 컬러를 선택해 주세요.')
+    const before = w.styleImages?.find(i => i.styleId === styleId && i.color === color)
+    if ((before?.version || 0) !== expectedVersion) throw new Error('image version conflict')
+    if (attachmentId) {
+      const file = w.attachments.find(a => a.id === attachmentId)
+      if (!file || file.styleId !== styleId || file.sampleId !== null || !STYLE_IMAGE_MIME.some(m => m === file.mime)) throw new Error('이 스타일에 첨부한 JPG·PNG·WEBP 사진만 대표 이미지로 지정할 수 있습니다.')
+    }
+    const after: StyleImage = { styleId, color, attachmentId, version: expectedVersion + 1, updatedAt: new Date().toISOString(), updatedBy: profile.id }
+    w.styleImages = [...(w.styleImages || []).filter(i => i.styleId !== styleId || i.color !== color), after]
+    w.audits.unshift({ id: crypto.randomUUID(), styleId, actorId: profile.id, actorName: profile.name, action: attachmentId ? before?.attachmentId ? '대표 이미지 변경' : '대표 이미지 등록' : '대표 이미지 해제', reason: reason.trim(), before: before || null, after, createdAt: after.updatedAt })
+    persist(w)
+  })
+}
+export async function uploadStyleImage(styleId: string, color: string, file: File, expectedVersion: number, reason: string, profile: Profile) {
+  assertActive(profile)
+  if (profile.role === 'factory') throw new Error('대표 이미지는 관리자·본사 직원만 변경할 수 있습니다.')
+  if (!STYLE_IMAGE_MIME.some(m => m === file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) throw new Error('대표 이미지는 10MB 이하의 PNG·WEBP·JPG 파일을 선택해 주세요.')
+  if (reason.trim().length < 2 || reason.trim().length > 1000) throw new Error('이미지 변경 사유를 2~1,000자로 입력해 주세요.')
+  let image: ImageBitmap
+  try { image = await createImageBitmap(file) } catch { throw new Error('이미지 파일을 읽을 수 없습니다. PNG·WEBP·JPG 파일을 확인해 주세요.') }
+  image.close()
+  // Files are immutable. A stale image selection keeps the uploaded file in the
+  // attachment list, where the user can select it after reviewing the conflict.
+  const attachment = await uploadFile(styleId, file, profile)
+  await setStyleImage(styleId, color, attachment.id, expectedVersion, reason, profile)
 }
 export async function resetDemo() { if (supabase) throw new Error('실제 데이터는 초기화할 수 없습니다.'); await locked(() => persist(createSeed())) }

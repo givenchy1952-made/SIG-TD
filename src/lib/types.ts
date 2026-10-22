@@ -31,7 +31,8 @@ export interface Style {
 export interface Comment { id: string; styleId: string; sampleId: string | null; authorId: string; authorName: string; body: string; createdAt: string }
 export interface Attachment { id: string; styleId: string; sampleId: string | null; name: string; path: string; mime: string; size: number; uploadedBy: string; createdAt: string }
 export interface Audit { id: string; styleId: string | null; actorId: string; actorName: string; action: string; reason: string; before: unknown; after: unknown; createdAt: string }
-export interface Workspace { styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[] }
+export interface StyleImage { styleId: string; color: string; attachmentId: string | null; version: number; updatedAt: string; updatedBy: string }
+export interface Workspace { styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[]; styleImages?: StyleImage[]; styleImagesAvailable?: boolean }
 export interface StyleSave { (style: Style, reason: string): Promise<void> }
 export const STATUS_LABEL: Record<Status, string> = { unset: '미기재', todo: '미완료', progress: '진행 중', done: '완료', approved: '최종 컨펌', delayed: '일정 지연' }
 export const STAGE_LABEL: Record<Stage, string> = { registered: '스타일 등록', pattern: '패턴 진행', sample1: '1차 샘플', sampleN: '2차 이상 샘플', review: '샘플 리뷰', revision: '수정 요청', approved: '최종 컨펌', production: '메인 생산' }
