@@ -1,0 +1,45 @@
+name: Build SIG-TD offline HTML demo
+
+on:
+  push:
+    branches:
+      - demo/china-preview
+    paths:
+      - 'src/**'
+      - 'scripts/build-offline.mjs'
+      - 'vite.offline.config.ts'
+      - '.github/workflows/build-offline-demo.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-html:
+    runs-on: ubuntu-latest
+    env:
+      VITE_ENABLE_DEMO: 'true'
+      VITE_SUPABASE_URL: ''
+      VITE_SUPABASE_ANON_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Compile full app into one JS/CSS bundle
+        run: npx vite build --config vite.offline.config.ts
+      - name: Inline assets in a single HTML file
+        run: node scripts/build-offline.mjs
+      - name: Upload ready-to-share HTML file
+        uses: actions/upload-artifact@v4
+        with:
+          name: SIG_TD_Offline_Demo
+          path: dist-offline/SIG_TD_Offline_Demo.html
+          retention-days: 30
