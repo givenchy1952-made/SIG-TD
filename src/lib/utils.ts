@@ -12,6 +12,7 @@ export function scopeWorkspace(workspace: Workspace, profile: import('./types').
   return { styles, profiles: [profile, ...directory], factories: workspace.factories.filter(f => f.id === profile.factoryId), projects: workspace.projects.filter(p => projectIds.has(p.id)), comments: workspace.comments.filter(c => ids.has(c.styleId)), attachments: workspace.attachments.filter(a => ids.has(a.styleId)), audits: workspace.audits.filter(a => a.styleId && ids.has(a.styleId)), styleImages: (workspace.styleImages || []).filter(image => ids.has(image.styleId)), styleImagesAvailable: workspace.styleImagesAvailable }
 }
 export function message(error: unknown): string { const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : String(error); if (/conflict|version|409/i.test(text)) return '다른 사용자가 먼저 수정했습니다. 입력 내용을 보관한 뒤 최신 정보를 다시 열어 확인해 주세요.'; if (/REASON_REQUIRED/.test(text)) return '변경 사유를 두 글자 이상 입력해 주세요.';
+  if (/Invalid path specified in request URL/i.test(text)) return '서비스 연결 주소가 올바르지 않습니다. Supabase 프로젝트 기본 주소 설정과 앱 재배포를 확인해 주세요.';
   if (/FORBIDDEN_FIELD|permission denied|FORBIDDEN/.test(text)) return '이 항목을 수정할 권한이 없습니다. 관리자 승인과 담당 공장 배정을 확인해 주세요.';
   if (/DUPLICATE_STYLE|duplicate key/.test(text)) return '같은 스타일 코드가 이미 등록되어 있습니다.';
   if (/HISTORY_PROTECTED/.test(text)) return '기존 샘플 및 컬러별 생산 이력은 삭제하거나 차수를 변경할 수 없습니다.';

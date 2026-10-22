@@ -55,6 +55,8 @@ VITE_ENABLE_DEMO=false
 
 `VITE_` 값은 클라이언트 번들에 포함됩니다. 공개 `anon` 또는 `publishable` 키만 사용하세요. `service_role`, Supabase secret 키, 데이터베이스 비밀번호는 브라우저 환경변수에 넣지 마세요. 실제 접근 제한은 데이터베이스의 RLS와 RPC에서 적용합니다.
 
+`VITE_SUPABASE_URL`에는 `https://프로젝트주소.supabase.co` 형태의 **프로젝트 기본 주소**를 입력하세요. Data API의 `/rest/v1/` 주소를 입력한 경우 앱이 기본 주소로 보정하여 가입·로그인·파일 요청에 사용합니다. 지원하지 않는 경로·쿼리·접속 정보는 설정 오류로 안내합니다. 이전 버전의 가입 화면에서 `Invalid path specified in request URL`이 발생하면 이 설정을 확인하고 최신 코드를 다시 배포하세요. Vercel에서 환경변수를 바꾼 경우에도 **Redeploy**가 필요합니다.
+
 네트워크 제한이 있는 환경에서는 해당 Supabase 프로젝트 호스트에 대한 HTTPS와 WebSocket 연결이 필요합니다. 선택 사항인 `supabase/seed.sql`은 EXAMPLE 표시가 있는 공장·프로젝트 기준 정보를 추가하고, 첫 관리자가 이미 있으면 명시적으로 표시된 예시 스타일 1개를 추가합니다. 실제 사용자·비밀번호는 만들지 않습니다. 운영 프로젝트에는 필요할 때만 검토 후 적용하세요. 브라우저 예시 스타일은 `src/lib/seed.ts`에 있으며 클라우드로 자동 이관하지 않습니다.
 
 이 저장소에는 실제 Supabase 계정·키가 제공되지 않았습니다. 실제 Auth, 원격 저장, Storage, 서로 다른 사용자 간 Realtime 동작은 프로젝트 연결 후 확인해야 합니다.

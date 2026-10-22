@@ -3,13 +3,11 @@ import type { Attachment, Profile, Style, Workspace, Factory, Project, StyleImag
 import { createSeed } from './seed'
 import { assertActive, assertStyleSave, canViewStyle } from './permissions'
 import { STYLE_IMAGE_MIME } from './style-images'
+import { resolveSupabaseConfiguration } from './configuration'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
-const url = import.meta.env.VITE_SUPABASE_URL?.trim(), key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
-let configurationError = ''
-if (!!url !== !!key) configurationError = 'Supabase URL과 공개 키를 모두 설정해 주세요.'
-if (url && !/^https:\/\/[^\s]+$/.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(url)) configurationError = 'Supabase URL 형식이 올바르지 않습니다.'
-if (key?.startsWith('sb_secret_')) configurationError = 'Supabase secret 키는 브라우저에서 사용할 수 없습니다. 공개 anon 또는 publishable 키를 사용해 주세요.'
-if (key) { try { if (JSON.parse(atob(key.split('.')[1] || '')).role === 'service_role') configurationError = '관리자 service_role 키는 브라우저에서 사용할 수 없습니다. 공개 anon 또는 publishable 키로 변경해 주세요.' } catch { /* publishable keys are not JWTs */ } }
+const config = resolveSupabaseConfiguration(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
+const { url, key } = config
+let configurationError = config.error
 let supabase: SupabaseClient | null = null
 if (url && key && !configurationError) { try { supabase = createClient(url, key) } catch { configurationError = 'Supabase 연결 정보를 초기화할 수 없습니다. URL과 공개 키 형식을 확인해 주세요.' } }
 export { configurationError, supabase }
