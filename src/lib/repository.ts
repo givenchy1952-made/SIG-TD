@@ -4,7 +4,10 @@ import { createSeed } from './seed'
 import { assertActive, assertStyleSave, canViewStyle } from './permissions'
 import { STYLE_IMAGE_MIME } from './style-images'
 import { resolveSupabaseConfiguration } from './configuration'
+import { readAuthCallbackError } from './auth-flow'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+// Capture before the SDK consumes/removes the callback hash during startup.
+export const authCallbackError = readAuthCallbackError(window.location.href)
 const config = resolveSupabaseConfiguration(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
 const { url, key } = config
 let configurationError = config.error
