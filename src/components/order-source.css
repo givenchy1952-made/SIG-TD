@@ -1,0 +1,15 @@
+.order-source-panel { display: grid; gap: 18px; padding: 24px 0; }
+.order-source-panel h2 { display: flex; align-items: center; gap: 8px; }
+.order-source-info, .order-source-current { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.order-source-info > div { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.order-source-info span, .order-source-note { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.order-source-table { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
+.order-source-table table { border-collapse: collapse; width: 100%; min-width: 560px; }
+.order-source-table th, .order-source-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; font-size: 12px; min-width: 80px; }
+.order-source-table thead, .order-source-table tbody th { background: #f7f9fb; }
+.order-source-table td > span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.order-source-footer { display: grid; gap: 12px; }
+.order-source-footer > div { display: flex; gap: 8px; justify-content: flex-end; }
+.order-source-current { padding: 14px; background: #f7f9fb; border-radius: 8px; font-size: 12px; }
+.order-source-current strong { margin-left: 12px; }
+@media (max-width: 600px) { .order-source-panel { padding: 14px 0; } .order-source-info, .order-source-current { align-items: flex-start; flex-direction: column; } }

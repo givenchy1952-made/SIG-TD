@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   ArrowDown, ArrowDownToLine, ArrowRight, ArrowUpRight, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Factory as FactoryIcon,
@@ -10,13 +10,16 @@ import { resolveStyleImage } from '../lib/style-images'
 import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '../lib/types'
 import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
 import { exportWorkspace } from '../lib/export'
+import type { OrderImportChange } from '../lib/operations-types'
 import './dashboard.css'
+const OrderImport = lazy(() => import('../components/OrderImport'))
+const SettlementTemplateExport = lazy(() => import('../components/SettlementTemplateExport'))
 
 type View = 'overview' | 'samples' | 'production' | 'settlement'
 type QuickFilter = 'all' | 'delayed' | 'upcoming' | 'approved' | 'samples' | 'unpaid'
 type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code'
 type DateField = 'dueDate' | 'samplePlanned' | 'sampleReceived' | 'sampleShipped' | 'productionShipped' | 'productionReceived' | 'confirmDue' | 'paymentDue'
-interface Props { workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void }
+interface Props { workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
 interface Row { style: Style; line?: ProductionLine }
 const formatter = new Intl.NumberFormat('ko-KR')
 const number = (value: number) => formatter.format(value)
@@ -45,7 +48,9 @@ function datesFor(style: Style, field: DateField): string[] {
   }
 }
 
-export default function Dashboard({ workspace, profile, view, onOpenStyle, onCreate, query, onQueryChange }: Props) {
+export default function Dashboard({ workspace, profile, view, onOpenStyle, onCreate, query, onQueryChange, onImport }: Props) {
+  const [orderImportOpen, setOrderImportOpen] = useState(false)
+  const [templateOpen, setTemplateOpen] = useState(false)
   const [imagePreview, setImagePreview] = useState<{ attachment: Attachment; styleId: string; alt: string } | null>(null)
   const imageScope = `${profile.id}:${profile.role}:${profile.factoryId || ''}`
   const [season, setSeason] = useState('')
@@ -153,11 +158,13 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     return <button type="button" className={`garment-icon ${attachment ? 'garment-photo cutout-background' : ''}`} aria-label={attachment ? `${alt} 크게 보기` : `${style.code} 대표 이미지 등록`} title={attachment ? '대표 이미지 크게 보기' : '스타일 상세에서 대표 이미지 등록'} onClick={event => { event.stopPropagation(); if (attachment) setImagePreview({ attachment, styleId: style.id, alt }); else onOpenStyle(style.id) }}>{attachment ? <PrivateImage attachment={attachment} scope={imageScope} alt={alt}/> : <Shirt size={21} strokeWidth={1.15}/>}</button>
   }
   return <div className="dashboard-page">
+    {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} /></Suspense>}
+    {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={exportStyles} onClose={() => setTemplateOpen(false)} /></Suspense>}
     {imagePreview && <Modal title={imagePreview.alt} wide onClose={() => setImagePreview(null)}><div className="modal-body"><div className="style-image-zoom cutout-background"><PrivateImage attachment={imagePreview.attachment} scope={imageScope} alt={imagePreview.alt}/></div><div className="modal-footer"><button className="button" onClick={() => { onOpenStyle(imagePreview.styleId); setImagePreview(null) }}>{profile.role === 'factory' ? '스타일 상세' : '이미지 관리'}</button><button className="button button-primary" onClick={() => setImagePreview(null)}>닫기</button></div></div></Modal>}
 
     <div className="dashboard-page-heading">
       <div><div className="page-eyebrow">{eyebrow}</div><h1>{title}<span className="heading-period">.</span></h1><p>{subtitle}</p></div>
-      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
+      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{view === 'settlement' && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
     </div>
 
     <div className="dashboard-kpis">

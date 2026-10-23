@@ -1,0 +1,4 @@
+# The handler validates every POST JWT with Auth.getUser(token); database RPCs
+# independently enforce approved HQ permissions. Never remove that verification.
+[functions.send-po-email]
+verify_jwt = false
