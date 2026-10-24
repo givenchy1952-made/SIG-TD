@@ -8,6 +8,7 @@ import { readAuthCallbackError } from './auth-flow'
 import { assertManagedShipmentTotals, freshOperations } from './operations-domain'
 import { createDefaultOperationCatalogs } from './default-operation-catalogs'
 import { loadOperationsWorkspace } from './operations-cloud'
+import { loadSettlementTermsWorkspace } from './settlement-cloud'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -18,7 +19,7 @@ let supabase: SupabaseClient | null = null
 if (url && key && !configurationError) { try { supabase = createClient(url, key) } catch { configurationError = 'Supabase 연결 정보를 초기화할 수 없습니다. URL과 공개 키 형식을 확인해 주세요.' } }
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
-export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return { ...parsed, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true } } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = { ...createSeed(), styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }; localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
+export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return { ...parsed, settlementTerms: parsed.settlementTerms || [], settlementTermsAudits: parsed.settlementTermsAudits || [], settlementTermsAvailable: true, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true } } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = { ...createSeed(), settlementTerms: [], settlementTermsAudits: [], settlementTermsAvailable: true, styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }; localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
 export function persist(workspace: Workspace) { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); window.dispatchEvent(new Event('sig-workspace-change')) }
 export async function locked<T>(fn: () => T | Promise<T>): Promise<T> { if (!navigator.locks) throw new Error('안전한 동시 저장을 위해 최신 Chrome, Edge 또는 Safari를 사용해 주세요.'); return navigator.locks.request('sig-workspace-write', fn) }
 function check<T extends { error: unknown; data: unknown }>(result: T): T['data'] { if (result.error) throw result.error; return result.data }
@@ -49,9 +50,9 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const operations = await loadOperationsWorkspace(supabase)
+  const [operations, settlement] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase)])
   return {
-    ...operations,
+    ...operations, ...settlement,
     styleImages, styleImagesAvailable,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),

@@ -4,7 +4,7 @@ import { ORDER_SOURCE_COLUMNS, type OrderImportChange, type OrderSourceData } fr
 
 export type ImportCell = string | number | boolean | null | { error: string }
 export interface ImportSheet { name: string; rows: ImportCell[][] }
-export interface ImportWorkbook { name: string; sheets: ImportSheet[]; kind?: 'xlsx' | 'csv' }
+export interface ImportWorkbook { name: string; sheets: ImportSheet[]; kind?: 'xlsx' | 'csv'; encoding?: 'utf-8' | 'cp949' }
 export type ImportLayout = 'wide' | 'long'
 export type OrderImportPreset = 'generic' | 'sig-order-qty'
 export const SIG_ORDER_SOURCE_COLUMNS = ORDER_SOURCE_COLUMNS
@@ -19,6 +19,10 @@ export interface OrderImportPreview { rows: OrderImportPreviewRow[]; changes: Or
 const MAX_QUANTITY = 10_000_000
 const MAX_ROWS = 10_000
 export const MAX_ORDER_IMPORT_FILE = 10 * 1024 * 1024
+// CSV serializes Excel error cells as plain text. Match only complete error
+// tokens so ordinary notes containing a hash or an error example remain text.
+const EXCEL_ERROR_LITERALS = new Set(['#REF!', '#NAME?', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#NULL!', '#SPILL!', '#CALC!', '#GETTING_DATA', '#BLOCKED!', '#CONNECT!', '#FIELD!', '#UNKNOWN!', '#BUSY!', '#PYTHON!'])
+const excelErrorLiteral = (value: ImportCell | undefined): string | null => typeof value === 'string' && EXCEL_ERROR_LITERALS.has(value.trim().toUpperCase()) ? value.trim().toUpperCase() : null
 
 /** Read cached formula values only. No formula is evaluated or sent to an evaluator. */
 export function orderImportCell(value: unknown): ImportCell {
@@ -61,14 +65,22 @@ export function parseOrderCSV(input: string): ImportCell[][] {
   return rows
 }
 export async function parseOrderWorkbook(file: Pick<File, 'name' | 'size' | 'arrayBuffer'>): Promise<ImportWorkbook> {
-  if (!/\.(xlsx|csv)$/i.test(file.name)) throw new Error('Excel .xlsx 또는 UTF-8 CSV 파일을 선택해 주세요. 기존 .xls 파일은 .xlsx로 저장해 주세요.')
+  if (!/\.(xlsx|csv)$/i.test(file.name)) throw new Error('Excel .xlsx 또는 UTF-8·CP949 CSV 파일을 선택해 주세요. 기존 .xls 파일은 .xlsx로 저장해 주세요.')
   if (!file.size || file.size > MAX_ORDER_IMPORT_FILE) throw new Error('비어 있지 않은 10MB 이하의 파일을 선택해 주세요. 큰 Excel 파일은 ORDER QTY 시트만 UTF-8 CSV로 저장해 주세요.')
   if (/\.csv$/i.test(file.name)) {
-    let text: string
-    try { text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()) } catch { throw new Error('CSV를 UTF-8로 읽지 못했습니다. Excel에서 CSV UTF-8 형식으로 다시 저장해 주세요.') }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let text: string, encoding: ImportWorkbook['encoding'] = 'utf-8'
+    // Excel's Korean "CSV (쉼표로 분리)" uses CP949. Decode UTF-8 first so
+    // normal UTF-8/BOM files never take the legacy encoding fallback.
+    if (bytes[0] === 0xff && bytes[1] === 0xfe || bytes[0] === 0xfe && bytes[1] === 0xff) throw new Error('UTF-16 CSV는 지원하지 않습니다. Excel에서 CSV UTF-8 형식으로 다시 저장해 주세요.')
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch {
+      try { text = new TextDecoder('euc-kr', { fatal: true }).decode(bytes); encoding = 'cp949' }
+      catch { throw new Error('CSV를 UTF-8 또는 CP949로 읽지 못했습니다. Excel에서 CSV UTF-8 형식으로 다시 저장해 주세요.') }
+    }
+    if (text.includes('\u0000')) throw new Error('CSV에 지원하지 않는 제어 문자가 있습니다. Excel에서 CSV UTF-8 형식으로 다시 저장해 주세요.')
     const rows = parseOrderCSV(text)
     if (!rows.length) throw new Error('CSV 파일에 읽을 수 있는 행이 없습니다.')
-    return { name: file.name, kind: 'csv', sheets: [{ name: file.name.replace(/\.csv$/i, ''), rows }] }
+    return { name: file.name, kind: 'csv', encoding, sheets: [{ name: file.name.replace(/\.csv$/i, ''), rows }] }
   }
   const module = await import('exceljs')
   const workbook = new (module.default ?? module).Workbook()
@@ -115,7 +127,18 @@ export function detectOrderHeaderRow(sheet: ImportSheet): number {
 export function sigOrderColumnMapping(): OrderColumnMapping {
   return { sku: 5, color: null, size: null, quantity: null, total: 50, sizes: { XXS: 42, XS: 43, S: 44, M: 45, L: 46, XL: 47 } }
 }
+/** SIG sheets have summary size bands above their real field header. Require
+ * F identity + AY total + six exact size/TTL columns to identify that header. */
+function sigStructuralHeader(row: ImportCell[]): boolean {
+  const identity = normalizedHeader(row[5] ?? null)
+  const total = normalizedHeader(row[50] ?? null)
+  return ['스타일코드', 'STYLECODE', '품번', '컬러품번'].includes(identity)
+    && ['TOTALQTY', 'TOTALQUANTITY', '합계', '총수량', '총오더수량'].includes(total)
+    && SIZES.every((size, index) => [size, `TTL${index + 1}`].includes(normalizedHeader(row[42 + index] ?? null)))
+}
 export function detectSigOrderHeaderRow(sheet: ImportSheet): number {
+  const structural = sheet.rows.slice(0, 50).findIndex(sigStructuralHeader)
+  if (structural >= 0) return structural + 1
   const mapping = sigOrderColumnMapping()
   let best = -1, score = 0
   sheet.rows.slice(0, 50).forEach((row, index) => {
@@ -131,7 +154,7 @@ export function orderImportDefaults(book: ImportWorkbook, selectedSheet?: number
   const sigHeader = detectSigOrderHeaderRow(sheet)
   const sigMap = sigOrderColumnMapping()
   const hasFixedHeaders = SIZES.every(size => normalizedHeader(sheet.rows[sigHeader - 1]?.[sigMap.sizes[size]!] ?? null) === size)
-  const preset: OrderImportPreset = sheet.name.trim().toUpperCase() === 'ORDER QTY' || hasFixedHeaders ? 'sig-order-qty' : 'generic'
+  const preset: OrderImportPreset = sheet.name.trim().toUpperCase() === 'ORDER QTY' || hasFixedHeaders || sigStructuralHeader(sheet.rows[sigHeader - 1] || []) ? 'sig-order-qty' : 'generic'
   const headerRow = preset === 'sig-order-qty' ? sigHeader : detectOrderHeaderRow(sheet)
   const detected = autoMapOrderColumns(sheet.rows[headerRow - 1] || [])
   return { sheetIndex, preset, headerRow, mapping: preset === 'sig-order-qty' ? sigMap : detected.mapping, layout: preset === 'sig-order-qty' ? 'wide' : detected.layout }
@@ -193,6 +216,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
     for (const column of SIG_ORDER_SOURCE_COLUMNS) {
       const value = sheet.rows[headerRow - 1]?.[columnIndex(column)] ?? null
       if (typeof value === 'object' && value !== null) errors.push(`원본 ${column}열 제목: ${value.error}`)
+      else if (excelErrorLiteral(value)) errors.push(`원본 ${column}열 제목: Excel 셀 오류 ${excelErrorLiteral(value)}. 원본을 수정한 뒤 다시 가져와 주세요.`)
       else { sourceHeaders[column] = value == null ? '' : String(value); if (sourceHeaders[column].length > 4000) errors.push(`원본 ${column}열 제목은 4,000자 이내여야 합니다.`) }
     }
     if ((options.fileName?.trim() || '오더 가져오기').length > 255 || sheet.name.trim().length > 100) errors.push('원본 파일명은 255자, 시트명은 100자 이내여야 합니다.')
@@ -263,6 +287,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
         for (const column of SIG_ORDER_SOURCE_COLUMNS) {
           const value = original.columns[column]
           if (typeof value === 'object' && value !== null) row.errors.push(`${original.rowNumber}행 원본 ${column}열: ${value.error}`)
+          else if (excelErrorLiteral(value)) row.errors.push(`${original.rowNumber}행 원본 ${column}열: Excel 셀 오류 ${excelErrorLiteral(value)}. 원본을 수정한 뒤 다시 가져와 주세요.`)
           else if (typeof value === 'number' && (!Number.isFinite(value) || Math.abs(value) > 1e15)) row.errors.push(`${original.rowNumber}행 원본 ${column}열의 숫자를 확인해 주세요.`)
           else if (typeof value === 'string' && value.length > 4000) row.errors.push(`${original.rowNumber}행 원본 ${column}열은 4,000자 이내여야 합니다.`)
           else columns[column] = value

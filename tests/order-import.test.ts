@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Workbook } from 'exceljs'
+import { readFile } from 'node:fs/promises'
 import { createSeed } from '../src/lib/seed'
 import { SIZES, quantityTotal } from '../src/lib/types'
 import { EMPTY_OPERATIONS } from '../src/lib/operations-types'
@@ -272,6 +273,7 @@ describe('UTF-8 CSV와 인용부호·줄바꿈 보존', () => {
     const file = new File(['\uFEFF' + cells.join('\r\n')], 'generic-orders.csv', { type: 'text/csv' })
     const parsed = await parseOrderWorkbook(file)
     expect(parsed.kind).toBe('csv')
+    expect(parsed.encoding).toBe('utf-8')
     const defaults = orderImportDefaults(parsed)
     expect(defaults.preset).toBe('generic')
     const preview = buildOrderImportPreview(workspace, parsed.sheets[defaults.sheetIndex], { ...options, ...defaults })
@@ -279,9 +281,111 @@ describe('UTF-8 CSV와 인용부호·줄바꿈 보존', () => {
     expect(preview.changes[0].styleId).toBe(style.id)
   })
 
-  it('잘못된 문자 인코딩을 임의 해석하지 않고 UTF-8 재저장을 안내한다', async () => {
+  it('지원하지 않는 UTF-16을 CP949로 잘못 읽지 않고 UTF-8 재저장을 안내한다', async () => {
     const file = new File([new Uint8Array([0xff, 0xfe, 0x82, 0xa0])], 'not-utf8.csv')
     await expect(parseOrderWorkbook(file)).rejects.toThrow('UTF-8')
+  })
+
+  it('UTF-8·CP949 모두에서 잘못된 바이트 또는 NUL 문자는 오류로 안내한다', async () => {
+    for (const bytes of [new Uint8Array([0xff]), new Uint8Array([65, 0, 66])]) {
+      await expect(parseOrderWorkbook(new File([bytes], 'invalid.csv'))).rejects.toThrow(/UTF-8|제어 문자/)
+    }
+  })
+})
+
+describe('다단 머리글·CP949 한국어 Excel CSV (별도 합성 자료)', () => {
+  async function actualGeometry() {
+    const bytes = await readFile(new URL('./fixtures/sig-order-geometry-cp949.csv', import.meta.url))
+    const file = new File([bytes], '합성-발주요청서.csv', { type: 'text/csv' })
+    const parsed = await parseOrderWorkbook(file)
+    return { parsed, defaults: orderImportDefaults(parsed) }
+  }
+
+  it('일반 한국어 Excel CSV를 CP949로 읽고 상단 사이즈 요약 대신 7행 실제 제목을 선택한다', async () => {
+    const { parsed, defaults } = await actualGeometry()
+    expect(parsed.encoding).toBe('cp949')
+    expect(parsed.sheets[0].rows).toHaveLength(33)
+    expect(parsed.sheets[0].rows[6]).toHaveLength(153)
+    expect(parsed.sheets[0].rows[6][5]).toBe('스타일코드')
+    expect(defaults.preset).toBe('sig-order-qty')
+    expect(defaults.headerRow).toBe(7)
+    expect(defaults.mapping).toEqual(sigOrderColumnMapping())
+    expect(detectSigOrderHeaderRow(parsed.sheets[0])).toBe(7)
+  })
+
+  it('8행 한 컬러의 수량·16열 원본만 보존하고 빈 행·선택 외 열의 Excel 오류는 가져오지 않는다', async () => {
+    const { parsed, defaults } = await actualGeometry()
+    const { workspace, options, style, line } = fixture()
+    style.code = 'TESTSTYLE01'; line.color = 'BK'
+    const preview = buildOrderImportPreview(workspace, parsed.sheets[0], { ...options, ...defaults, fileName: parsed.name })
+    expect(messages(preview)).toBe('')
+    expect(preview.sourceRows).toBe(1)
+    expect(preview.rows).toHaveLength(1)
+    expect(preview.rows[0].rowNumbers).toEqual([8])
+    expect(preview.rows[0].after).toEqual({ XXS: 10, XS: 20, S: 30, M: 40, L: 50, XL: 60 })
+    const source = preview.changes[0].lines[0].source!
+    expect(Object.keys(source.headers)).toEqual([...SIG_ORDER_SOURCE_COLUMNS])
+    expect(source.headers).toMatchObject({ A: '프로젝트 코드', F: '스타일코드', L: '년도/시즌', M: '프로젝트 명칭', S: '발주 요청일', V: '생산구분', W: '생산처', X: '제조국', Y: '생산 담당자', AQ: 'TTL 1', AV: 'TTL 6', AY: 'TOTAL QTY' })
+    expect(source.rows).toHaveLength(1)
+    expect(source.rows[0].columns).toMatchObject({ A: 'TEST-PROJECT-2026', F: 'TESTSTYLE01BK', M: '검증 프로젝트', W: '검증 업체', Y: '검증 담당자', AQ: '10', AV: '60', AY: ' 210 ' })
+    expect(JSON.stringify(source)).not.toContain('#REF!')
+    expect(JSON.stringify(source)).not.toContain('#NAME?')
+  })
+
+  it.each([' #ref! ', '#NAME?', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#NULL!', '#SPILL!', '#CALC!', '#GETTING_DATA'])('선택한 참조 열의 CSV Excel 오류 %s은 정상 행을 포함해 전체 적용을 차단한다', async error => {
+    const { parsed, defaults } = await actualGeometry()
+    const { workspace, options, style, line } = fixture()
+    style.code = 'TESTSTYLE01'; line.color = 'BK'
+    // Keep one valid row first, then an invalid duplicate; no valid subset is applied.
+    parsed.sheets[0].rows[8] = [...parsed.sheets[0].rows[7]]
+    parsed.sheets[0].rows[8][12] = error
+    const preview = buildOrderImportPreview(workspace, parsed.sheets[0], { ...options, ...defaults, fileName: parsed.name, duplicateMode: 'sum' })
+    expect(preview.changes).toHaveLength(0)
+    expect(messages(preview)).toContain('9행 원본 M열: Excel 셀 오류')
+  })
+
+  it('선택한 A열 값이나 제목의 CSV 오류도 차단하되 제목 앞 A2·선택 외 E열 오류는 무시한다', async () => {
+    const { parsed, defaults } = await actualGeometry()
+    const { workspace, options, style, line } = fixture()
+    style.code = 'TESTSTYLE01'; line.color = 'BK'
+    const sheet = parsed.sheets[0]
+    sheet.rows[1][0] = '#NAME?'; sheet.rows[7][4] = '#REF!'
+    const build = () => buildOrderImportPreview(workspace, sheet, { ...options, ...defaults, fileName: parsed.name })
+    expect(messages(build())).toBe('')
+    sheet.rows[7][0] = '#REF!'
+    expect(build().changes).toHaveLength(0)
+    expect(messages(build())).toContain('8행 원본 A열: Excel 셀 오류 #REF!')
+    sheet.rows[7][0] = 'TEST-PROJECT-2026'; sheet.rows[6][12] = ' #name? '
+    expect(build().changes).toHaveLength(0)
+    expect(messages(build())).toContain('원본 M열 제목: Excel 셀 오류 #NAME?')
+  })
+
+  it('해시가 있는 일반 참조값이나 오류 토큰을 포함한 설명을 Excel 오류로 오인하지 않는다', async () => {
+    const { parsed, defaults } = await actualGeometry()
+    const { workspace, options, style, line } = fixture()
+    style.code = 'TESTSTYLE01'; line.color = 'BK'
+    parsed.sheets[0].rows[7][0] = '#some'
+    parsed.sheets[0].rows[7][12] = '메모: #REF! 수정 확인'
+    parsed.sheets[0].rows[6][12] = '프로젝트 #1'
+    const preview = buildOrderImportPreview(workspace, parsed.sheets[0], { ...options, ...defaults, fileName: parsed.name })
+    expect(messages(preview)).toBe('')
+    expect(preview.changes[0].lines[0].source?.rows[0].columns).toMatchObject({ A: '#some', M: '메모: #REF! 수정 확인' })
+  })
+
+  it('다단 제목 아래 미등록 품번이면 임의 등록·수량 적용을 하지 않는다', async () => {
+    const { parsed, defaults } = await actualGeometry()
+    const { workspace, options } = fixture()
+    const preview = buildOrderImportPreview(workspace, parsed.sheets[0], { ...options, ...defaults, fileName: parsed.name })
+    expect(preview.changes).toHaveLength(0)
+    expect(messages(preview)).toContain('정확히 일치하는 스타일이 없습니다')
+  })
+
+  it('고정 위치의 품번·합계·TTL 여섯 열이 불완전하면 해당 구조만으로 SIG 형식을 제안하지 않는다', () => {
+    const row: ImportCell[] = Array(51).fill('')
+    row[5] = '스타일코드'; row[50] = 'TOTAL QTY'
+    for (let i = 0; i < 5; i++) row[42 + i] = `TTL ${i + 1}`
+    const defaults = orderImportDefaults({ name: '검증.csv', sheets: [{ name: '검증', rows: [row, []] }] })
+    expect(defaults.preset).toBe('generic')
   })
 })
 

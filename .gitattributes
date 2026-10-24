@@ -1,0 +1,2 @@
+# Preserve the exact Korean encoding and Windows line endings in this fixture.
+tests/fixtures/*-cp949.csv binary

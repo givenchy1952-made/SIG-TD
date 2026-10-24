@@ -6,9 +6,10 @@ import { blankProduction, blankSample, CHECKS, quantityTotal, ROLE_LABEL, SIZES,
 import StyleImageManager from './StyleImageManager'
 import OperationsPanel, { type OperationsPanelProps } from './OperationsPanel'
 import OrderSourcePanel, { type OrderSourcePanelProps } from './OrderSourcePanel'
+import SettlementTermsPanel, { type SettlementTermsPanelProps } from './SettlementTermsPanel'
 import './style-detail.css'
 
-interface Props extends Pick<OperationsPanelProps, 'onSavePO' | 'onSendPO' | 'onSaveShipment' | 'onSaveOperation'>, Pick<OrderSourcePanelProps, 'onSaveOrderSource'> {
+interface Props extends Pick<OperationsPanelProps, 'onSavePO' | 'onSendPO' | 'onSaveShipment' | 'onSaveOperation'>, Pick<OrderSourcePanelProps, 'onSaveOrderSource'>, Pick<SettlementTermsPanelProps, 'onSaveSettlementTerms'> {
   style: Style
   workspace: Workspace
   profile: Profile
@@ -65,7 +66,7 @@ function diffSummary(audit: Audit): string[] {
   return changes.slice(0, 20)
 }
 
-export default function StyleDetail({ style, workspace, profile, onClose, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage, onSavePO, onSendPO, onSaveShipment, onSaveOperation, onSaveOrderSource }: Props) {
+export default function StyleDetail({ style, workspace, profile, onClose, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage, onSavePO, onSendPO, onSaveShipment, onSaveOperation, onSaveOrderSource, onSaveSettlementTerms }: Props) {
   const [base, setBase] = useState(() => copy(style))
   const [draft, setDraft] = useState(() => copy(style))
   const [tab, setTab] = useState('samples')
@@ -85,13 +86,14 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
   const [closeOpen, setCloseOpen] = useState(false)
   const [operationsDirty, setOperationsDirty] = useState(false)
   const [sourceDirty, setSourceDirty] = useState(false)
+  const [settlementDirty, setSettlementDirty] = useState(false)
   const uploadRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const hq = profile.role !== 'factory'
   const admin = profile.role === 'admin'
   const dirty = JSON.stringify(draft) !== JSON.stringify(base)
-  const hasUnsavedChanges = dirty || operationsDirty || sourceDirty
+  const hasUnsavedChanges = dirty || operationsDirty || sourceDirty || settlementDirty
   const stale = style.version !== base.version
   const line = draft.production.find(item => item.id === activeColor) || draft.production[0]
   const shipmentManaged = !!line && !!workspace.operations?.shipmentLedgers.some(ledger => ledger.styleId === style.id && ledger.lineId === line.id)
@@ -205,7 +207,7 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
   const attachments = workspace.attachments.filter(item => item.styleId === style.id && (!scope || item.sampleId === scope)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const audits = workspace.audits.filter(item => item.styleId === style.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const productionTotal = (key: 'order' | 'shipped' | 'received') => draft.production.reduce((sum, item) => sum + quantityTotal(item[key]), 0)
-  const tabs = [ ['samples', '샘플 이력', draft.samples.length], ['production', '메인 생산', draft.production.length], ...(hq ? [['order-source', 'ORDER QTY 원본', workspace.operations?.orderSourceRecords.filter(item => item.styleId === style.id).length || 0] as const] : []), ['operations', '발주·출고·가공', workspace.operations?.shipmentBatches.filter(item => item.styleId === style.id && !item.voided).length || 0], ['comments', '코멘트·파일', workspace.comments.filter(item => item.styleId === style.id).length], ['history', '변경 이력', audits.length] ] as const
+  const tabs = [ ['samples', '샘플 이력', draft.samples.length], ['production', '메인 생산', draft.production.length], ...(hq ? [['settlement-terms', '을지·단가', workspace.settlementTerms?.filter(item => item.styleId === style.id).length || 0] as const, ['order-source', 'ORDER QTY 원본', workspace.operations?.orderSourceRecords.filter(item => item.styleId === style.id).length || 0] as const] : []), ['operations', '발주·출고·가공', workspace.operations?.shipmentBatches.filter(item => item.styleId === style.id && !item.voided).length || 0], ['comments', '코멘트·파일', workspace.comments.filter(item => item.styleId === style.id).length], ['history', '변경 이력', audits.length] ] as const
 
   return <div className="detail-overlay" onMouseDown={event => { if (event.target === event.currentTarget) requestClose() }}>
     <div className="detail-panel sig-detail" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={panelRef}>
@@ -255,6 +257,7 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
             {hq && <><Field label="업체 마감 금액 (KRW)"><input className="input" type="number" min="0" max="1000000000000" step="1" value={line.invoiceAmount} onChange={event => updateLine('invoiceAmount', Math.max(0, Math.floor(event.target.valueAsNumber || 0)))} /></Field><Field label="결제 예정일"><input className="input" type="date" value={line.paymentDue} onChange={event => updateLine('paymentDue', event.target.value)} /></Field><Field label="결제 상태"><StatusSelect label="결제 상태" value={line.paymentStatus} onChange={value => updateLine('paymentStatus', value)} /></Field></>}
           </div><Field label="메인 제품 사이즈 측정"><textarea className="textarea" rows={4} value={line.measurements} maxLength={10000} placeholder="예: M / 총장 68cm, 가슴 58cm, 소매 62cm" onChange={event => updateLine('measurements', event.target.value)} /></Field><Field label="공장 작업 코멘트"><textarea className="textarea" rows={3} value={line.factoryComment} maxLength={10000} placeholder="생산 및 출고 관련 확인 사항" onChange={event => updateLine('factoryComment', event.target.value)} /></Field></div></>}
         </section>}
+        {hq && <div hidden={tab !== 'settlement-terms'} role="tabpanel" aria-label="을지·단가"><SettlementTermsPanel style={style} workspace={workspace} profile={profile} onSaveSettlementTerms={onSaveSettlementTerms} onDirtyChange={setSettlementDirty} /></div>}
         {hq && <div hidden={tab !== 'order-source'} role="tabpanel" aria-label="ORDER QTY 원본"><OrderSourcePanel style={style} workspace={workspace} profile={profile} onSaveOrderSource={onSaveOrderSource} onDirtyChange={setSourceDirty} onEditQuantities={lineId => { setActiveColor(lineId); setTab('production') }} /></div>}
         <div hidden={tab !== 'operations'} role="tabpanel" aria-label="발주·출고·가공"><OperationsPanel style={style} workspace={workspace} profile={profile} onDirtyChange={setOperationsDirty} onSavePO={onSavePO} onSendPO={onSendPO} onSaveShipment={onSaveShipment} onSaveOperation={onSaveOperation} onDownload={onDownload} /></div>
         {tab === 'comments' && <section className="detail-section" role="tabpanel" aria-label="코멘트 및 파일"><div className="section-heading"><div><h2>함께 확인하고 기록하세요</h2><p className="muted">본사와 담당 공장의 코멘트 및 첨부파일을 공유합니다.</p></div><select className="select comment-scope" aria-label="코멘트 차수 필터" value={scope} onChange={event => setScope(event.target.value)}><option value="">전체 / 스타일 공통</option>{draft.samples.map(item => <option key={item.id} value={item.id}>{sampleLabel(item)}</option>)}</select></div><div className="collaboration-grid"><div className="panel comment-panel"><h3><MessageSquare size={16} /> 코멘트 <span>{comments.length}</span></h3><div className="comment-list">{!comments.length && <div className="empty-state">아직 코멘트가 없습니다.<br />첫 진행 상황을 공유해 주세요.</div>}{comments.map(item => <article className="comment-item" key={item.id}><div className="comment-avatar">{item.authorName.slice(0, 1)}</div><div><header><strong>{item.authorName}</strong><time>{timeLabel(item.createdAt)}</time></header>{item.sampleId && <span className="comment-sample">{draft.samples.find(sample => sample.id === item.sampleId) ? sampleLabel(draft.samples.find(sample => sample.id === item.sampleId)!) : '샘플'}</span>}<p>{item.body}</p></div></article>)}</div><form className="comment-compose" onSubmit={event => { event.preventDefault(); void sendComment() }}><textarea className="textarea" aria-label="코멘트 작성" placeholder="전달할 내용이나 확인 사항을 남겨 주세요." rows={3} maxLength={5000} value={comment} onChange={event => setComment(event.target.value)} /><div><span className="muted">{profile.name} · {ROLE_LABEL[profile.role]}</span><button className="button button-primary" type="submit" disabled={actionBusy || !comment.trim()}><Send size={13} /> 등록</button></div></form></div><div className="panel file-panel"><div className="section-heading"><h3><Paperclip size={16} /> 첨부파일 <span>{attachments.length}</span></h3><button className="button" disabled={actionBusy} onClick={() => uploadRef.current?.click()}><Plus size={14} /> 파일 첨부</button><input ref={uploadRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" aria-label="샘플 사진 또는 PDF 첨부" onChange={event => void upload(event)} /></div><p className="detail-small-note">사진 JPG·PNG·WEBP / PDF · 파일당 최대 10MB<br /><LockKeyhole size={11} /> 이 스타일에 배정된 사용자만 열람할 수 있습니다.</p><div className="file-list">{!attachments.length && <div className="file-empty"><FileImage size={34} /><span>샘플 사진과 작업 파일을 첨부해 주세요.</span></div>}{attachments.map(item => <button key={item.id} className="file-item" disabled={actionBusy} onClick={() => void download(item)}>{item.mime.startsWith('image/') ? <FileImage size={22} /> : <FileText size={22} />}<span><strong>{item.name}</strong><small>{(item.size / 1024).toFixed(0)} KB · {timeLabel(item.createdAt)}</small></span><ArrowUpRight size={15} /></button>)}</div></div></div></section>}
