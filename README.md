@@ -40,6 +40,8 @@ npm run dev
 
 추가한 여덟 가지 업무 기능의 화면 위치·사용법·PO 메일 서버 설정은 [추가 업무 설정 가이드](docs/OPERATIONS_SETUP.md)를 참고하세요. 전체 범위와 한계는 [구현 범위 문서](docs/IMPLEMENTATION.md), 실제 실행 결과는 [테스트 결과](docs/TEST_RESULTS.md)에 구분합니다.
 
+실사용 전에는 [운영 인수 체크리스트](docs/RELEASE_CHECKLIST.md)를 확인하세요. PR마다 GitHub Actions에서 타입 검사·빌드·단위/DB 테스트·Playwright 브라우저 테스트를 실행하며, 이 자동 검증은 실제 Supabase·메일 서비스·중국 현지 접속 테스트를 대신하지 않습니다.
+
 ## Supabase 실제 연결
 
 1. 새 Supabase 프로젝트는 SQL Editor에서 [001_initial.sql](supabase/migrations/001_initial.sql) → [002_style_images.sql](supabase/migrations/002_style_images.sql) → [003_operations.sql](supabase/migrations/003_operations.sql) → [004_settlement_terms.sql](supabase/migrations/004_settlement_terms.sql)을 **순서대로 각각 한 번** 실행합니다. **001·002·003 적용이 끝났으면 004만 한 번 실행하세요. 003이 아직 없으면 003 → 004 순서로 적용합니다. 이미 적용한 SQL은 다시 실행하지 않습니다.** 002는 대표 이미지, 003은 추가 업무, 004는 본사 전용 을지 단가·프로젝트 코드 및 변경 이력의 증분 마이그레이션입니다.
