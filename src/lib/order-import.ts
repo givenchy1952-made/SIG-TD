@@ -10,7 +10,7 @@ export type OrderImportPreset = 'generic' | 'sig-order-qty'
 export const SIG_ORDER_SOURCE_COLUMNS = ORDER_SOURCE_COLUMNS
 export interface OrderSourceMetadata { rowNumber: number; columns: Record<string, ImportCell> }
 export interface OrderColumnMapping { sku: number | null; color: number | null; size: number | null; quantity: number | null; total: number | null; sizes: Partial<Record<Size, number | null>> }
-export interface OrderImportOptions { fileName?: string; preset?: OrderImportPreset; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
+export interface OrderImportOptions { fileName?: string; preset?: OrderImportPreset; sigColors?: Record<number, string>; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
 export interface OrderImportPreviewRow {
   rowNumbers: number[]; sku: string; color: string; styleId: string | null; lineId: string | null; styleName: string;
   sourceMetadata?: OrderSourceMetadata[]; source?: OrderSourceData & { expectedVersion: number }; sourceChanged?: boolean; before: Quantities; imported: Quantities; after: Quantities; changed: boolean; errors: string[]; warnings: string[];
@@ -163,9 +163,25 @@ const columnIndex = (name: string) => [...name].reduce((value, char) => value * 
 function sourceMetadata(source: ImportCell[], rowNumber: number): OrderSourceMetadata {
   return { rowNumber, columns: Object.fromEntries(SIG_ORDER_SOURCE_COLUMNS.map(column => [column, source[columnIndex(column)] ?? null])) }
 }
-function matchSigOrderLine(workspace: Workspace, fullSku: string) {
-  if (fullSku.length < 3 || !/[A-Z]{2}$/.test(fullSku)) throw new Error('F열 품번의 마지막 두 자리는 영문 컬러 코드여야 합니다.')
-  const base = fullSku.slice(0, -2), color = fullSku.slice(-2)
+/** Column I is intentionally never used. A base-only F value needs an explicit
+ * color, or a single unambiguous color already registered for that exact base. */
+export function resolveSigOrderIdentity(workspace: Workspace, value: string, selectedColor?: string): { base: string; color: string; fullSku: string } {
+  const sku = value.trim().toUpperCase()
+  if (!/^[A-Z0-9_-]{1,62}$/.test(sku) || !/[A-Z]/.test(sku)) throw new Error('F열 품번은 영문·숫자·밑줄·하이픈으로 입력해 주세요.')
+  if (sku.length > 2 && /[A-Z]{2}$/.test(sku)) return { base: sku.slice(0, -2), color: sku.slice(-2), fullSku: sku }
+  if (sku.length > 60) throw new Error('F열 기본 품번은 60자 이내여야 합니다.')
+  const styles = workspace.styles.filter(style => !style.deletedAt && style.code.toUpperCase() === sku)
+  if (styles.length > 1) throw new Error('F열 기본 품번이 여러 스타일과 일치합니다. 스타일 코드를 먼저 확인해 주세요.')
+  let color: string
+  if (selectedColor !== undefined) {
+    color = selectedColor.trim().toUpperCase()
+    if (!/^[A-Z]{2}$/.test(color)) throw new Error('가져올 컬러를 영문 두 자리로 입력해 주세요. I열은 사용하지 않습니다.')
+  } else if (styles.length === 1 && styles[0].production.length === 1 && /^[A-Z]{2}$/.test(styles[0].production[0].color)) color = styles[0].production[0].color
+  else throw new Error('F열에 기본 품번만 있습니다. 가져올 컬러를 영문 두 자리로 지정해 주세요. I열은 사용하지 않습니다.')
+  return { base: sku, color, fullSku: `${sku}${color}` }
+}
+function matchSigOrderLine(workspace: Workspace, value: string, selectedColor?: string) {
+  const { base, color } = resolveSigOrderIdentity(workspace, value, selectedColor)
   const candidates = workspace.styles.filter(style => !style.deletedAt && style.code.toUpperCase() === base).flatMap(style => style.production.filter(line => line.color === color).map(line => ({ style, line })))
   if (!candidates.length) throw new Error(`F열 기본 품번 ${base} / 컬러 ${color}와 정확히 일치하는 스타일이 없습니다. 스타일·컬러를 먼저 등록해 주세요.`)
   if (candidates.length > 1) throw new Error('F열 품번이 여러 스타일·컬러와 일치합니다. 시스템의 스타일 코드를 확인해 주세요.')
@@ -244,22 +260,27 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
       const sku = textCell(source[mapping.sku!], '품번'), color = mapping.color === null ? '' : textCell(source[mapping.color], '색상')
       preview.sku = sku; preview.color = color
       if (!sku) throw new Error('품번이 비어 있습니다.')
-      const { style, line } = fixed ? matchSigOrderLine(workspace, sku) : matchLine(workspace, sku, color)
-      const key = `${style.id}:${line.id}`
-      let group = groups.get(key)
-      if (!group) {
-        preview = { ...preview, sku: `${style.code}${line.color}`, color: line.color, styleId: style.id, lineId: line.id, styleName: style.name, before: { ...line.order }, after: { ...line.order } }
-        group = { row: preview, style, seenSizes: new Set(), seenWide: false }; groups.set(key, group); rows.push(preview)
-      } else { if (fixed) group.row.sourceMetadata!.push(...preview.sourceMetadata!); preview = group.row; preview.rowNumbers.push(rowNumber) }
       const values = emptyQuantities()
       if (layout === 'wide') {
-        if (group.seenWide && duplicateMode === 'reject') throw new Error('동일 품번·컬러가 여러 행에 있습니다. 중복 합산 옵션을 확인해 주세요.')
-        if (group.seenWide) preview.warnings.push(`${rowNumber}행의 중복 수량을 합산했습니다.`)
-        for (const size of sizeColumns) { values[size] = quantityCell(source[mapping.sizes[size]!], size); group.seenSizes.add(size) }
+        for (const size of sizeColumns) values[size] = quantityCell(source[mapping.sizes[size]!], size)
+        preview.imported = { ...values }
         if (mapping.total !== null && source[mapping.total] != null && source[mapping.total] !== '') {
           const total = quantityCell(source[mapping.total], '합계', MAX_QUANTITY * SIZES.length)
           if (total !== quantityTotal(values)) throw new Error(`사이즈 합계 ${quantityTotal(values).toLocaleString()}와 파일 합계 ${total.toLocaleString()}가 다릅니다.`)
         }
+      }
+      if (fixed) preview.color = resolveSigOrderIdentity(workspace, sku, options.sigColors?.[rowNumber]).color
+      const { style, line } = fixed ? matchSigOrderLine(workspace, sku, options.sigColors?.[rowNumber]) : matchLine(workspace, sku, color)
+      const key = `${style.id}:${line.id}`
+      let group = groups.get(key)
+      if (!group) {
+        preview = { ...preview, sku: `${style.code}${line.color}`, color: line.color, styleId: style.id, lineId: line.id, styleName: style.name, before: { ...line.order }, imported: emptyQuantities(), after: { ...line.order } }
+        group = { row: preview, style, seenSizes: new Set(), seenWide: false }; groups.set(key, group); rows.push(preview)
+      } else { if (fixed) group.row.sourceMetadata!.push(...preview.sourceMetadata!); preview = group.row; preview.rowNumbers.push(rowNumber) }
+      if (layout === 'wide') {
+        if (group.seenWide && duplicateMode === 'reject') throw new Error('동일 품번·컬러가 여러 행에 있습니다. 중복 합산 옵션을 확인해 주세요.')
+        if (group.seenWide) preview.warnings.push(`${rowNumber}행의 중복 수량을 합산했습니다.`)
+        for (const size of sizeColumns) group.seenSizes.add(size)
         group.seenWide = true
       } else {
         const size = textCell(source[mapping.size!], '사이즈') as Size

@@ -169,4 +169,99 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.project!.id).toBe('project-stable')
     expect(result.style!.id).toBe('style-stable')
   })
+
+  it('F가 기본 품번이면 직접 선택한 컬러로 등록하고 끝 숫자와 원본 F를 보존한다', () => {
+    const { workspace, row, sheet, defaults } = fixture()
+    row[5] = 'QAFYTS9001'; row[8] = 'WH'
+    const before = structuredClone(workspace)
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, 'BK')
+    expect(result.errors).toEqual([])
+    expect(result.style).toMatchObject({ code: 'QAFYTS9001', name: 'QAFYTS9001', colors: ['BK'] })
+    expect(result.fullSku).toBe('QAFYTS9001BK')
+    expect(result.color).toBe('BK')
+    expect(row[5]).toBe('QAFYTS9001')
+    for (const group of ['order', 'received', 'shipped', 'packing'] as const) expect(quantityTotal(result.style!.production[0][group])).toBe(0)
+    expect(workspace).toEqual(before)
+  })
+
+  it('미등록 기본 품번의 컬러를 직접 고르지 않으면 I열 값으로 추측하지 않는다', () => {
+    const { row, plan } = fixture()
+    row[5] = 'QAFYTS9001'; row[8] = 'BK'
+    const result = plan()
+    expect(result.style).toBeNull()
+    expect(result.errors.join(' ')).toContain('컬러')
+  })
+
+  it('기본 품번의 등록된 생산 컬러가 하나일 때만 그 컬러로 연결한다', () => {
+    const { workspace, row, plan } = fixture(), style = workspace.styles[0]
+    style.production = [style.production[0]]; style.colors = [style.production[0].color]
+    row[5] = style.code; row[8] = { error: '#REF!' }
+    const before = structuredClone(style), result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.code).toBe(before.code)
+    expect(result.style!.production).toEqual(before.production)
+    expect(result.color).toBe(before.colors[0])
+    expect(result.isNewStyle).toBe(false)
+    expect(result.isNewColor).toBe(false)
+  })
+
+  it('기본 품번의 컬러가 여러 개면 명시적 선택 없이 하나를 고르지 않는다', () => {
+    const { workspace, row, plan } = fixture(), style = workspace.styles[0]
+    expect(style.production.length).toBeGreaterThan(1)
+    row[5] = style.code; row[8] = style.production[0].color
+    const result = plan()
+    expect(result.style).toBeNull()
+    expect(result.errors.join(' ')).toContain('컬러')
+  })
+
+  it('기본 품번의 여러 기존 컬러 중 직접 선택한 컬러를 정확하게 연결한다', () => {
+    const { workspace, row, sheet, defaults } = fixture(), style = workspace.styles[0]
+    const before = structuredClone(style)
+    row[5] = style.code; row[8] = 'ZZ'
+    const color = style.production[1].color
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, color)
+    expect(result.errors).toEqual([])
+    expect(result.color).toBe(color)
+    expect(result.isNewColor).toBe(false)
+    expect(result.style!.production).toEqual(before.production)
+    expect(result.style!.factoryId).toBe(before.factoryId)
+  })
+
+  it('기본 품번에 신규 컬러를 직접 선택해도 기존 수량과 생산 이력을 바꾸지 않는다', () => {
+    const { workspace, row, sheet, defaults } = fixture(), style = workspace.styles[0]
+    const before = structuredClone(style)
+    row[5] = style.code; row[8] = 'BK'
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, 'ZZ')
+    expect(result.errors).toEqual([])
+    expect(result.isNewStyle).toBe(false)
+    expect(result.isNewColor).toBe(true)
+    expect(result.style!.production.slice(0, before.production.length)).toEqual(before.production)
+    expect(result.style!.production.at(-1)!.color).toBe('ZZ')
+    expect(quantityTotal(result.style!.production.at(-1)!.order)).toBe(0)
+    expect(style).toEqual(before)
+  })
+
+  it('F에 이미 컬러가 붙어 있으면 직접 선택값으로 그 컬러를 바꾸지 않는다', () => {
+    const { workspace, sheet, defaults } = fixture()
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, 'WH')
+    expect(result.errors).toEqual([])
+    expect(result.color).toBe('BK')
+    expect(result.style!.colors).toEqual(['BK'])
+  })
+
+  it.each(['B', 'B1', '1K'])('기본 품번의 수기 컬러 %s가 영문 두 자리가 아니면 등록하지 않는다', color => {
+    const { workspace, row, sheet, defaults } = fixture()
+    row[5] = 'QAFYTS9001'
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, color)
+    expect(result.style).toBeNull()
+    expect(result.errors.join(' ')).toContain('컬러')
+  })
+
+  it.each([12345, true])('F열의 숫자·불리언 값 %s를 기본 품번으로 등록하지 않는다', value => {
+    const { workspace, row, sheet, defaults } = fixture()
+    row[5] = value
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, 'BK')
+    expect(result.style).toBeNull()
+    expect(result.errors.join(' ')).toContain('F열 품번')
+  })
 })

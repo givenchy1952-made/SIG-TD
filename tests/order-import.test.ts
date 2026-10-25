@@ -549,13 +549,55 @@ describe('SIG ORDER QTY 고정 열 형식 (사용자 지정 위치의 합성 검
     expect(overLimit.changes).toHaveLength(0)
   })
 
-  it('F열 품번·컬러가 없거나 잘못된 경우 자동 생성하지 않고 차단한다', () => {
+  it('여러 컬러의 F 기본 품번은 선택을 요청하고 잘못된 컬러를 자동 생성하지 않는다', () => {
     const { source, style, buildSig } = sigFixture()
     source[5] = style.code
-    expect(messages(buildSig())).toContain('마지막 두 자리')
+    expect(messages(buildSig())).toContain('컬러를 영문 두 자리로 지정')
     source[5] = `${style.code}ZZ`
     expect(messages(buildSig())).toContain('정확히 일치하는 스타일이 없습니다')
     expect(buildSig().changes).toHaveLength(0)
+  })
+
+  it('미등록 기본 품번에도 실제 파일 수량을 표시하며 컬러 미지정 상태의 저장은 막는다', () => {
+    const { source, buildSig } = sigFixture()
+    source[5] = 'QAFYDW9901'; source[8] = '#REF!'
+    const values = [60, 384, 626, '1,296', '1,162', 610]
+    values.forEach((value, index) => { source[42 + index] = value }); source[50] = '4,138'
+    const preview = buildSig()
+    expect(preview.rows[0].imported).toEqual({ XXS: 60, XS: 384, S: 626, M: 1296, L: 1162, XL: 610 })
+    expect(preview.rows[0].sourceMetadata![0].columns.F).toBe('QAFYDW9901')
+    expect(messages(preview)).toContain('컬러를 영문 두 자리로 지정')
+    expect(preview.changes).toEqual([])
+  })
+
+  it('기본 품번의 명시한 컬러만 연결하고 원본 F와 기존 다른 컬러는 유지한다', () => {
+    const fixed = sigFixture(), before = structuredClone(fixed.workspace)
+    fixed.source[5] = fixed.style.code; fixed.source[8] = { error: '읽지 않는 I열' }
+    const preview = buildOrderImportPreview(fixed.workspace, fixed.sheet, { ...fixed.sigOptions, sigColors: { 3: 'bk' } })
+    expect(messages(preview)).toBe('')
+    expect(preview.changes[0].lines).toHaveLength(1)
+    expect(preview.changes[0].lines[0]).toMatchObject({ lineId: fixed.line.id, color: 'BK', quantities: { XXS: 1, XS: 2, S: 3, M: 4, L: 5, XL: 6 } })
+    expect(preview.changes[0].lines[0].source!.rows[0].columns.F).toBe(fixed.style.code)
+    expect(fixed.workspace).toEqual(before)
+  })
+
+  it('같은 기본 품번의 서로 다른 행에서 지정한 컬러를 각각 매칭한다', () => {
+    const fixed = sigFixture(); fixed.source[5] = fixed.style.code
+    fixed.sheet.rows.push(structuredClone(fixed.source))
+    const preview = buildOrderImportPreview(fixed.workspace, fixed.sheet, { ...fixed.sigOptions, sigColors: { 3: 'BK', 4: 'OT' } })
+    expect(messages(preview)).toBe('')
+    expect(preview.changes[0].lines.map(line => line.color)).toEqual(['BK', 'OT'])
+    expect(preview.changes[0].lines.every(line => quantityTotal(line.quantities) === 21)).toBe(true)
+  })
+
+  it('기본 품번의 잘못된 수량·합계는 컬러를 지정해도 가져오지 않는다', () => {
+    const fixed = sigFixture(); fixed.source[5] = fixed.style.code
+    fixed.source[42] = -1
+    const options = { ...fixed.sigOptions, sigColors: { 3: 'BK' } }
+    expect(messages(buildOrderImportPreview(fixed.workspace, fixed.sheet, options))).toContain('정수')
+    fixed.source[42] = 1; fixed.source[50] = 999
+    expect(messages(buildOrderImportPreview(fixed.workspace, fixed.sheet, options))).toContain('파일 합계')
+    expect(buildOrderImportPreview(fixed.workspace, fixed.sheet, options).changes).toEqual([])
   })
 
   it('AY 합계가 AQ~AV와 다르면 전체 적용을 차단한다', () => {

@@ -1,5 +1,5 @@
 import { blankProduction, type Project, type Style, type Workspace } from './types'
-import type { ImportCell, ImportSheet } from './order-import'
+import { resolveSigOrderIdentity, type ImportCell, type ImportSheet } from './order-import'
 
 export interface RegistrationProject extends Project { code: string; expected: { code: string; name: string; season: string } | null }
 export interface RegistrationDefaults { factoryId: string; ownerId: string; dueDate: string }
@@ -13,15 +13,16 @@ function literal(cell: ImportCell | undefined, label: string): string {
   if (excelError.test(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label}의 오류·제어 문자를 수정해 주세요.`)
   return value
 }
-/** F is the only style/color identity. Column I is deliberately never read. */
-export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet, headerRow: number, rowNumber: number, defaults: RegistrationDefaults, makeId = () => crypto.randomUUID()): OrderRegistrationPlan {
+/** F is the style identity. A base-only F may use an explicit user-selected
+ * color or its sole registered production color. Column I is never read. */
+export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet, headerRow: number, rowNumber: number, defaults: RegistrationDefaults, makeId = () => crypto.randomUUID(), selectedColor?: string): OrderRegistrationPlan {
   const result: OrderRegistrationPlan = { style: null, project: null, isNewProject: false, isNewStyle: false, isNewColor: false, fullSku: '', color: '', errors: [], sourceFactory: '', sourceOwner: '' }
   try {
     if (!Number.isInteger(headerRow) || !Number.isInteger(rowNumber) || headerRow < 1 || rowNumber <= headerRow || rowNumber > sheet.rows.length) throw new Error('등록할 원본 데이터 행을 확인해 주세요.')
     const row = sheet.rows[rowNumber - 1]
-    const fullSku = literal(row[5], 'F열 품번').toUpperCase()
-    if (!/^[A-Z0-9_-]{1,60}[A-Z]{2}$/.test(fullSku)) throw new Error('F열에는 기본 품번과 영문 두 자리 컬러가 붙은 품번을 입력해 주세요.')
-    const code = fullSku.slice(0, -2), color = fullSku.slice(-2)
+    if (typeof row[5] !== 'string') throw new Error('F열 품번은 문자로 입력해 주세요.')
+    const rawSku = literal(row[5], 'F열 품번').toUpperCase()
+    const { base: code, color, fullSku } = resolveSigOrderIdentity(workspace, rawSku, selectedColor)
     result.fullSku = fullSku; result.color = color
     const projectCode = literal(row[0], 'A열 프로젝트 코드'), projectName = literal(row[12], 'M열 프로젝트 명칭'), season = literal(row[11], 'L열 시즌')
     if (!projectCode || projectCode.length > 120 || !projectName || projectName.length > 160 || !season || season.length > 30) throw new Error('A열 프로젝트 코드·M열 프로젝트 명칭·L열 시즌을 확인해 주세요.')
