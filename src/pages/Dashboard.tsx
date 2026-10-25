@@ -10,6 +10,7 @@ import { resolveStyleImage } from '../lib/style-images'
 import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '../lib/types'
 import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
 import { exportWorkspace } from '../lib/export'
+import { isSampleStyle } from '../lib/utils'
 import type { OrderImportChange } from '../lib/operations-types'
 import type { RegistrationProject } from '../lib/order-registration'
 import './dashboard.css'
@@ -81,7 +82,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const today = localDate(new Date())
   const weekEndDate = new Date(); weekEndDate.setDate(weekEndDate.getDate() + 7)
   const weekEnd = localDate(weekEndDate)
-  const visibleStyles = workspace.styles.filter(s => !s.deletedAt)
+  const visibleStyles = workspace.styles.filter(style => !style.deletedAt && (!(view === 'samples' || tableMode === 'samples') || isSampleStyle(style)))
   const factoryName = (id: string) => workspace.factories.find(f => f.id === id)?.name || '미배정'
   const projectName = (id: string) => { const item = workspace.projects.find(p => p.id === id); return item ? [item.code, item.name].filter(Boolean).join(' · ') : '미배정' }
   const ownerName = (id: string) => workspace.profiles.find(p => p.id === id)?.name || '담당자'

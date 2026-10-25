@@ -307,3 +307,36 @@ test('승인되지 않은 계정은 업무 화면 진입이 차단된다', async
   await expect(page.locator('.style-code')).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: '주 메뉴' })).toHaveCount(0)
 })
+
+
+test('생산 수량만 있는 가져온 품번은 샘플 집계·목록에서 제외하고 실제 샘플·신규 대기와 생산 수량은 보존한다', async ({ page }) => {
+  await ready(page)
+  await page.evaluate(key => {
+    const workspace = JSON.parse(localStorage.getItem(key)!)
+    const source = workspace.styles.find((style: { samples: unknown[] }) => style.samples.length > 0)
+    const make = (code: string, stage: string, hasSamples: boolean, quantity: number) => {
+      const style = structuredClone(source)
+      style.id = crypto.randomUUID(); style.code = code; style.stage = stage; style.deletedAt = null
+      style.samples = hasSamples ? style.samples : []
+      style.production = [style.production[0]]; style.colors = [style.production[0].color]
+      for (const type of ['order', 'shipped', 'received']) for (const size of Object.keys(style.production[0][type])) style.production[0][type][size] = 0
+      style.production[0].order.M = quantity
+      return style
+    }
+    workspace.styles = [make('QAIMPORT001', 'registered', false, 4138), make('QAPENDING002', 'registered', false, 0), make('QASAMPLE003', 'sample1', true, 100), make('QAPRODUCTION004', 'production', true, 200)]
+    workspace.comments = []; workspace.attachments = []; workspace.audits = []
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, STORAGE)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
+  const before = await stored(page)
+  const sampleMenu = page.getByRole('navigation', { name: '주 메뉴' }).getByRole('button', { name: /샘플 관리/ })
+  await expect(sampleMenu.locator('.nav-count')).toHaveText('2')
+  await sampleMenu.click()
+  await expect(page.locator('.style-code')).toHaveCount(2)
+  await expect(page.locator('.style-code')).toContainText(['QAPENDING002', 'QASAMPLE003'])
+  await navigate(page, /^메인 생산$/)
+  await expect(page.locator('.style-code')).toHaveCount(4)
+  await expect(page.locator('.styles-table tbody tr').filter({ hasText: 'QAIMPORT001' })).toContainText('4,138')
+  expect(await stored(page)).toEqual(before)
+})
