@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, Filter, LockKeyhole, Plus } from 'lucide-react'
+import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, Filter, LockKeyhole, Plus, X } from 'lucide-react'
 import type { Profile, Style, Workspace } from '../lib/types'
 import type { CalendarEvent, CalendarEventKind } from '../lib/operations-types'
 import { EMPTY_OPERATIONS } from '../lib/operations-types'
 import { quantityTotal } from '../lib/types'
 import { leaveLabel } from '../lib/workflow-refinements'
+import MultiSelectFilter from '../components/MultiSelectFilter'
 import CalendarEventEditor, { CALENDAR_KIND_LABEL, canViewCalendarEvent } from '../components/CalendarEventEditor'
 import './support.css'
+import './calendar-filters.css'
 
 type CalendarWorkspace = Workspace
 interface Props { workspace: CalendarWorkspace; profile: Profile; onOpenStyle: (id: string) => void; onSaveCalendarEvent: (event: CalendarEvent, reason: string) => Promise<void>; onDeleteCalendarEvent: (event: CalendarEvent, reason: string) => Promise<void> }
@@ -23,20 +25,39 @@ const dateRange = (start: string, end: string) => start === end ? start.slice(5)
 export default function Calendar({ workspace, profile, onOpenStyle, onSaveCalendarEvent, onDeleteCalendarEvent }: Props) {
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<'month' | 'week'>('month')
-  const [factory, setFactory] = useState('')
-  const [project, setProject] = useState('')
-  const [kindFilter, setKindFilter] = useState('')
+  const [factory, setFactory] = useState<string[] | null>(null)
+  const [project, setProject] = useState<string[] | null>(null)
+  const [products, setProducts] = useState<string[] | null>(null)
+  const [kindFilter, setKindFilter] = useState<string[] | null>(null)
   const [selected, setSelected] = useState(dayKey(new Date()))
   const [editorTarget, setEditorTarget] = useState<CalendarEvent | null | undefined>(undefined)
   const today = dayKey(new Date())
   const operationsAvailable = workspace.operationsAvailable === true
   const operations = workspace.operations || EMPTY_OPERATIONS
+  const kindOptions = [
+    { value: 'sample', label: '샘플' }, { value: 'production', label: '생산·납기' }, { value: 'payment', label: '결제' },
+    { value: 'personal_leave', label: '개인 휴가' }, { value: 'launch', label: '제품 런칭' },
+    ...(profile.role === 'factory' ? [] : [{ value: 'factory_holiday', label: '협력업체 휴가' }]),
+  ]
+  const factoryOptions = workspace.factories.map(item => ({ value: item.id, label: item.name }))
+  const projectOptions = workspace.projects.map(item => ({ value: item.id, label: item.code ? `${item.code} · ${item.name}` : item.name }))
+  const productOptions = workspace.styles.filter(style => !style.deletedAt).map(style => ({ value: style.id, label: `${style.code} · ${style.name}` }))
+  const matches = (selection: string[] | null, value: string) => selection === null || selection.includes(value)
+  const kindMatches = (kind: ScheduleKind) => matches(kindFilter, kind === 'due' ? 'production' : kind)
+  const resetFilters = () => { setFactory(null); setProject(null); setProducts(null); setKindFilter(null) }
+  const filters = [
+    { label: '일정', value: kindFilter, options: kindOptions, clear: () => setKindFilter(null) },
+    { label: '공장', value: factory, options: factoryOptions, clear: () => setFactory(null) },
+    { label: '프로젝트', value: project, options: projectOptions, clear: () => setProject(null) },
+    { label: '제품', value: products, options: productOptions, clear: () => setProducts(null) },
+  ].filter(item => item.value !== null)
+
   const events = useMemo(() => {
     const result: ScheduleItem[] = []
     const add = (style: Style, id: string, date: string, label: string, kind: ScheduleKind, complete = false) => {
-      if (date) result.push({ id: `${style.id}-${id}`, style, date, endDate: date, title: style.code, label, kind, complete })
+      if (date && kindMatches(kind)) result.push({ id: `${style.id}-${id}`, style, date, endDate: date, title: style.code, label, kind, complete })
     }
-    if (!kindFilter || kindFilter === 'workflow') workspace.styles.filter(style => !style.deletedAt && (!factory || style.factoryId === factory) && (!project || style.projectId === project)).forEach(style => {
+    workspace.styles.filter(style => !style.deletedAt && matches(factory, style.factoryId) && matches(project, style.projectId) && matches(products, style.id)).forEach(style => {
       const ordered = style.production.reduce((n, line) => n + quantityTotal(line.order), 0)
       const received = style.production.reduce((n, line) => n + quantityTotal(line.received), 0)
       add(style, 'due', style.dueDate, '기준 납기', 'due', ordered > 0 ? received >= ordered : style.stage === 'approved')
@@ -54,11 +75,11 @@ export default function Calendar({ workspace, profile, onOpenStyle, onSaveCalend
         add(style, `${line.id}-payment`, line.paymentDue, `${line.color} 업체 결제 마감`, 'payment', line.paymentStatus === 'done' || line.paymentStatus === 'approved')
       })
     })
-    if (operationsAvailable && kindFilter !== 'workflow') operations.calendarEvents.filter(event => canViewCalendarEvent(event, profile) && (!kindFilter || event.kind === kindFilter) && (!factory || !event.factoryId || event.factoryId === factory)).forEach(event => {
+    if (operationsAvailable) operations.calendarEvents.filter(event => canViewCalendarEvent(event, profile) && kindMatches(event.kind) && (factory === null || factory.length > 0 && (!event.factoryId || factory.includes(event.factoryId)))).forEach(event => {
       result.push({ id: event.id, date: event.startDate, endDate: event.endDate, title: event.title, label: `${CALENDAR_KIND_LABEL[event.kind]}${event.kind === 'personal_leave' ? ` · ${leaveLabel(event)}` : ''}`, custom: event, complete: false, kind: event.kind })
     })
     return result.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
-  }, [workspace.styles, operations.calendarEvents, profile, factory, project, kindFilter, operationsAvailable])
+  }, [workspace.styles, operations.calendarEvents, profile, factory, project, products, kindFilter, operationsAvailable])
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12)
   const weekStart = shift(anchor, -((anchor.getDay() + 6) % 7))
   const start = view === 'month' ? shift(first, -((first.getDay() + 6) % 7)) : weekStart
@@ -74,9 +95,14 @@ export default function Calendar({ workspace, profile, onOpenStyle, onSaveCalend
     <div className="page-heading"><div><div className="eyebrow">SCHEDULE OVERVIEW</div><h1>프로젝트 캘린더</h1><p className="muted">샘플·메인 생산 일정과 휴가·제품 런칭을 함께 확인하세요.</p></div><button className="button button-primary" disabled={!operationsAvailable} onClick={() => setEditorTarget(null)}><Plus size={16}/>일정 등록</button></div>
     {!operationsAvailable && <div className="calendar-migration-notice" role="status">{profile.role === 'factory' ? '추가 일정 등록은 관리자 설정 후 사용할 수 있습니다. 기존 샘플·생산 일정은 계속 표시됩니다.' : '휴가·제품 런칭 등록은 추가 설정 후 사용할 수 있습니다. 기존 샘플·생산 일정은 계속 표시됩니다. 관리자는 003 업무 확장 SQL 적용 여부를 확인해 주세요.'}</div>}
     <div className="calendar-summary"><div><CalendarDays size={17}/><span>7일 이내 예정</span><strong>{upcoming.length}</strong><small>건</small></div><div className="danger-text"><Clock3 size={17}/><span>미완료 지연 일정</span><strong>{overdue.length}</strong><small>건</small></div><p>여러 날의 휴가·런칭은 기간 전체에 표시됩니다.</p></div>
-    <div className="calendar-top-legend"><div className="calendar-legend"><span><i className="legend-dot sample"/>샘플</span><span><i className="legend-dot production"/>생산·납기</span><span><i className="legend-dot payment"/>결제</span><span><i className="legend-dot personal_leave"/>개인 휴가</span><span><i className="legend-dot launch"/>제품 런칭</span>{profile.role !== 'factory' && <span><i className="legend-dot factory_holiday"/>협력업체 휴가 <LockKeyhole size={11}/></span>}</div><span className="calendar-filter-note">휴가·런칭은 프로젝트와 독립된 일정입니다.</span></div>
+    <div className="calendar-top-legend"><div className="calendar-legend"><span><i className="legend-dot sample"/>샘플</span><span><i className="legend-dot production"/>생산·납기</span><span><i className="legend-dot payment"/>결제</span><span><i className="legend-dot personal_leave"/>개인 휴가</span><span><i className="legend-dot launch"/>제품 런칭</span>{profile.role !== 'factory' && <span><i className="legend-dot factory_holiday"/>협력업체 휴가 <LockKeyhole size={11}/></span>}</div><span className="calendar-filter-note">휴가·런칭은 프로젝트·제품 필터와 독립된 일정입니다.</span></div>
     <div className="panel calendar-panel">
-      <div className="calendar-toolbar"><div className="calendar-period"><button className="icon-button" onClick={() => navigate(-1)} aria-label="이전 기간"><ChevronLeft size={18}/></button><h2>{anchor.getFullYear()}년 {anchor.getMonth() + 1}월{view === 'week' ? ` · ${weekStart.getDate()}일 주간` : ''}</h2><button className="icon-button" onClick={() => navigate(1)} aria-label="다음 기간"><ChevronRight size={18}/></button><button className="button button-ghost" onClick={() => { setAnchor(new Date()); setSelected(today) }}>오늘</button></div><div className="calendar-controls"><Filter size={15}/><select className="select" aria-label="일정 유형 필터" value={kindFilter} onChange={event => setKindFilter(event.target.value)}><option value="">전체 일정</option><option value="workflow">샘플·생산·결제</option><option value="personal_leave">개인 휴가</option><option value="launch">제품 런칭</option>{profile.role !== 'factory' && <option value="factory_holiday">협력업체 휴가</option>}</select><select className="select" aria-label="일정 공장 필터" value={factory} onChange={e => setFactory(e.target.value)}><option value="">전체 공장</option>{workspace.factories.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select><select className="select" aria-label="일정 프로젝트 필터" value={project} onChange={e => setProject(e.target.value)}><option value="">전체 프로젝트</option>{workspace.projects.map(item => <option value={item.id} key={item.id}>{item.code ? `${item.code} · ${item.name}` : item.name}</option>)}</select><div className="segmented"><button className={view === 'month' ? 'active' : ''} onClick={() => setView('month')}>월간</button><button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>주간</button></div></div></div>
+      <div className="calendar-toolbar"><div className="calendar-period"><button className="icon-button" onClick={() => navigate(-1)} aria-label="이전 기간"><ChevronLeft size={18}/></button><h2>{anchor.getFullYear()}년 {anchor.getMonth() + 1}월{view === 'week' ? ` · ${weekStart.getDate()}일 주간` : ''}</h2><button className="icon-button" onClick={() => navigate(1)} aria-label="다음 기간"><ChevronRight size={18}/></button><button className="button button-ghost" onClick={() => { setAnchor(new Date()); setSelected(today) }}>오늘</button></div><div className="calendar-controls"><Filter size={15}/><MultiSelectFilter label="일정 유형 필터" options={kindOptions} value={kindFilter} onChange={setKindFilter} allLabel="전체 일정"/><MultiSelectFilter label="일정 공장 필터" options={factoryOptions} value={factory} onChange={setFactory} allLabel="전체 공장"/><MultiSelectFilter label="일정 프로젝트 필터" options={projectOptions} value={project} onChange={setProject} allLabel="전체 프로젝트"/><MultiSelectFilter label="일정 제품 필터" options={productOptions} value={products} onChange={setProducts} allLabel="전체 제품"/><div className="segmented"><button className={view === 'month' ? 'active' : ''} onClick={() => setView('month')}>월간</button><button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>주간</button></div></div></div>
+      {filters.length > 0 && <div className="calendar-filter-chips" aria-label="적용된 일정 필터">{filters.map(filter => {
+        const labels = filter.options.filter(option => filter.value!.includes(option.value)).map(option => option.label)
+        const text = labels.length ? labels.join(', ') : '선택 없음'
+        return <button className="calendar-filter-chip" key={filter.label} onClick={filter.clear} aria-label={`${filter.label} 필터 해제`} title={`${filter.label}: ${text}`}><span><strong>{filter.label}</strong> {text}</span><X size={12}/></button>
+      })}<button className="calendar-filters-reset" onClick={resetFilters}>필터 초기화</button><span>같은 필터 안에서는 선택 항목 중 하나, 서로 다른 필터는 모두 일치하는 일정입니다.</span></div>}
       <div className="calendar-scroll"><div className={`calendar-grid ${view === 'week' ? 'week-view' : ''}`}>
         {['월', '화', '수', '목', '금', '토', '일'].map((day, i) => <div className={`calendar-weekday ${i === 6 ? 'sunday' : ''}`} key={day}>{day}</div>)}
         {cells.map(date => { const key = dayKey(date); const dayEvents = events.filter(event => event.date <= key && event.endDate >= key); return <div key={key} className={`calendar-cell ${date.getMonth() !== anchor.getMonth() && view === 'month' ? 'outside' : ''} ${key === selected ? 'selected' : ''} ${date.getDay() === 0 ? 'sunday' : ''}`}><button className={`calendar-day ${key === today ? 'today' : ''}`} onClick={() => setSelected(key)} aria-label={`${key} 일정 확인`}>{date.getDate()}</button>{dayEvents.slice(0, view === 'week' ? 20 : 3).map(event => <button key={event.id} className={`calendar-event ${itemClass(event, today)} ${event.custom && event.date !== event.endDate ? 'multi-day-event' : ''} ${event.date === key ? 'range-start' : ''} ${event.endDate === key ? 'range-end' : ''}`} onClick={() => openItem(event)} title={`${event.title} · ${event.label} · ${dateRange(event.date, event.endDate)}`}><span className="calendar-event-code">{event.title}</span><span>{event.custom?.visibility === 'private' && <LockKeyhole size={9}/>} {event.label}{event.custom && event.date !== event.endDate ? ` · ${dateRange(event.date, event.endDate)}` : ''}</span></button>)}{dayEvents.length > 3 && view === 'month' && <button className="calendar-more" onClick={() => setSelected(key)}>+{dayEvents.length - 3}개 일정</button>}</div>})}

@@ -29,6 +29,14 @@ async function save(detail: Locator, reason: string) {
 async function navigate(page: Page, name: RegExp) {
   await page.getByRole('navigation', { name: '주 메뉴' }).getByRole('button', { name }).click()
 }
+async function chooseFilter(page: Page, label: string, options: string[]) {
+  await page.getByRole('button', { name: label, exact: true }).click()
+  const panel = page.getByRole('dialog', { name: `${label} 선택`, exact: true })
+  await panel.getByRole('button', { name: '선택해제', exact: true }).click()
+  for (const option of options) await panel.getByRole('checkbox', { name: option, exact: true }).check()
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+}
 async function stored(page: Page) {
   return page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
 }
@@ -42,11 +50,11 @@ test('대시보드가 오류 없이 로딩되고 검색·상세 필터·업무 �
   await page.getByLabel('스타일 검색', { exact: true }).fill('JK0101')
   await expect(page.locator('.style-code')).toHaveCount(1)
   await expect(page.locator('.style-code')).toHaveText('BO42FYJK0101')
-  await page.getByLabel('시즌 필터').selectOption('2027SS')
+  await chooseFilter(page, '시즌 필터', ['2027SS'])
   await expect(page.getByRole('heading', { name: '조건에 맞는 스타일이 없습니다.' })).toBeVisible()
   await page.getByRole('button', { name: '필터 초기화', exact: true }).click()
   await page.getByRole('button', { name: '상세 필터', exact: true }).click()
-  await page.getByRole('combobox', { name: 'PP 최종 승인', exact: true }).selectOption('yes')
+  await chooseFilter(page, 'PP 최종 승인', ['승인'])
   await expect(page.locator('.style-code')).toHaveCount(6)
   await page.getByRole('button', { name: '필터 초기화', exact: true }).click()
   await navigate(page, /샘플 관리/)
@@ -208,7 +216,7 @@ test('월간·주간 캘린더와 가입 승인·공장·프로젝트 설정을 
   await expect(page.locator('.calendar-cell')).toHaveCount(42)
   await page.getByRole('button', { name: '주간', exact: true }).click()
   await expect(page.locator('.calendar-cell')).toHaveCount(7)
-  await page.getByLabel('일정 공장 필터').selectOption(CHINA)
+  await chooseFilter(page, '일정 공장 필터', ['칭다오 · A FACTORY'])
   await page.getByRole('button', { name: '월간', exact: true }).click()
   await expect(page.locator('.calendar-cell')).toHaveCount(42)
   await page.getByRole('button', { name: '이전 기간', exact: true }).click()

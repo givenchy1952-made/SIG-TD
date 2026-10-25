@@ -3,13 +3,17 @@ import { Download, FileSpreadsheet, Upload } from 'lucide-react'
 import type { Profile, Style, Workspace } from '../lib/types'
 import { message } from '../lib/utils'
 import { MAX_SETTLEMENT_TEMPLATE_BYTES, SETTLEMENT_FIELDS, autoMapSettlementColumns, buildSettlementRows, fillSettlementTemplate, inspectSettlementSheet, loadSettlementTemplate, preflightSettlementTemplate, type SettlementFieldKey, type SettlementTemplate, type SettlementTemplateOptions } from '../lib/settlement-template'
-import { buildSigEuljiRows, fillSigEuljiTemplate, loadBundledSigEuljiTemplate, type SigEuljiRow } from '../lib/sig-eulji'
+import { buildSigEuljiRows, fillSigEuljiTemplate, loadBundledSigEuljiTemplate, type SigEuljiRow, type SigEuljiKind } from '../lib/sig-eulji'
 import { Modal } from './ui'
 import './settlement-template.css'
 
 export default function SettlementTemplateExport({ workspace, profile, styles, onClose }: { workspace: Workspace; profile: Profile; styles: Style[]; onClose: () => void }) {
   const rows = useMemo(() => buildSettlementRows(workspace, styles, profile), [workspace, styles, profile])
-  const sig = useMemo(() => buildSigEuljiRows(workspace, styles, profile), [workspace, styles, profile])
+  const [sigKind, setSigKind] = useState<SigEuljiKind>('product')
+  const sigKinds: { value: SigEuljiKind; label: string }[] = [{ value: 'product', label: '메인 제품' }, { value: 'label', label: '중화라벨' }, { value: 'embroidery', label: '비와이 자수' }, { value: 'quality', label: '품질검사' }]
+  const sigKindLabel = sigKinds.find(item => item.value === sigKind)!.label
+  const sig = useMemo(() => buildSigEuljiRows(workspace, styles, profile, sigKind), [workspace, styles, profile, sigKind])
+  const sigReady = profile.role !== 'factory' && (sigKind === 'product' ? workspace.settlementTermsAvailable === true : sigKind === 'quality' ? workspace.refinementsAvailable === true : workspace.operationsAvailable === true)
   const [mode, setMode] = useState<'sig' | 'generic'>(profile.role === 'factory' ? 'generic' : 'sig')
   const [template, setTemplate] = useState<SettlementTemplate>()
   const [sheetName, setSheetName] = useState(''), [headerRow, setHeaderRow] = useState(1)
@@ -59,21 +63,21 @@ export default function SettlementTemplateExport({ workspace, profile, styles, o
   }
 
   async function downloadSig() {
-    if (busy || workspace.settlementTermsAvailable !== true || sig.errors.length || !sig.rows.length || profile.role === 'factory') return
+    if (busy || !sigReady || sig.errors.length || !sig.rows.length) return
     setBusy(true); setError(''); setSuccess('')
     try {
       const bytes = await fillSigEuljiTemplate(await loadBundledSigEuljiTemplate(), sig.rows)
       const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
       const anchor = document.createElement('a')
       const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).replaceAll('-', '')
-      anchor.href = url; anchor.download = `SIG_을지_${today}.xlsx`; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setSuccess(`${sig.rows.length}개 컬러의 을지를 다운로드했습니다. T는 부가세 제외 금액이며 U·V는 원본 수식을 유지합니다.`)
+      anchor.href = url; anchor.download = `SIG_을지_${sigKind === 'product' ? '' : `${sigKindLabel}_`}${today}.xlsx`; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setSuccess(`${sigKindLabel} ${sig.rows.length}행을 다운로드했습니다.${sigKind === 'product' ? ' T는 부가세 제외 금액이며 U·V는 원본 수식을 유지합니다.' : ' 빈 단가·입고일·입고 수량은 Excel에서 작성해 주세요.'}`)
     } catch (failure) { setError(message(failure)) } finally { setBusy(false) }
   }
-  const sigColumns: { letter: string; label: string; value: (row: SigEuljiRow) => string | number }[] = [
+  const sigColumns: { letter: string; label: string; value: (row: SigEuljiRow) => string | number | null | undefined }[] = [
     { letter: 'A', label: '프로젝트 코드', value: row => row.projectCode }, { letter: 'C', label: '입고일자', value: row => row.receivedAtISO }, { letter: 'D', label: '업체명', value: row => row.factory }, { letter: 'I', label: '컬러 포함 품번', value: row => row.colorStyleCode },
-    { letter: 'N', label: '장당 원가', value: row => row.unitCost }, { letter: 'O', label: '장수', value: () => 1 }, { letter: 'P', label: 'PO 오더 수량', value: row => row.orderQuantity }, { letter: 'Q', label: 'P와 동일', value: row => row.orderQuantity }, { letter: 'R', label: '실제 입고 수량', value: row => row.receivedQuantity },
-    { letter: 'S', label: '단위', value: row => row.unit }, { letter: 'T', label: '금액 · 부가세 제외', value: row => row.netAmount }, { letter: 'U', label: '부가세', value: row => row.netAmount / 10 }, { letter: 'V', label: '합계', value: row => row.netAmount + row.netAmount / 10 }, { letter: 'W', label: '담당자', value: row => row.owner },
+    { letter: 'L', label: '품명·작업 종류', value: row => row.itemName || '' }, { letter: 'N', label: '장당 원가', value: row => row.unitCost }, { letter: 'O', label: '장수', value: () => 1 }, { letter: 'P', label: 'PO 오더 수량', value: row => row.orderQuantity }, { letter: 'Q', label: 'P와 동일', value: row => row.orderQuantity }, { letter: 'R', label: '실제 입고 수량', value: row => row.receivedQuantity },
+    { letter: 'S', label: '단위', value: row => row.unit }, { letter: 'T', label: '금액 · 부가세 제외', value: row => row.netAmount }, { letter: 'U', label: '부가세', value: row => row.netAmount === null ? null : row.netAmount / 10 }, { letter: 'V', label: '합계', value: row => row.netAmount === null ? null : row.netAmount + row.netAmount / 10 }, { letter: 'W', label: '담당자', value: row => row.owner }, { letter: 'X', label: '산출근거·비고', value: row => row.note || '' },
   ]
   return <Modal title="마감 양식에 채워서 다운로드" onClose={onClose} wide><div className="modal-body settlement-template">
     <div className="settlement-export-modes" role="tablist" aria-label="마감 다운로드 방식"><button type="button" role="tab" aria-selected={mode === 'sig'} disabled={busy || profile.role === 'factory'} onClick={() => { setMode('sig'); setError(''); setSuccess('') }}>SIG 을지 자동 작성</button><button type="button" role="tab" aria-selected={mode === 'generic'} disabled={busy} onClick={() => { setMode('generic'); setError(''); setSuccess('') }}>다른 양식 · 직접 열 연결</button></div>
@@ -81,13 +85,14 @@ export default function SettlementTemplateExport({ workspace, profile, styles, o
     {success && <div className="settlement-template-success" role="status">{success}</div>}
     <div hidden={mode !== 'sig'} className="sig-eulji-export" role="tabpanel" aria-label="SIG 을지 자동 작성">
       <p className="settlement-template-intro">제공한 <strong>SIG_을지.xlsx · 대금지급(을)</strong> 양식에 지정한 열을 자동으로 채웁니다. 매번 양식을 업로드하거나 열을 연결할 필요가 없습니다.</p>
-      <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>현재 검색·필터 결과 <strong>{rows.length}개 컬러 행</strong><small>프로젝트·품번·컬러별 현재 오더와 실제 입고 수량을 사용합니다.</small></span></div>
-      <div className="sig-eulji-rule"><strong>T = N(장당 원가) × R(실제 입고 수량)</strong><span>부가세 제외 금액입니다. O는 1, Q는 P와 같으며, S는 원단 YDS · 제품/라벨 EA로 작성합니다. U 부가세와 V 합계는 원본 수식을 유지합니다.</span></div>
-      {workspace.settlementTermsAvailable !== true && <div className="error-message" role="alert">추가 단가 데이터베이스 설정이 필요합니다. 관리자가 004_settlement_terms.sql을 적용한 뒤 다시 열어 주세요.</div>}
-      {!!sig.errors.length && <div className="settlement-template-problems" role="alert"><strong>다운로드 전에 아래 정보를 입력해 주세요.</strong><p>스타일 상세 → 을지·단가에서 프로젝트 코드·장당 원가·품목 구분을 저장하세요. 실제 입고일과 입고 수량은 메인 생산의 관리자 입력값을 사용합니다.</p><ul>{sig.errors.slice(0, 30).map((problem, index) => <li key={index}>{problem}</li>)}</ul>{sig.errors.length > 30 && <p>외 {sig.errors.length - 30}건 · 필터로 대상 범위를 좁혀 확인할 수 있습니다.</p>}</div>}
-      {!!sig.rows.length && <section className="settlement-template-preview"><h3>을지 입력 미리보기 <small>처음 {Math.min(5, sig.rows.length)}행 / 준비된 {sig.rows.length}행</small></h3><div><table><thead><tr><th>Excel 행</th>{sigColumns.map(column => <th key={column.letter}>{column.letter} · {column.label}</th>)}</tr></thead><tbody>{sig.rows.slice(0, 5).map((row, index) => <tr key={index}><td>{index + 3}</td>{sigColumns.map(column => { const value = column.value(row); return <td key={column.letter}>{typeof value === 'number' ? value.toLocaleString('ko-KR', { maximumFractionDigits: 3 }) : value}</td> })}</tr>)}</tbody></table></div></section>}
-      <p className="settlement-template-help">현재 필터에 포함된 행 중 필수 정보가 누락된 행이 있으면 전체 다운로드를 막습니다. 미입력 원가를 0원으로 처리하지 않습니다. 입고·원가 변경 후 파일을 다시 내려받아 주세요.</p>
-      <div className="modal-footer"><button type="button" className="button" disabled={busy} onClick={onClose}>닫기</button><button type="button" className="button button-primary" onClick={() => void downloadSig()} disabled={busy || workspace.settlementTermsAvailable !== true || profile.role === 'factory' || !!sig.errors.length || !sig.rows.length}><Download size={15}/>{busy ? '처리 중…' : '을지 다운로드'}</button></div>
+      <div className="settlement-export-modes" role="tablist" aria-label="을지 작성 항목">{sigKinds.map(item => <button key={item.value} type="button" role="tab" aria-selected={sigKind === item.value} disabled={busy} onClick={() => { setSigKind(item.value); setError(''); setSuccess('') }}>{item.label}</button>)}</div>
+      <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>현재 검색·필터 결과 <strong>{rows.length}개 컬러 행</strong><small>{sigKind === 'product' ? '프로젝트·품번·컬러별 현재 오더와 실제 입고 수량을 사용합니다.' : `${sigKindLabel}에 저장된 작업 내역 ${sig.rows.length}행을 작성합니다.`}</small></span></div>
+      {sigKind === 'product' ? <div className="sig-eulji-rule"><strong>T = N(장당 원가) × R(실제 입고 수량)</strong><span>부가세 제외 금액입니다. O는 1, Q는 P와 같으며, S는 원단 YDS · 제품/라벨 EA로 작성합니다. U 부가세와 V 합계는 원본 수식을 유지합니다.</span></div> : <div className="sig-eulji-rule"><strong>{sigKind === 'label' ? '업체명: 주식회사 중화라벨' : sigKind === 'embroidery' ? '업체명: BY컴퓨터자수' : '품질검사 업체명은 빈칸으로 다운로드합니다.'}</strong><span>담당자가 Excel에서 단가와 비어 있는 날짜·수량을 입력하면 금액·부가세·합계가 계산됩니다. {sigKind === 'label' || sigKind === 'embroidery' ? '스타일 공통 작업은 컬러별로 중복 작성하지 않습니다.' : '업체명은 담당자가 직접 작성해 주세요.'}</span></div>}
+      {sigKind === 'product' && workspace.settlementTermsAvailable !== true && <div className="error-message" role="alert">추가 단가 데이터베이스 설정이 필요합니다. 관리자가 004_settlement_terms.sql을 적용한 뒤 다시 열어 주세요.</div>}
+      {!!sig.errors.length && <div className="settlement-template-problems" role="alert"><strong>다운로드 전에 아래 정보를 확인해 주세요.</strong><p>{sigKind === 'product' ? '스타일 상세 → 을지·단가에서 프로젝트 코드·장당 원가·품목 구분을 저장하세요. 실제 입고일과 입고 수량은 메인 생산의 관리자 입력값을 사용합니다.' : '스타일 상세 → 가공·품질 관리에서 해당 작업을 등록·저장한 뒤 다시 내려받아 주세요.'}</p><ul>{sig.errors.slice(0, 30).map((problem, index) => <li key={index}>{problem}</li>)}</ul>{sig.errors.length > 30 && <p>외 {sig.errors.length - 30}건 · 필터로 대상 범위를 좁혀 확인할 수 있습니다.</p>}</div>}
+      {!!sig.rows.length && <section className="settlement-template-preview"><h3>을지 입력 미리보기 <small>처음 {Math.min(5, sig.rows.length)}행 / 준비된 {sig.rows.length}행</small></h3><div><table><thead><tr><th>Excel 행</th>{sigColumns.map(column => <th key={column.letter}>{column.letter} · {column.label}</th>)}</tr></thead><tbody>{sig.rows.slice(0, 5).map((row, index) => <tr key={index}><td>{index + 3}</td>{sigColumns.map(column => { const value = column.value(row); return <td key={column.letter}>{value === null || value === undefined || value === '' ? '—' : typeof value === 'number' ? value.toLocaleString('ko-KR', { maximumFractionDigits: 3 }) : value}</td> })}</tr>)}</tbody></table></div></section>}
+      <p className="settlement-template-help">{sigKind === 'product' ? '현재 필터에 포함된 행 중 필수 정보가 누락된 행이 있으면 전체 다운로드를 막습니다. 미입력 원가를 0원으로 처리하지 않습니다. 입고·원가 변경 후 파일을 다시 내려받아 주세요.' : '가공·검사 단가는 메인 제품 원가를 재사용하지 않습니다. 빈칸은 0원이 아니며 담당자가 Excel에서 작성할 항목입니다.'}</p>
+      <div className="modal-footer"><button type="button" className="button" disabled={busy} onClick={onClose}>닫기</button><button type="button" className="button button-primary" onClick={() => void downloadSig()} disabled={busy || !sigReady || !!sig.errors.length || !sig.rows.length}><Download size={15}/>{busy ? '처리 중…' : '을지 다운로드'}</button></div>
     </div>
     <div hidden={mode !== 'generic'} role="tabpanel" aria-label="다른 마감 양식 연결">
     <p className="settlement-template-intro">다른 <strong>.xlsx 마감 원본 양식</strong>을 사용할 때 각 열에 넣을 항목을 직접 연결하세요. 기본 SIG 을지는 위 자동 작성에서 다운로드할 수 있습니다.</p>
