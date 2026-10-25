@@ -3,6 +3,7 @@ import { CalendarDays, Check, Eye, History, LockKeyhole, Save, ShieldCheck, Tras
 import type { Profile, Workspace } from '../lib/types'
 import type { CalendarEvent, CalendarEventKind } from '../lib/operations-types'
 import { localDate, message } from '../lib/utils'
+import { LEAVE_LABELS, validateLeave, type LeaveType } from '../lib/workflow-refinements'
 import './calendar-events.css'
 
 export const CALENDAR_KIND_LABEL: Record<CalendarEventKind, string> = { personal_leave: '개인 휴가', launch: '제품 런칭', factory_holiday: '협력업체 휴가' }
@@ -10,7 +11,7 @@ export function canViewCalendarEvent(event: CalendarEvent, profile: Profile): bo
   if (!profile.approved || !profile.active || event.deletedAt) return false
   if (event.kind === 'factory_holiday') return profile.role !== 'factory'
   if (event.kind === 'launch') return true
-  return event.ownerId === profile.id || event.visibility === 'hq' && profile.role !== 'factory'
+  return event.visibility === 'private' && event.ownerId === profile.id || event.visibility === 'hq' && profile.role !== 'factory'
 }
 export function canEditCalendarEvent(event: CalendarEvent, profile: Profile): boolean {
   if (!canViewCalendarEvent(event, profile)) return false
@@ -19,11 +20,18 @@ export function canEditCalendarEvent(event: CalendarEvent, profile: Profile): bo
 }
 type CalendarWorkspace = Workspace
 interface Props { event: CalendarEvent | null; initialDate: string; workspace: CalendarWorkspace; profile: Profile; onClose: () => void; onSave: (event: CalendarEvent, reason: string) => Promise<void>; onDelete: (event: CalendarEvent, reason: string) => Promise<void> }
-const createEvent = (profile: Profile, date: string): CalendarEvent => ({ id: crypto.randomUUID(), kind: 'personal_leave', title: '', startDate: date, endDate: date, ownerId: profile.id, factoryId: null, visibility: 'private', note: '', deletedAt: null, version: 0, createdAt: '', updatedAt: '', updatedBy: profile.id })
+const createEvent = (profile: Profile, date: string, refinements: boolean): CalendarEvent => ({ ...(refinements ? { leaveType: 'full' as const, startTime: '', endTime: '' } : {}), id: crypto.randomUUID(), kind: 'personal_leave', title: '', startDate: date, endDate: date, ownerId: profile.id, factoryId: null, visibility: 'private', note: '', deletedAt: null, version: 0, createdAt: '', updatedAt: '', updatedBy: profile.id })
+const twoHoursAfter = (value: string): string => {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return ''
+  const end = Number(value.slice(0, 2)) * 60 + Number(value.slice(3)) + 120
+  return end < 1440 ? `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}` : ''
+}
 const formatTime = (date: string) => date ? new Date(date).toLocaleString('ko-KR') : '아직 저장 전'
 
 export default function CalendarEventEditor({ event, initialDate, workspace, profile, onClose, onSave, onDelete }: Props) {
-  const [draft, setDraft] = useState(() => event ? structuredClone(event) : createEvent(profile, initialDate || localDate()))
+  const refinementsAvailable = workspace.refinementsAvailable === true
+  const normalize = (value: CalendarEvent): CalendarEvent => refinementsAvailable ? { ...structuredClone(value), leaveType: value.leaveType || 'full', startTime: value.startTime || '', endTime: value.endTime || '' } : structuredClone(value)
+  const [draft, setDraft] = useState(() => event ? normalize(event) : createEvent(profile, initialDate || localDate(), refinementsAvailable))
   const originalDraft = useRef(draft)
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
@@ -47,7 +55,9 @@ export default function CalendarEventEditor({ event, initialDate, workspace, pro
     document.addEventListener('keydown', handle)
     return () => document.removeEventListener('keydown', handle)
   }, [busy, canEdit, dirty, discardConfirm, deleteConfirm, onClose])
-  const updateKind = (kind: CalendarEventKind) => setDraft(current => ({ ...current, kind, factoryId: kind === 'factory_holiday' ? current.factoryId : null, visibility: kind === 'launch' ? 'all' : kind === 'factory_holiday' ? 'hq' : 'private' }))
+  const updateKind = (kind: CalendarEventKind) => setDraft(current => ({ ...current, ...(refinementsAvailable ? { leaveType: 'full' as const, startTime: '', endTime: '' } : {}), kind, factoryId: kind === 'factory_holiday' ? current.factoryId : null, visibility: kind === 'launch' ? 'all' : kind === 'factory_holiday' ? 'hq' : 'private' }))
+  const updateLeave = (leaveType: LeaveType) => setDraft(current => ({ ...current, leaveType, endDate: leaveType === 'full' ? current.endDate : current.startDate, startTime: leaveType === 'two_hours' ? current.startTime || '' : '', endTime: leaveType === 'two_hours' ? twoHoursAfter(current.startTime || '') : '' }))
+  const partialLeave = draft.kind === 'personal_leave' && !!draft.leaveType && draft.leaveType !== 'full'
   const submit = async (remove = false) => {
     setError('')
     if (!canEdit || deleted) { setError('이 일정을 변경할 권한이 없습니다.'); return }
@@ -56,6 +66,7 @@ export default function CalendarEventEditor({ event, initialDate, workspace, pro
     if (!remove && (!draft.title.trim() || !draft.startDate || !draft.endDate)) { setError('일정명과 시작일·종료일을 입력해 주세요.'); return }
     if (draft.startDate > draft.endDate) { setError('종료일은 시작일 이후로 선택해 주세요.'); return }
     if (draft.kind === 'factory_holiday' && !draft.factoryId) { setError('휴가에 해당하는 협력 공장을 선택해 주세요.'); return }
+    if (!remove) { try { validateLeave(draft) } catch (error) { setError(message(error)); return } }
     setBusy(true)
     try {
       if (remove) await onDelete(draft, reason.trim())
@@ -70,12 +81,14 @@ export default function CalendarEventEditor({ event, initialDate, workspace, pro
     <form onSubmit={event => { event.preventDefault(); void submit() }}>
       <div className="calendar-editor-body">
         {deleted && <div className="error-message" role="alert">이 일정은 다른 사용자가 삭제했습니다. 과거 편집 내용은 저장할 수 없습니다.</div>}
-        {stale && !deleted && <div className="calendar-version-warning" role="status"><strong>다른 사용자가 이 일정을 변경했습니다.</strong><p>내 편집 내용을 복사해 둔 뒤 최신 일정을 불러와 다시 반영하세요. 현재 초안은 자동으로 덮어쓰지 않습니다.</p><button type="button" className="button button-ghost" disabled={busy} onClick={() => { if (event) { originalDraft.current = structuredClone(event); setDraft(structuredClone(event)); setError(''); setReason('') } }}>내 편집을 버리고 최신 일정 불러오기</button></div>}
+        {stale && !deleted && <div className="calendar-version-warning" role="status"><strong>다른 사용자가 이 일정을 변경했습니다.</strong><p>내 편집 내용을 복사해 둔 뒤 최신 일정을 불러와 다시 반영하세요. 현재 초안은 자동으로 덮어쓰지 않습니다.</p><button type="button" className="button button-ghost" disabled={busy} onClick={() => { if (event) { const latest = normalize(event); originalDraft.current = latest; setDraft(latest); setError(''); setReason('') } }}>내 편집을 버리고 최신 일정 불러오기</button></div>}
         <div className="calendar-event-type-bar"><span className={`calendar-kind-badge kind-${draft.kind}`}>{CALENDAR_KIND_LABEL[draft.kind]}</span><span className="calendar-privacy"><LockKeyhole size={12}/>{visibilityLabel}</span></div>
         <fieldset disabled={!canEdit || busy || deleted} className="calendar-editor-fields">
           <label className="field"><span className="field-label">일정 유형</span><select className="select" aria-label="일정 유형" value={draft.kind} disabled={!isNew || busy || !canEdit} onChange={event => updateKind(event.target.value as CalendarEventKind)}><option value="personal_leave">개인 휴가</option>{profile.role !== 'factory' && <><option value="launch">제품 런칭</option><option value="factory_holiday">협력업체 휴가</option></>}</select>{!isNew && <small className="muted">유형과 일정 소유자는 등록 후 변경할 수 없습니다.</small>}</label>
           <label className="field"><span className="field-label">일정명</span><input ref={titleRef} className="input" aria-label="일정명" required maxLength={160} placeholder={draft.kind === 'personal_leave' ? '예: 연차 휴가' : draft.kind === 'launch' ? '예: 27SS 컬렉션 런칭' : '예: 설 연휴 공장 휴무'} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })}/></label>
-          <div className="calendar-date-fields"><label className="field"><span className="field-label">시작일</span><input className="input" type="date" aria-label="일정 시작일" required value={draft.startDate} onChange={event => setDraft({ ...draft, startDate: event.target.value, endDate: !draft.endDate || draft.endDate < event.target.value ? event.target.value : draft.endDate })}/></label><label className="field"><span className="field-label">종료일 (당일 포함)</span><input className="input" type="date" aria-label="일정 종료일" required min={draft.startDate} value={draft.endDate} onChange={event => setDraft({ ...draft, endDate: event.target.value })}/></label></div>
+          {draft.kind === 'personal_leave' && <div className="calendar-leave-section"><label className="field"><span className="field-label">휴가 구분</span><select className="select" aria-label="휴가 구분" value={draft.leaveType || 'full'} disabled={!refinementsAvailable || !canEdit || busy || deleted} onChange={event => updateLeave(event.target.value as LeaveType)}>{Object.entries(LEAVE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{!refinementsAvailable && <p className="calendar-leave-help">반차·반반차는 관리자가 005 추가 SQL을 적용한 뒤 사용할 수 있습니다. 종일 휴가는 기존대로 등록할 수 있습니다.</p>}{partialLeave && <p className="calendar-leave-help">반차·반반차는 시작일 하루에 등록합니다.{draft.leaveType !== 'two_hours' && ' 회사의 오전·오후 구분으로 기록하며 고정 근무시간을 임의로 지정하지 않습니다.'}</p>}</div>}
+          <div className="calendar-date-fields"><label className="field"><span className="field-label">시작일</span><input className="input" type="date" aria-label="일정 시작일" required value={draft.startDate} onChange={event => setDraft({ ...draft, startDate: event.target.value, endDate: partialLeave || !draft.endDate || draft.endDate < event.target.value ? event.target.value : draft.endDate })}/></label><label className="field"><span className="field-label">종료일 (당일 포함)</span><input className="input" type="date" aria-label="일정 종료일" required min={draft.startDate} value={draft.endDate} disabled={partialLeave} onChange={event => setDraft({ ...draft, endDate: event.target.value })}/></label></div>
+          {draft.kind === 'personal_leave' && draft.leaveType === 'two_hours' && <div className="calendar-leave-section"><div className="calendar-date-fields"><label className="field"><span className="field-label">반반차 시작 시간</span><input className="input" type="time" aria-label="반반차 시작 시간" required max="21:59" step="60" value={draft.startTime || ''} onChange={event => setDraft({ ...draft, startTime: event.target.value, endTime: twoHoursAfter(event.target.value) })}/></label><label className="field"><span className="field-label">반반차 종료 시간 · 2시간 후</span><input className="input" type="time" aria-label="반반차 종료 시간" value={draft.endTime || ''} readOnly /></label></div><p className="calendar-leave-help">시작 시간을 선택하면 종료 시간이 정확히 2시간 뒤로 계산됩니다. 자정을 넘기는 일정은 등록할 수 없습니다.</p></div>}
           {draft.kind === 'factory_holiday' && <label className="field"><span className="field-label">협력 공장</span><select className="select" aria-label="휴가 공장" required value={draft.factoryId || ''} onChange={event => setDraft({ ...draft, factoryId: event.target.value || null })}><option value="">공장 선택</option>{workspace.factories.map(factory => <option key={factory.id} value={factory.id}>{factory.name}</option>)}</select></label>}
           {draft.kind === 'personal_leave' && profile.role !== 'factory' && <label className="field"><span className="field-label">공개 범위</span><select className="select" aria-label="휴가 공개 범위" value={draft.visibility} onChange={event => setDraft({ ...draft, visibility: event.target.value as CalendarEvent['visibility'] })}><option value="private">나만 보기</option><option value="hq">본사 구성원과 공유</option></select></label>}
           <label className="field"><span className="field-label">메모</span><textarea className="textarea" aria-label="일정 메모" rows={3} maxLength={5000} placeholder="일정에 필요한 내용을 기록하세요." value={draft.note} onChange={event => setDraft({ ...draft, note: event.target.value })}/></label>

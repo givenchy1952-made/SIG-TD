@@ -11,6 +11,7 @@ import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '..
 import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
 import { exportWorkspace } from '../lib/export'
 import type { OrderImportChange } from '../lib/operations-types'
+import type { RegistrationProject } from '../lib/order-registration'
 import './dashboard.css'
 const OrderImport = lazy(() => import('../components/OrderImport'))
 const SettlementTemplateExport = lazy(() => import('../components/SettlementTemplateExport'))
@@ -19,7 +20,7 @@ type View = 'overview' | 'samples' | 'production' | 'settlement'
 type QuickFilter = 'all' | 'delayed' | 'upcoming' | 'approved' | 'samples' | 'unpaid'
 type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code'
 type DateField = 'dueDate' | 'samplePlanned' | 'sampleReceived' | 'sampleShipped' | 'productionShipped' | 'productionReceived' | 'confirmDue' | 'paymentDue'
-interface Props { workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
+interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<void>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
 interface Row { style: Style; line?: ProductionLine }
 const formatter = new Intl.NumberFormat('ko-KR')
 const number = (value: number) => formatter.format(value)
@@ -48,7 +49,7 @@ function datesFor(style: Style, field: DateField): string[] {
   }
 }
 
-export default function Dashboard({ workspace, profile, view, onOpenStyle, onCreate, query, onQueryChange, onImport }: Props) {
+export default function Dashboard({ workspace, profile, view, onOpenStyle, onCreate, query, onQueryChange, onImport, onRegisterStyle }: Props) {
   const [orderImportOpen, setOrderImportOpen] = useState(false)
   const [templateOpen, setTemplateOpen] = useState(false)
   const [imagePreview, setImagePreview] = useState<{ attachment: Attachment; styleId: string; alt: string } | null>(null)
@@ -82,7 +83,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const weekEnd = localDate(weekEndDate)
   const visibleStyles = workspace.styles.filter(s => !s.deletedAt)
   const factoryName = (id: string) => workspace.factories.find(f => f.id === id)?.name || '미배정'
-  const projectName = (id: string) => workspace.projects.find(p => p.id === id)?.name || '미배정'
+  const projectName = (id: string) => { const item = workspace.projects.find(p => p.id === id); return item ? [item.code, item.name].filter(Boolean).join(' · ') : '미배정' }
   const ownerName = (id: string) => workspace.profiles.find(p => p.id === id)?.name || '담당자'
   const upcoming = (style: Style) => !complete(style) && ([style.dueDate, ...style.samples.filter(s => s.status !== 'done' && s.status !== 'approved').map(s => s.plannedAt), ...style.production.map(p => p.confirmDue)]).some(date => !!date && date >= today && date <= weekEnd)
   const totalOrders = visibleStyles.reduce((sum, s) => sum + s.production.reduce((n, p) => n + quantityTotal(p.order), 0), 0)
@@ -158,13 +159,13 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     return <button type="button" className={`garment-icon ${attachment ? 'garment-photo cutout-background' : ''}`} aria-label={attachment ? `${alt} 크게 보기` : `${style.code} 대표 이미지 등록`} title={attachment ? '대표 이미지 크게 보기' : '스타일 상세에서 대표 이미지 등록'} onClick={event => { event.stopPropagation(); if (attachment) setImagePreview({ attachment, styleId: style.id, alt }); else onOpenStyle(style.id) }}>{attachment ? <PrivateImage attachment={attachment} scope={imageScope} alt={alt}/> : <Shirt size={21} strokeWidth={1.15}/>}</button>
   }
   return <div className="dashboard-page">
-    {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} /></Suspense>}
+    {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} onRegisterStyle={onRegisterStyle} /></Suspense>}
     {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={exportStyles} onClose={() => setTemplateOpen(false)} /></Suspense>}
     {imagePreview && <Modal title={imagePreview.alt} wide onClose={() => setImagePreview(null)}><div className="modal-body"><div className="style-image-zoom cutout-background"><PrivateImage attachment={imagePreview.attachment} scope={imageScope} alt={imagePreview.alt}/></div><div className="modal-footer"><button className="button" onClick={() => { onOpenStyle(imagePreview.styleId); setImagePreview(null) }}>{profile.role === 'factory' ? '스타일 상세' : '이미지 관리'}</button><button className="button button-primary" onClick={() => setImagePreview(null)}>닫기</button></div></div></Modal>}
 
     <div className="dashboard-page-heading">
       <div><div className="page-eyebrow">{eyebrow}</div><h1>{title}<span className="heading-period">.</span></h1><p>{subtitle}</p></div>
-      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{view === 'settlement' && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
+      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{profile.role !== 'factory' && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
     </div>
 
     <div className="dashboard-kpis">
@@ -198,7 +199,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     {view === 'overview' && projectSummary.length > 0 && <div className="project-overview">
       <div className="section-caption"><span>PROJECT AT A GLANCE</span><span>프로젝트별 입고 현황</span></div>
       <div className="project-cards">{projectSummary.slice(0, 4).map(p => <button className={`project-card ${project === p.id ? 'selected' : ''}`} key={p.id} onClick={() => changeFilter(setProject, project === p.id ? '' : p.id)}>
-        <div className="project-card-top"><span>{p.season}</span><ArrowUpRight size={15}/></div><h3>{p.name}</h3><div className="project-card-numbers"><span>{p.count} 스타일</span><strong>{number(p.received)}<small> / {number(p.order)} pcs</small></strong></div><div className="project-progress"><i style={{ width: `${p.order ? Math.min(100, p.received / p.order * 100) : 0}%` }}/></div>
+        <div className="project-card-top"><span>{p.code ? `${p.code} · ${p.season}` : p.season}</span><ArrowUpRight size={15}/></div><h3>{p.name}</h3><div className="project-card-numbers"><span>{p.count} 스타일</span><strong>{number(p.received)}<small> / {number(p.order)} pcs</small></strong></div><div className="project-progress"><i style={{ width: `${p.order ? Math.min(100, p.received / p.order * 100) : 0}%` }}/></div>
       </button>)}</div>
     </div>}
 
@@ -212,7 +213,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       <div className="dashboard-filter-bar">
         <label className="dashboard-search"><Search size={16}/><input aria-label="스타일 검색" placeholder="스타일, 제품명, 요청사항 검색" value={query} onChange={e => { onQueryChange(e.target.value); resetPage() }}/>{query && <button onClick={() => { onQueryChange(''); resetPage() }} aria-label="검색 초기화"><X size={13}/></button>}</label>
         <select className="select" aria-label="시즌 필터" value={season} onChange={e => changeFilter(setSeason, e.target.value)}><option value="">전체 시즌</option>{seasons.map(s => <option key={s}>{s}</option>)}</select>
-        <select className="select project-select" aria-label="프로젝트 필터" value={project} onChange={e => changeFilter(setProject, e.target.value)}><option value="">전체 프로젝트</option>{workspace.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select className="select project-select" aria-label="프로젝트 필터" value={project} onChange={e => changeFilter(setProject, e.target.value)}><option value="">전체 프로젝트</option>{workspace.projects.map(p => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>)}</select>
         <select className="select" aria-label="공장 필터" value={factory} onChange={e => changeFilter(setFactory, e.target.value)}><option value="">전체 공장</option>{workspace.factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select>
         <button className={`button button-ghost button-small filter-toggle ${expanded ? 'active' : ''}`} onClick={() => setExpanded(!expanded)} aria-expanded={expanded}><SlidersHorizontal size={14}/>상세 필터{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
       </div>

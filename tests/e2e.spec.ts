@@ -232,10 +232,13 @@ test('월간·주간 캘린더와 가입 승인·공장·프로젝트 설정을 
   await page.getByRole('button', { name: '프로젝트 관리', exact: true }).click()
   await page.getByRole('button', { name: '프로젝트 추가', exact: true }).click()
   const project = page.getByRole('dialog', { name: '프로젝트 정보' })
-  await project.getByLabel('프로젝트명 / 코드', { exact: true }).fill('E2E-2027-SPRING')
+  await project.getByLabel('프로젝트 코드', { exact: true }).fill('E2E-2027-SPRING')
+  await project.getByLabel('프로젝트 명칭', { exact: true }).fill('E2E 봄 프로젝트')
   await project.getByLabel('시즌 (년도)', { exact: true }).fill('2027SS')
   await project.getByRole('button', { name: '변경 저장', exact: true }).click()
   await expect(page.locator('.admin-cards')).toContainText('E2E-2027-SPRING')
+  await expect(page.locator('.admin-cards')).toContainText('E2E 봄 프로젝트')
+  expect((await stored(page)).projects.find((item: { code?: string }) => item.code === 'E2E-2027-SPRING')).toMatchObject({ name: 'E2E 봄 프로젝트', season: '2027SS' })
 })
 
 test('모바일 화면에서 메뉴·검색·상세가 접근 가능하고 페이지가 가로로 넘치지 않는다', async ({ page }, testInfo) => {

@@ -26,7 +26,7 @@ export default function SettlementTermsPanel({ style, workspace, profile, onSave
   const record = workspace.settlementTerms?.find(item => item.styleId === style.id && item.lineId === line?.id)
   const source = workspace.operations?.orderSourceRecords.find(item => item.styleId === style.id && item.lineId === line?.id)
   const sourceCodes = [...new Set((source?.rows || []).map(row => row.columns.A == null ? '' : String(row.columns.A).trim()).filter(Boolean))]
-  const sourceCode = sourceCodes.length === 1 ? sourceCodes[0] : ''
+  const sourceCode = workspace.projects.find(project => project.id === style.projectId)?.code?.trim() || (sourceCodes.length === 1 ? sourceCodes[0] : '')
   const projectCode = draft?.projectCode ?? (record?.projectCode || sourceCode)
   const cost = draft ? draft.unitCost.trim() === '' ? null : Number(draft.unitCost) : record?.unitCost ?? null
   const itemType = draft?.itemType ?? record?.itemType ?? 'product'

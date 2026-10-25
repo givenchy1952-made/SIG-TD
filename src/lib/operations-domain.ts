@@ -2,6 +2,7 @@ import { SIZES, emptyQuantities, quantityTotal, type Profile, type Quantities, t
 import { assertActive, assertStyleSave, canViewStyle } from './permissions'
 import type { CalendarEvent, CalendarEventInput, OperationRow, OperationsWorkspace, OrderImportChange, OrderSourceData, OrderSourceRecord, PoDispatchInput, ShipmentBatchInput, StyleOperationInput, StyleOperationKind } from './operations-types'
 import { EMPTY_OPERATIONS, ORDER_SOURCE_COLUMNS } from './operations-types'
+import { validateLeave } from './workflow-refinements'
 
 export function freshOperations(value?: Partial<OperationsWorkspace>): OperationsWorkspace {
   return Object.fromEntries(Object.keys(EMPTY_OPERATIONS).map(key => [key, [...(value?.[key as keyof OperationsWorkspace] || [])]])) as unknown as OperationsWorkspace
@@ -126,6 +127,7 @@ export function saveOperationInWorkspace(workspace: Workspace, profile: Profile,
 export function saveCalendarInWorkspace(workspace: Workspace, profile: Profile, id: string, data: CalendarEventInput, expected: number, reason: string): Workspace {
   const actor = actorFor(workspace, profile), next = start(workspace, reason), ops = next.operations!
   const before = ops.calendarEvents.find(item => item.id === id); checkVersion(before, expected)
+  validateLeave({ ...before, ...data })
   if (before && (before.kind !== data.kind || before.ownerId !== data.ownerId || !canReadCalendarEvent(before, actor))) throw new Error('일정 종류·작성자는 변경할 수 없습니다.')
   if (!before && data.ownerId !== actor.id) throw new Error('일정 작성자는 로그인한 사용자여야 합니다.')
   if (!['personal_leave', 'launch', 'factory_holiday'].includes(data.kind)) throw new Error('일정 종류를 선택해 주세요.')
@@ -136,7 +138,7 @@ export function saveCalendarInWorkspace(workspace: Workspace, profile: Profile, 
   validateOperationDate(data.startDate, true); validateOperationDate(data.endDate, true)
   if (data.startDate > data.endDate || !data.title.trim() || data.title.length > 200 || data.note.length > 10000) throw new Error('일정 제목·기간·메모를 확인해 주세요.')
   if (data.kind === 'factory_holiday' && !data.factoryId || data.factoryId && !next.factories.some(factory => factory.id === data.factoryId)) throw new Error('협력업체 휴가의 공장을 선택해 주세요.')
-  const after: CalendarEvent = { id, kind: data.kind, visibility: data.visibility, title: data.title.trim(), startDate: data.startDate, endDate: data.endDate, ownerId: data.ownerId, factoryId: data.factoryId, note: data.note, deletedAt: data.deleted ? before?.deletedAt || new Date().toISOString() : null, ...stamp(before, actor) }
+  const after: CalendarEvent = { ...(data.leaveType !== undefined ? { leaveType: data.leaveType, startTime: data.startTime || '', endTime: data.endTime || '' } : before?.leaveType !== undefined ? { leaveType: before.leaveType, startTime: before.startTime || '', endTime: before.endTime || '' } : {}), id, kind: data.kind, visibility: data.visibility, title: data.title.trim(), startDate: data.startDate, endDate: data.endDate, ownerId: data.ownerId, factoryId: data.factoryId, note: data.note, deletedAt: data.deleted ? before?.deletedAt || new Date().toISOString() : null, ...stamp(before, actor) }
   ops.calendarEvents = replace(ops.calendarEvents, after, item => item.id === id)
   ops.calendarEventAudits.unshift({ id: crypto.randomUUID(), eventId: id, actorId: actor.id, actorName: actor.name, action: data.deleted ? '일정 삭제' : before ? '일정 수정' : '일정 등록', reason: reason.trim(), before: before || null, after, createdAt: after.updatedAt }); return next
 }

@@ -39,7 +39,7 @@ export async function saveStyleOperation(id: string, styleId: string, kind: Styl
   await locked(() => persist(saveOperationInWorkspace(getDemoWorkspace(), profile, id, styleId, kind, data, expectedVersion, reason)))
 }
 export async function saveCalendarEvent(event: CalendarEvent, reason: string, profile: Profile): Promise<void> {
-  const data: CalendarEventInput = { kind: event.kind, visibility: event.visibility, title: event.title, startDate: event.startDate, endDate: event.endDate, ownerId: event.ownerId, factoryId: event.factoryId, note: event.note, deleted: !!event.deletedAt }
+  const data: CalendarEventInput = { ...(event.leaveType !== undefined ? { leaveType: event.leaveType, startTime: event.startTime || '', endTime: event.endTime || '' } : {}), kind: event.kind, visibility: event.visibility, title: event.title, startDate: event.startDate, endDate: event.endDate, ownerId: event.ownerId, factoryId: event.factoryId, note: event.note, deleted: !!event.deletedAt }
   if (supabase) { await rpc('save_calendar_event', { p_id: event.id, p_expected_version: event.version, p_data: data, p_reason: reason }); return }
   await locked(() => persist(saveCalendarInWorkspace(getDemoWorkspace(), profile, event.id, data, event.version, reason)))
 }

@@ -1,4 +1,5 @@
 import type { Quantities } from './types'
+import type { LeaveType } from './workflow-refinements'
 
 export interface OperationStamp { version: number; createdAt: string; updatedAt: string; updatedBy: string }
 export type PoDispatchStatus = 'draft' | 'sending' | 'sent' | 'failed' | 'unknown'
@@ -16,8 +17,8 @@ export interface OperationRow { id: string; catalogId: string; name: string; spe
 export interface StyleOperation extends OperationStamp { id: string; styleId: string; kind: StyleOperationKind; rows: OperationRow[]; note: string; voided: boolean }
 export interface StyleOperationInput { rows: OperationRow[]; note: string; voided: boolean }
 export type CalendarEventKind = 'personal_leave' | 'launch' | 'factory_holiday'
-export interface CalendarEvent extends OperationStamp { id: string; kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deletedAt: string | null }
-export interface CalendarEventInput { kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deleted: boolean }
+export interface CalendarEvent extends OperationStamp { leaveType?: LeaveType; startTime?: string; endTime?: string; id: string; kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deletedAt: string | null }
+export interface CalendarEventInput { leaveType?: LeaveType; startTime?: string; endTime?: string; kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deleted: boolean }
 export interface CalendarEventAudit { id: string; eventId: string; actorId: string; actorName: string; action: string; reason: string; before: unknown; after: unknown; createdAt: string }
 export interface EmployeeFactoryAssignment extends OperationStamp { employeeId: string; factoryIds: string[] }
 export const ORDER_SOURCE_COLUMNS = ['A', 'F', 'L', 'M', 'S', 'V', 'W', 'X', 'Y', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AV', 'AY'] as const

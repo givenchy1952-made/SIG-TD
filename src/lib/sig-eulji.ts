@@ -55,7 +55,7 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
       selectedLineIds.add(selection.id)
       const label = `${style.code}${line.color}`
       const terms = workspace.settlementTerms?.find(item => item.styleId === style.id && item.lineId === line.id)
-      const code = terms?.projectCode?.trim() || sigEuljiSourceProjectCode(workspace, style.id, line.id)
+      const code = terms?.projectCode?.trim() || workspace.projects.find(project => project.id === style.projectId)?.code?.trim() || sigEuljiSourceProjectCode(workspace, style.id, line.id)
       const problems: string[] = []
       if (!projectCode(code)) problems.push('프로젝트 코드')
       if (terms?.unitCost === null || terms?.unitCost === undefined) problems.push('장당 원가')

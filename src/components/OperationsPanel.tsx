@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertCircle, ArrowDownToLine, Check, ChevronDown, FileText, History, Mail, Plus, Save, Scissors, Send, Tags, Truck, X } from 'lucide-react'
+import { AlertCircle, ArrowDownToLine, Check, ChevronDown, FileText, History, Mail, Plus, Save, Scissors, Send, Tags, Truck, ShieldCheck, X } from 'lucide-react'
 import type { Attachment, Profile, Quantities, Style, Workspace } from '../lib/types'
 import { emptyQuantities, quantityTotal, SIZES, STATUS_LABEL } from '../lib/types'
 import type { OperationRow, OperationsWorkspace, PoDispatch, PoDispatchInput, ShipmentBatchInput, StyleOperationInput, StyleOperationKind } from '../lib/operations-types'
@@ -18,6 +18,8 @@ export interface OperationsPanelProps {
   onSaveOperation: (id: string, styleId: string, kind: StyleOperationKind, data: StyleOperationInput, expectedVersion: number, reason: string) => Promise<void>
   onDownload: (attachment: Attachment) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
+  mode?: 'all' | 'po' | 'processing'
+  qualityContent?: ReactNode
 }
 const amount = (value: number) => value.toLocaleString('ko-KR')
 const dateTime = (value: string) => value ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
@@ -44,7 +46,8 @@ function downloadEml(data: PoDispatchInput) {
 }
 
 export default function OperationsPanel(props: OperationsPanelProps) {
-  const [tab, setTab] = useState<'po' | 'shipments' | 'label' | 'embroidery'>('po')
+  const mode = props.mode || 'all'
+  const [tab, setTab] = useState<'po' | 'shipments' | 'label' | 'embroidery' | 'quality'>(mode === 'processing' ? 'label' : 'po')
   const [dirtyPanels, setDirtyPanels] = useState({ po: false, shipments: false, label: false, embroidery: false })
   const reportPO = useCallback((dirty: boolean) => setDirtyPanels(current => current.po === dirty ? current : { ...current, po: dirty }), [])
   const reportShipments = useCallback((dirty: boolean) => setDirtyPanels(current => current.shipments === dirty ? current : { ...current, shipments: dirty }), [])
@@ -52,16 +55,18 @@ export default function OperationsPanel(props: OperationsPanelProps) {
   const reportEmbroidery = useCallback((dirty: boolean) => setDirtyPanels(current => current.embroidery === dirty ? current : { ...current, embroidery: dirty }), [])
   useEffect(() => { props.onDirtyChange?.(props.workspace.operationsAvailable !== false && Object.values(dirtyPanels).some(Boolean)) }, [dirtyPanels, props.onDirtyChange, props.workspace.operationsAvailable])
   const operations = props.workspace.operations || EMPTY_OPERATIONS
-  const tabs = [ ['po', 'PO 발송 이력', Mail, operations.poDispatches.filter(record => record.styleId === props.style.id).length], ['shipments', '부분 출고', Truck, operations.shipmentBatches.filter(record => record.styleId === props.style.id && !record.voided).length], ['label', '중화 라벨', Tags, operations.styleOperations.filter(record => record.styleId === props.style.id && record.kind === 'label').flatMap(record => record.rows).length], ['embroidery', '비와이 자수', Scissors, operations.styleOperations.filter(record => record.styleId === props.style.id && record.kind === 'embroidery').flatMap(record => record.rows).length] ] as const
+  const allTabs = [ ['po', 'PO 발송 이력', Mail, operations.poDispatches.filter(record => record.styleId === props.style.id).length], ['shipments', '부분 출고', Truck, operations.shipmentBatches.filter(record => record.styleId === props.style.id && !record.voided).length], ['label', '중화 라벨', Tags, operations.styleOperations.filter(record => record.styleId === props.style.id && record.kind === 'label').flatMap(record => record.rows).length], ['embroidery', '비와이 자수', Scissors, operations.styleOperations.filter(record => record.styleId === props.style.id && record.kind === 'embroidery').flatMap(record => record.rows).length], ['quality', '품질 검사', ShieldCheck, 0] ] as const
+  const tabs = allTabs.filter(([key]) => mode === 'all' ? key !== 'quality' || props.qualityContent : mode === 'processing' && ['label', 'embroidery', 'quality'].includes(key))
   const id = useId()
-  return <section className="operations-panel" aria-label="발주·출고·가공 관리">
-    <div className="ops-heading"><div><h2>발주부터 출고, 가공까지</h2><p>PO 발송 근거와 차수별 출고, 협력업체 작업 내역을 함께 관리합니다.</p></div><span className="pill"><History size={12} /> 수정 이력 보존</span></div>
-    <div className="ops-tabs" role="tablist" aria-label="스타일 추가 업무">{tabs.map(([key, label, Icon, count]) => <button type="button" role="tab" id={`${id}-${key}-tab`} aria-controls={`${id}-${key}-panel`} aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}><Icon size={14} />{label}<span>{count}</span></button>)}</div>
+  return <section className="operations-panel" aria-label={mode === 'po' ? 'PO 관리' : mode === 'processing' ? '가공·품질 관리' : '발주·출고·가공 관리'}>
+    <div className="ops-heading"><div><h2>{mode === 'po' ? 'PO 관리' : mode === 'processing' ? '가공·품질 관리' : '발주부터 출고, 가공까지'}</h2><p>{mode === 'po' ? '납기와 수신인을 확인하고 PO를 발송하며 이력을 보관합니다.' : mode === 'processing' ? '중화 라벨·비와이 자수 작업과 품질 검사를 함께 관리합니다.' : 'PO 발송 근거와 차수별 출고, 협력업체 작업 내역을 함께 관리합니다.'}</p></div><span className="pill"><History size={12} /> 수정 이력 보존</span></div>
+    {mode !== 'po' && <div className="ops-tabs" role="tablist" aria-label="스타일 추가 업무">{tabs.map(([key, label, Icon, count]) => <button type="button" role="tab" id={`${id}-${key}-tab`} aria-controls={`${id}-${key}-panel`} aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}><Icon size={14} />{label}<span>{count}</span></button>)}</div>}
     {props.workspace.operationsAvailable === false ? <div className="ops-unavailable"><AlertCircle size={21} /><div><strong>추가 업무 기능 설정이 필요합니다.</strong><p>{props.profile.role === 'factory' ? '관리자에게 기능 설정을 요청해 주세요.' : <>관리자가 데이터베이스에 <code>003_operations.sql</code> 마이그레이션을 적용한 뒤 다시 접속해 주세요.</>}</p></div></div> : <>
-      <div role="tabpanel" id={`${id}-po-panel`} aria-labelledby={`${id}-po-tab`} hidden={tab !== 'po'}><PoPanel {...props} onDirtyChange={reportPO} /></div>
-      <div role="tabpanel" id={`${id}-shipments-panel`} aria-labelledby={`${id}-shipments-tab`} hidden={tab !== 'shipments'}><ShipmentPanel {...props} onDirtyChange={reportShipments} /></div>
-      <div role="tabpanel" id={`${id}-label-panel`} aria-labelledby={`${id}-label-tab`} hidden={tab !== 'label'}><ProcessingPanel {...props} onDirtyChange={reportLabels} kind="label" /></div>
+      {mode !== 'processing' && <div role="tabpanel" id={`${id}-po-panel`} aria-label="PO 발송 이력" hidden={mode !== 'po' && tab !== 'po'}><PoPanel {...props} onDirtyChange={reportPO} /></div>}
+      {mode === 'all' && <div role="tabpanel" id={`${id}-shipments-panel`} aria-labelledby={`${id}-shipments-tab`} hidden={tab !== 'shipments'}><ShipmentPanel {...props} onDirtyChange={reportShipments} /></div>}
+      {mode !== 'po' && <><div role="tabpanel" id={`${id}-label-panel`} aria-labelledby={`${id}-label-tab`} hidden={tab !== 'label'}><ProcessingPanel {...props} onDirtyChange={reportLabels} kind="label" /></div>
       <div role="tabpanel" id={`${id}-embroidery-panel`} aria-labelledby={`${id}-embroidery-tab`} hidden={tab !== 'embroidery'}><ProcessingPanel {...props} onDirtyChange={reportEmbroidery} kind="embroidery" /></div>
+      {props.qualityContent && <div role="tabpanel" id={`${id}-quality-panel`} aria-labelledby={`${id}-quality-tab`} hidden={tab !== 'quality'}>{props.qualityContent}</div>}</>}
     </>}
   </section>
 }
@@ -113,9 +118,9 @@ function PoPanel({ style, workspace, profile, onSavePO, onSendPO, onDownload, on
   </div>
 }
 
-function ShipmentPanel({ style, workspace, profile, onSaveShipment, onDirtyChange }: OperationsPanelProps) {
+export function ShipmentPanel({ style, workspace, profile, onSaveShipment, onDirtyChange, fixedLineId, parentDirty = false }: OperationsPanelProps & { fixedLineId?: string; parentDirty?: boolean }) {
   const [lineId, setLineId] = useState(style.production[0]?.id || '')
-  const line = style.production.find(item => item.id === lineId) || style.production[0]
+  const line = style.production.find(item => item.id === (fixedLineId || lineId)) || (!fixedLineId ? style.production[0] : undefined)
   const records = (workspace.operations?.shipmentBatches || []).filter(record => record.styleId === style.id && record.lineId === line?.id).sort((a, b) => a.round - b.round)
   const ledger = workspace.operations?.shipmentLedgers.find(record => record.styleId === style.id && record.lineId === line?.id)
   const baseline = ledger?.baselineQuantities || line?.shipped || emptyQuantities()
@@ -130,6 +135,7 @@ function ShipmentPanel({ style, workspace, profile, onSaveShipment, onDirtyChang
   const stale = !!draft && (conflicted || draft.styleVersion !== style.version || draft.version > 0 && (workspace.operations?.shipmentBatches || []).find(record => record.id === draft.id)?.version !== draft.version)
   const current = draft?.data || selected
   function begin(existing = false) {
+    if (parentDirty) { setError('메인 생산의 변경 내용을 먼저 저장한 뒤 출고 차수를 입력해 주세요.'); return }
     if (!line) return
     const record = existing ? selected : undefined
     setDraft({ id: record?.id || crypto.randomUUID(), version: record?.version || 0, styleVersion: style.version, lineId: line.id, round: record?.round || Math.max(0, ...records.map(item => item.round)) + 1, data: record ? { shippedAt: record.shippedAt, quantities: clone(record.quantities), tracking: record.tracking, note: record.note, voided: record.voided } : { shippedAt: today(), quantities: emptyQuantities(), tracking: '', note: '', voided: false } }); setReason(''); setError(''); setSuccess(''); setConflicted(false)
@@ -137,15 +143,16 @@ function ShipmentPanel({ style, workspace, profile, onSaveShipment, onDirtyChang
   function update<K extends keyof ShipmentBatchInput>(key: K, value: ShipmentBatchInput[K]) { setDraft(item => item ? { ...item, data: { ...item.data, [key]: value } } : item); setSuccess('') }
   async function save() {
     if (!draft) return
+    if (parentDirty) { setError('메인 생산의 변경 내용을 먼저 저장한 뒤 출고 차수를 저장해 주세요.'); return }
     if (!draft.data.shippedAt) { setError('실제 출고일을 입력해 주세요.'); return }
     if (quantityTotal(draft.data.quantities) < 1 && !draft.data.voided) { setError('출고 수량을 하나 이상 입력해 주세요.'); return }
     if (reason.trim().length < 2) { setError('출고 변경 사유를 두 글자 이상 입력해 주세요.'); return }
     setBusy(true); setError('')
     try { await onSaveShipment(draft.id, style.id, draft.lineId, draft.data, draft.version, draft.styleVersion, reason.trim()); setSelectedId(draft.id); setDraft(null); setReason(''); setSuccess('출고 차수를 저장하고 누적 실 출고 수량을 반영했습니다.') } catch (err) { const text = message(err); setError(text); if (/conflict|version|다른 사용자가/i.test(text)) setConflicted(true) } finally { setBusy(false) }
   }
-  return <div className="ops-section"><div className="section-heading"><div><h3><Truck size={17} />차수별 부분 출고</h3><p className="muted">컬러별로 1차, 2차 등 실제 출고 내역을 누적합니다.</p></div><select className="select ops-line-select" aria-label="출고 컬러" value={line?.id || ''} disabled={!!draft || busy} onChange={event => { setLineId(event.target.value); setSelectedId(''); setSuccess(''); setError('') }}>{style.production.map(item => <option key={item.id} value={item.id}>{item.color} · {style.code}{item.color}</option>)}</select></div><ErrorNotice error={error} /><SuccessNotice text={success} />
-    {!line ? <div className="ops-empty">생산 컬러를 먼저 등록해 주세요.</div> : <><div className="ops-shipment-summary"><div><span>오더 수량</span><strong>{amount(quantityTotal(line.order))}<small>pcs</small></strong></div><div><span>이전 입력 수량</span><strong>{amount(quantityTotal(baseline))}<small>pcs</small></strong></div><div><span>차수별 출고 합계</span><strong>{amount(quantityTotal(batchesTotal))}<small>pcs</small></strong></div><div><span>누적 실 출고</span><strong>{amount(quantityTotal(addQuantities(baseline, batchesTotal)))}<small>pcs</small></strong></div></div><div className="ops-baseline-note"><History size={13} /><p>이전 입력 수량은 기존 화면에 입력되어 있던 수량입니다. 차수별 내역과 중복 합산하지 않도록 별도 기준으로 보관됩니다. {baselineDate ? `기존 기록 일자: ${baselineDate}` : '이전 출고일 미기재'}</p></div>
-      <div className="ops-quantity-scroll"><table className="data-table ops-ledger-table"><thead><tr><th>출고 구분</th>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr><th>이전 입력 수량</th>{SIZES.map(size => <td key={size}>{amount(baseline[size])}</td>)}<td>{amount(quantityTotal(baseline))}</td></tr>{records.map(record => <tr key={record.id} className={record.voided ? 'ops-voided-row' : ''}><th>{record.round}차 출고 {record.voided && <small>무효</small>}</th>{SIZES.map(size => <td key={size}>{amount(record.quantities[size])}</td>)}<td>{amount(quantityTotal(record.quantities))}</td></tr>)}<tr className="ops-ledger-total"><th>누적 실 출고</th>{SIZES.map(size => <td key={size}>{amount(baseline[size] + batchesTotal[size])}</td>)}<td>{amount(quantityTotal(addQuantities(baseline, batchesTotal)))}</td></tr></tbody></table></div>
+  return <div className="ops-section">{parentDirty && <p className="muted">메인 생산의 변경 내용을 먼저 저장하면 차수별 출고를 입력할 수 있습니다.</p>}<div className="section-heading"><div><h3><Truck size={17} />{fixedLineId ? '실 출고 차수' : '차수별 부분 출고'}</h3><p className="muted">컬러별로 1차, 2차 등 실제 출고 내역을 누적합니다.</p></div>{!fixedLineId ? <select className="select ops-line-select" aria-label="출고 컬러" value={line?.id || ''} disabled={!!draft || busy} onChange={event => { setLineId(event.target.value); setSelectedId(''); setSuccess(''); setError('') }}>{style.production.map(item => <option key={item.id} value={item.id}>{item.color} · {style.code}{item.color}</option>)}</select> : <span className="pill">{line?.color} · 실 출고 합산</span>}</div><ErrorNotice error={error} /><SuccessNotice text={success} />
+    {!line ? <div className="ops-empty">생산 컬러를 먼저 등록해 주세요.</div> : <>{!fixedLineId && <><div className="ops-shipment-summary"><div><span>오더 수량</span><strong>{amount(quantityTotal(line.order))}<small>pcs</small></strong></div><div><span>이전 입력 수량</span><strong>{amount(quantityTotal(baseline))}<small>pcs</small></strong></div><div><span>차수별 출고 합계</span><strong>{amount(quantityTotal(batchesTotal))}<small>pcs</small></strong></div><div><span>누적 실 출고</span><strong>{amount(quantityTotal(addQuantities(baseline, batchesTotal)))}<small>pcs</small></strong></div></div></>}<div className="ops-baseline-note"><History size={13} /><p>이전 입력 수량은 기존 화면에 입력되어 있던 수량입니다. 차수별 내역과 중복 합산하지 않도록 별도 기준으로 보관됩니다. {baselineDate ? `기존 기록 일자: ${baselineDate}` : '이전 출고일 미기재'}</p></div>
+      {!fixedLineId && <><div className="ops-quantity-scroll"><table className="data-table ops-ledger-table"><thead><tr><th>출고 구분</th>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr><th>이전 입력 수량</th>{SIZES.map(size => <td key={size}>{amount(baseline[size])}</td>)}<td>{amount(quantityTotal(baseline))}</td></tr>{records.map(record => <tr key={record.id} className={record.voided ? 'ops-voided-row' : ''}><th>{record.round}차 출고 {record.voided && <small>무효</small>}</th>{SIZES.map(size => <td key={size}>{amount(record.quantities[size])}</td>)}<td>{amount(quantityTotal(record.quantities))}</td></tr>)}<tr className="ops-ledger-total"><th>누적 실 출고</th>{SIZES.map(size => <td key={size}>{amount(baseline[size] + batchesTotal[size])}</td>)}<td>{amount(quantityTotal(addQuantities(baseline, batchesTotal)))}</td></tr></tbody></table></div></>}
       <div className="ops-round-toolbar"><div className="ops-round-tabs" aria-label="출고 차수">{records.map(record => <button type="button" key={record.id} disabled={!!draft} className={(draft ? draft.id : selected?.id) === record.id ? 'active' : ''} onClick={() => setSelectedId(record.id)}>{record.round}차{record.voided && <span>무효</span>}</button>)}</div>{canEdit && !draft && <button className="button" type="button" onClick={() => begin()}><Plus size={14} />출고 차수 추가</button>}</div>
       {stale && <ConflictNotice text="스타일 또는 출고 차수의 최신 버전이 바뀌었습니다." onCancel={() => { setDraft(null); setReason(''); setConflicted(false); setError('') }} />}
       {current ? <section className="ops-editor"><div className="section-heading"><h3>{draft?.round || selected?.round}차 출고 내역 {current.voided && <span className="pill">무효 기록</span>}</h3>{canEdit && !draft && (profile.role === 'admin' || !current.voided) && <button className="button button-ghost" type="button" onClick={() => begin(true)}>출고 내역 수정</button>}</div><div className="form-grid"><Field label="출고일"><input className="input" type="date" aria-label="출고일" value={current.shippedAt} disabled={!draft || busy} onChange={event => update('shippedAt', event.target.value)} /></Field><Field label="운송장 번호"><input className="input" aria-label="운송장 번호" maxLength={120} value={current.tracking} disabled={!draft || busy} onChange={event => update('tracking', event.target.value)} /></Field></div><div className="ops-size-inputs">{SIZES.map(size => <Field key={size} label={size}><input className="input" type="number" min="0" max="10000000" step="1" aria-label={`${size} 출고 수량`} value={current.quantities[size]} disabled={!draft || busy} onChange={event => update('quantities', { ...current.quantities, [size]: asNumber(event.target.value) })} /></Field>)}<div className="ops-size-total"><span>합계</span><strong>{amount(quantityTotal(current.quantities))}</strong></div></div><Field label="출고 메모"><textarea className="textarea" aria-label="출고 메모" rows={3} maxLength={10000} value={current.note} disabled={!draft || busy} onChange={event => update('note', event.target.value)} /></Field>

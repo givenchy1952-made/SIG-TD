@@ -34,7 +34,9 @@ async function openStyle(page: Page, code = CODE) {
   return detail
 }
 async function operationTab(detail: Locator, name: string) {
-  await detail.getByRole('tab', { name: /발주·출고·가공/ }).click()
+  if (name === 'PO 발송 이력') { await detail.getByRole('tab', { name: /^PO/ }).click(); return }
+  if (name === '부분 출고') { await detail.getByRole('tab', { name: /메인 생산/ }).click(); return }
+  await detail.getByRole('tab', { name: /가공·품질 관리/ }).click()
   await detail.getByRole('tablist', { name: '스타일 추가 업무', exact: true }).getByRole('tab', { name: new RegExp(`^${name}`) }).click()
 }
 function amounts(values: number[]): Quantities { return Object.fromEntries(SIZES.map((size, index) => [size, values[index]])) as Quantities }
@@ -160,7 +162,7 @@ test('부분 출고 차수는 기존 출고를 보존하고 6사이즈 합계를
   const first = [1, 2, 3, 4, 5, 6], second = [6, 5, 4, 3, 2, 1]
   const detail = await openStyle(page, SHIPPING_CODE)
   await operationTab(detail, '부분 출고')
-  await detail.getByLabel('출고 컬러', { exact: true }).selectOption(originalLine.id)
+  await detail.locator('.production-color').filter({ hasText: originalLine.color }).first().click()
   for (const [index, quantities] of [first, second].entries()) {
     await detail.getByRole('button', { name: '출고 차수 추가', exact: true }).click()
     await detail.getByLabel('출고일', { exact: true }).fill(index === 0 ? '2026-11-05' : '2026-11-08')
@@ -181,7 +183,11 @@ test('부분 출고 차수는 기존 출고를 보존하고 6사이즈 합계를
   for (const size of SIZES) expect(line.shipped[size]).toBe(originalLine.shipped[size] + 7)
   expect(line.shippedAt).toBe('2026-11-08')
   expect(after.styles.find(style => style.id === original.id)!.version).toBe(original.version + 2)
-  await detail.locator('.ops-quantity-scroll').scrollIntoViewIfNeeded()
+  await detail.locator('.quantity-table').scrollIntoViewIfNeeded()
+  const quantityTable = detail.locator('.quantity-table')
+  await expect(quantityTable.getByRole('row').filter({ hasText: '1차 출고' })).toContainText('2026-11-05')
+  await expect(quantityTable.getByRole('row').filter({ hasText: '2차 출고' })).toContainText('2026-11-08')
+  await expect(quantityTable.getByRole('rowheader', { name: '패킹리스트', exact: true })).toHaveCount(0)
   await page.screenshot({ path: 'docs/screenshots/operations.png' })
   await detail.getByRole('button', { name: '상세 화면 닫기', exact: true }).click()
   await page.reload()
