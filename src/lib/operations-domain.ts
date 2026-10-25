@@ -23,7 +23,7 @@ export function scopeOperations(workspace: Workspace, profile: Profile): Operati
   const ops = freshOperations(workspace.operations)
   if (!profile.approved || !profile.active) return freshOperations()
   const ids = new Set(workspace.styles.filter(style => canViewStyle(profile, style)).map(style => style.id))
-  const poDispatches = ops.poDispatches.filter(item => ids.has(item.styleId))
+  const poDispatches = ops.poDispatches.filter(item => ids.has(item.styleId) && (profile.role !== 'factory' || item.status === 'sent' && item.factoryIdSnapshot === profile.factoryId))
   const poIds = new Set(poDispatches.map(item => item.id))
   const events = ops.calendarEvents.filter(event => canReadCalendarEvent(event, profile))
   const eventIds = new Set(events.map(event => event.id))
@@ -32,7 +32,7 @@ export function scopeOperations(workspace: Workspace, profile: Profile): Operati
     shipmentLedgers: ops.shipmentLedgers.filter(item => ids.has(item.styleId)), shipmentBatches: ops.shipmentBatches.filter(item => ids.has(item.styleId)),
     styleOperations: ops.styleOperations.filter(item => ids.has(item.styleId)), calendarEvents: events,
     calendarEventAudits: ops.calendarEventAudits.filter(audit => eventIds.has(audit.eventId) && [audit.before, audit.after].every(snapshot => { const event = eventSnapshot(snapshot); return !event || canReadCalendarEvent(event, profile) })),
-    employeeFactoryAssignments: profile.role === 'factory' ? [] : ops.employeeFactoryAssignments.filter(item => profile.role === 'admin' || item.employeeId === profile.id),
+    employeeFactoryAssignments: profile.role === 'factory' ? [] : ops.employeeFactoryAssignments,
     operationCatalogs: profile.role === 'factory' ? [] : ops.operationCatalogs,
     orderSourceRecords: profile.role === 'factory' ? [] : ops.orderSourceRecords.filter(item => ids.has(item.styleId)),
   }
@@ -143,8 +143,9 @@ export function saveCalendarInWorkspace(workspace: Workspace, profile: Profile, 
   ops.calendarEventAudits.unshift({ id: crypto.randomUUID(), eventId: id, actorId: actor.id, actorName: actor.name, action: data.deleted ? '일정 삭제' : before ? '일정 수정' : '일정 등록', reason: reason.trim(), before: before || null, after, createdAt: after.updatedAt }); return next
 }
 export function saveAssignmentInWorkspace(workspace: Workspace, profile: Profile, employeeId: string, factoryIds: string[], expected: number, reason: string): Workspace {
-  const actor = hqActor(workspace, profile); if (actor.role !== 'admin') throw new Error('담당 공장 배정은 관리자만 변경할 수 있습니다.')
+  const actor = hqActor(workspace, profile)
   const employee = workspace.profiles.find(item => item.id === employeeId && item.role !== 'factory' && item.approved && item.active)
+  if (actor.role === 'internal' && employee?.role !== 'internal') throw new Error('관리자의 담당 공장은 관리자만 변경할 수 있습니다.')
   if (!employee || new Set(factoryIds).size !== factoryIds.length || factoryIds.some(id => !workspace.factories.some(item => item.id === id))) throw new Error('활성 본사 담당자와 등록된 공장을 선택해 주세요.')
   const next = start(workspace, reason), ops = next.operations!, before = ops.employeeFactoryAssignments.find(item => item.employeeId === employeeId); checkVersion(before, expected)
   const after = { employeeId, factoryIds: [...factoryIds].sort(), ...stamp(before, actor) }

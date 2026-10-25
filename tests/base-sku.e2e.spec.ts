@@ -11,6 +11,16 @@ async function ready(page: Page) {
   await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
 }
 async function snapshot(page: Page): Promise<Workspace> { return page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE) }
+async function registerFixtureProjectCode(page: Page, styleCode: string, projectCode: string) {
+  await page.evaluate(({ key, styleCode, projectCode }) => {
+    const workspace = JSON.parse(localStorage.getItem(key)!) as Workspace
+    const style = workspace.styles.find(item => item.code === styleCode)!
+    workspace.projects.find(project => project.id === style.projectId)!.code = projectCode
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, { key: STORAGE, styleCode, projectCode })
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
+}
 async function openImport(page: Page, query?: string) {
   const menu = page.getByRole('button', { name: '메뉴 열기', exact: true })
   if (await menu.isVisible()) await menu.click()
@@ -76,6 +86,7 @@ test('F 기본 품번의 실제 수량을 먼저 표시하고 입력한 전체 �
 
 test('기본 품번에 여러 컬러가 있으면 선택 전 적용을 막고 선택한 컬러의 오더만 변경한다', async ({ page }) => {
   await ready(page)
+  await registerFixtureProjectCode(page, 'BO42FYHD0102', 'QA-EXISTING-01')
   const before = await snapshot(page), original = before.styles.find(item => item.code === 'BO42FYHD0102')!, project = before.projects.find(item => item.id === original.projectId)!
   const modal = await openImport(page)
   await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'QA-MULTICOLOR.csv', mimeType: 'text/csv', buffer: csv(original.code, { code: 'QA-EXISTING-01', name: project.name, season: project.season }) })
@@ -94,10 +105,13 @@ test('기본 품번에 여러 컬러가 있으면 선택 전 적용을 막고 �
   }
   expect(updated.colors).toEqual(original.colors)
   expect(after.operations!.orderSourceRecords.find(item => item.styleId === original.id)!.rows[0].columns.F).toBe(original.code)
+  expect(after.productionRuns).toHaveLength(1)
+  expect(after.productionRuns![0]).toMatchObject({ styleId: original.id, projectId: project.id, projectCode: 'QA-EXISTING-01', order: QUANTITIES, round: 1 })
 })
 
 test('단일 등록 컬러의 기본 품번과 기존 컬러 포함 품번을 모두 읽고 I열은 사용하지 않는다', async ({ page }) => {
   await ready(page)
+  await registerFixtureProjectCode(page, 'BO42FYVT0109', 'QA-EXISTING-02')
   const before = await snapshot(page), original = before.styles.find(item => item.code === 'BO42FYVT0109')!, project = before.projects.find(item => item.id === original.projectId)!
   const modal = await openImport(page)
   for (const sku of [original.code, `${original.code}BK`]) {
@@ -111,6 +125,9 @@ test('단일 등록 컬러의 기본 품번과 기존 컬러 포함 품번을 �
     expect(updated.production[0].shipped).toEqual(original.production[0].shipped)
     const source = after.operations!.orderSourceRecords.find(item => item.styleId === original.id)!
     expect(source.rows[0].columns.F).toBe(sku); expect('I' in source.rows[0].columns).toBe(false)
+    const runs = after.productionRuns!.filter(run => run.styleId === original.id)
+    expect(runs).toHaveLength(sku === original.code ? 1 : 2)
+    expect(runs.at(-1)).toMatchObject({ projectId: project.id, projectCode: 'QA-EXISTING-02', order: QUANTITIES })
   }
 })
 

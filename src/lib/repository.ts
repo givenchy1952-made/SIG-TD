@@ -10,6 +10,11 @@ import { createDefaultOperationCatalogs } from './default-operation-catalogs'
 import { loadOperationsWorkspace } from './operations-cloud'
 import { loadSettlementTermsWorkspace } from './settlement-cloud'
 import { loadWorkflowRefinements } from './workflow-repository'
+import { manageProfileInWorkspace } from './staff-approval'
+import { loadProductionLedgerWorkspace } from './production-ledger-repository'
+import { loadSupplierProductionOrders } from './supplier-orders-repository'
+import { getDemoSupplierProductionOrders } from './supplier-orders'
+import { assertProductionLedgerTotals } from './production-ledger'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -20,7 +25,11 @@ let supabase: SupabaseClient | null = null
 if (url && key && !configurationError) { try { supabase = createClient(url, key) } catch { configurationError = 'Supabase 연결 정보를 초기화할 수 없습니다. URL과 공개 키 형식을 확인해 주세요.' } }
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
-export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return { ...parsed, settlementTerms: parsed.settlementTerms || [], settlementTermsAudits: parsed.settlementTermsAudits || [], settlementTermsAvailable: true, productionDetails: parsed.productionDetails || [], refinementsAvailable: true, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true } } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = { ...createSeed(), productionDetails: [], refinementsAvailable: true, settlementTerms: [], settlementTermsAudits: [], settlementTermsAvailable: true, styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }; localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
+function withProductionDefaults(workspace: Workspace): Workspace {
+  const next = { ...workspace, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
+  return { ...next, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
+}
+export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return withProductionDefaults({ ...parsed, staffApprovalsAvailable: true, settlementTerms: parsed.settlementTerms || [], settlementTermsAudits: parsed.settlementTermsAudits || [], settlementTermsAvailable: true, productionDetails: parsed.productionDetails || [], refinementsAvailable: true, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true }) } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = withProductionDefaults({ ...createSeed(), staffApprovalsAvailable: true, productionDetails: [], refinementsAvailable: true, settlementTerms: [], settlementTermsAudits: [], settlementTermsAvailable: true, styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }); localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
 export function persist(workspace: Workspace) { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); window.dispatchEvent(new Event('sig-workspace-change')) }
 export async function locked<T>(fn: () => T | Promise<T>): Promise<T> { if (!navigator.locks) throw new Error('안전한 동시 저장을 위해 최신 Chrome, Edge 또는 Safari를 사용해 주세요.'); return navigator.locks.request('sig-workspace-write', fn) }
 function check<T extends { error: unknown; data: unknown }>(result: T): T['data'] { if (result.error) throw result.error; return result.data }
@@ -51,10 +60,11 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const [operations, settlement, workflow] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase)])
+  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase)])
+  if (approvals.error && !['PGRST202', '42883'].includes(approvals.error.code)) throw approvals.error
   return {
-    ...operations, ...settlement, ...workflow,
-    styleImages, styleImagesAvailable,
+    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders,
+    styleImages, styleImagesAvailable, staffApprovalsAvailable: !approvals.error && approvals.data === true,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),
     attachments: rows.attachments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, name: r.name, path: r.path, mime: r.mime, size: r.size, uploadedBy: r.uploaded_by, createdAt: r.created_at })),
@@ -63,7 +73,7 @@ export async function loadWorkspace(): Promise<Workspace> {
 }
 export async function saveStyle(style: Style, reason: string, profile: Profile) {
   if (supabase) { check(await supabase.rpc('save_style', { p_id: style.id, p_data: style, p_expected_version: style.version, p_reason: reason })); return }
-  await locked(() => { const w = getDemoWorkspace(), before = w.styles.find(s => s.id === style.id); if ((before?.version || 0) !== style.version) throw new Error('version conflict'); assertManagedShipmentTotals(w, style); assertStyleSave(profile, before, style, reason)
+  await locked(() => { const w = getDemoWorkspace(), before = w.styles.find(s => s.id === style.id); if ((before?.version || 0) !== style.version) throw new Error('version conflict'); assertManagedShipmentTotals(w, style); assertProductionLedgerTotals(w, style); assertStyleSave(profile, before, style, reason)
     if (w.styles.some(s => s.id !== style.id && !s.deletedAt && s.code.toLowerCase() === style.code.toLowerCase())) throw new Error('같은 스타일 코드가 이미 있습니다.')
     const now = new Date().toISOString()
     const samples = style.samples.map(sample => { const old = before?.samples.find(s => s.id === sample.id); const changed = !old || JSON.stringify({ ...old, updatedAt: '' }) !== JSON.stringify({ ...sample, updatedAt: '' }); return { ...sample, updatedAt: changed ? now : old!.updatedAt } })
@@ -78,7 +88,7 @@ export async function deleteStyle(style: Style, reason: string, profile: Profile
 }
 export async function saveProfile(target: Profile, profile: Profile) {
   if (supabase) { check(await supabase.rpc('manage_profile', { p_id: target.id, p_name: target.name, p_role: target.role, p_approved: target.approved, p_active: target.active, p_factory_id: target.factoryId })); return }
-  await locked(() => { assertActive(profile); if (profile.role !== 'admin') throw new Error('관리자만 계정을 관리할 수 있습니다.'); if (target.id === profile.id && (!target.active || !target.approved || target.role !== 'admin')) throw new Error('본인의 관리자 권한은 해제할 수 없습니다.'); if (target.role === 'factory' && target.approved && !target.factoryId) throw new Error('공장을 지정해 주세요.'); const w = getDemoWorkspace(), before = w.profiles.find(p => p.id === target.id); w.profiles = before ? w.profiles.map(p => p.id === target.id ? target : p) : [...w.profiles, target]; w.audits.unshift({ id: crypto.randomUUID(), styleId: null, actorId: profile.id, actorName: profile.name, action: '사용자 권한 변경', reason: '관리자 계정 관리', before, after: target, createdAt: new Date().toISOString() }); persist(w) })
+  await locked(() => persist(manageProfileInWorkspace(getDemoWorkspace(), profile, target)))
 }
 export async function saveMetadata<T extends Factory | Project>(table: 'factories' | 'projects', target: T, profile: Profile) {
   if (supabase) { check(await supabase.from(table).upsert(target)); return }

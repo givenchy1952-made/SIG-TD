@@ -8,6 +8,8 @@ import OperationsPanel, { ShipmentPanel, type OperationsPanelProps } from './Ope
 import OrderSourcePanel, { type OrderSourcePanelProps } from './OrderSourcePanel'
 import SettlementTermsPanel, { type SettlementTermsPanelProps } from './SettlementTermsPanel'
 import ProductionDetailsPanel from './ProductionDetailsPanel'
+import ProductionLedgerPanel from './ProductionLedgerPanel'
+import SupplierOrdersPanel from './SupplierOrdersPanel'
 import type { ProductionDetailsInput } from '../lib/workflow-refinements'
 import './style-detail.css'
 const SettlementTemplateExport = lazy(() => import('./SettlementTemplateExport'))
@@ -17,6 +19,7 @@ interface Props extends Pick<OperationsPanelProps, 'onSavePO' | 'onSendPO' | 'on
   workspace: Workspace
   profile: Profile
   onClose: () => void
+  onRefresh: () => Promise<unknown>
   onSaveProductionDetails: (styleId: string, lineId: string, data: ProductionDetailsInput, expectedVersion: number, reason: string) => Promise<void>
   onSave: (style: Style, reason: string) => Promise<void>
   onDelete: (style: Style, reason: string) => Promise<void>
@@ -70,10 +73,10 @@ function diffSummary(audit: Audit): string[] {
   return changes.slice(0, 20)
 }
 
-export default function StyleDetail({ style, workspace, profile, onClose, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage, onSavePO, onSendPO, onSaveShipment, onSaveOperation, onSaveOrderSource, onSaveSettlementTerms, onSaveProductionDetails }: Props) {
+export default function StyleDetail({ style, workspace, profile, onClose, onRefresh, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage, onSavePO, onSendPO, onSaveShipment, onSaveOperation, onSaveOrderSource, onSaveSettlementTerms, onSaveProductionDetails }: Props) {
   const [base, setBase] = useState(() => copy(style))
   const [draft, setDraft] = useState(() => copy(style))
-  const [tab, setTab] = useState('samples')
+  const [tab, setTab] = useState(() => workspace.supplierProductionOrders?.some(order => order.styleId === style.id) ? 'supplier-orders' : 'samples')
   const [infoOpen, setInfoOpen] = useState(false)
   const [activeSample, setActiveSample] = useState(style.samples.at(-1)?.id || '')
   const [activeColor, setActiveColor] = useState(style.production[0]?.id || '')
@@ -96,13 +99,15 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [sourceDirty, setSourceDirty] = useState(false)
   const [settlementDirty, setSettlementDirty] = useState(false)
+  const [ledgerDirty, setLedgerDirty] = useState(false)
+  const [supplierDirty, setSupplierDirty] = useState(false)
   const uploadRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const hq = profile.role !== 'factory'
   const admin = profile.role === 'admin'
   const dirty = JSON.stringify(draft) !== JSON.stringify(base)
-  const hasUnsavedChanges = dirty || operationsDirty || sourceDirty || settlementDirty || poDirty || shipmentDirty || qualityDirty || measurementsDirty
+  const hasUnsavedChanges = dirty || operationsDirty || sourceDirty || settlementDirty || poDirty || shipmentDirty || qualityDirty || measurementsDirty || ledgerDirty || supplierDirty
   const stale = style.version !== base.version
   const line = draft.production.find(item => item.id === activeColor) || draft.production[0]
   const shipmentManaged = !!line && !!workspace.operations?.shipmentLedgers.some(ledger => ledger.styleId === style.id && ledger.lineId === line.id)
@@ -220,7 +225,7 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
   const audits = workspace.audits.filter(item => item.styleId === style.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const currentProject = workspace.projects.find(item => item.id === draft.projectId)
   const productionTotal = (key: 'order' | 'shipped' | 'received') => draft.production.reduce((sum, item) => sum + quantityTotal(item[key]), 0)
-  const tabs = [ ['samples', '샘플 이력', draft.samples.length], ['production', '메인 생산', draft.production.length], ...(hq ? [['settlement-terms', '을지·단가', workspace.settlementTerms?.filter(item => item.styleId === style.id).length || 0] as const, ['order-source', 'ORDER QTY 원본', workspace.operations?.orderSourceRecords.filter(item => item.styleId === style.id).length || 0] as const] : []), ['po', 'PO', workspace.operations?.poDispatches.filter(item => item.styleId === style.id).length || 0], ['operations', '가공·품질 관리', workspace.operations?.styleOperations.filter(item => item.styleId === style.id).flatMap(item => item.rows).length || 0], ['comments', '코멘트·파일', workspace.comments.filter(item => item.styleId === style.id).length], ['history', '변경 이력', audits.length] ] as const
+  const tabs = [ ['supplier-orders', '업체 납기·동의', workspace.supplierProductionOrders?.filter(item => item.styleId === style.id).length || 0], ...(hq ? [['production-ledger', '생산 차수·마감', workspace.productionRuns?.filter(item => item.styleId === style.id).length || 0] as const] : []), ['samples', '샘플 이력', draft.samples.length], ['production', '메인 생산', draft.production.length], ...(hq ? [['settlement-terms', '을지·단가', workspace.settlementTerms?.filter(item => item.styleId === style.id).length || 0] as const, ['order-source', 'ORDER QTY 원본', workspace.operations?.orderSourceRecords.filter(item => item.styleId === style.id).length || 0] as const] : []), ['po', 'PO', workspace.operations?.poDispatches.filter(item => item.styleId === style.id).length || 0], ['operations', '가공·품질 관리', workspace.operations?.styleOperations.filter(item => item.styleId === style.id).flatMap(item => item.rows).length || 0], ['comments', '코멘트·파일', workspace.comments.filter(item => item.styleId === style.id).length], ['history', '변경 이력', audits.length] ] as const
 
   return <><div className="detail-overlay" onMouseDown={event => { if (event.target === event.currentTarget) requestClose() }}>
     <div className="detail-panel sig-detail" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={panelRef}>
@@ -273,6 +278,8 @@ export default function StyleDetail({ style, workspace, profile, onClose, onSave
             {hq && <><Field label="업체 마감 금액 (KRW)"><input className="input" type="number" min="0" max="1000000000000" step="1" value={line.invoiceAmount} onChange={event => updateLine('invoiceAmount', Math.max(0, Math.floor(event.target.valueAsNumber || 0)))} /></Field><Field label="결제 예정일"><input className="input" type="date" value={line.paymentDue} onChange={event => updateLine('paymentDue', event.target.value)} /></Field><Field label="결제 상태"><StatusSelect label="결제 상태" value={line.paymentStatus} onChange={value => updateLine('paymentStatus', value)} /></Field></>}
           </div>{style.production.some(item => item.id === line.id) ? <ProductionDetailsPanel key={`measurements-${line.id}`} style={style} workspace={workspace} profile={profile} lineId={line.id} mode="measurements" onSave={onSaveProductionDetails} onDirtyChange={setMeasurementsDirty} /> : <p className="muted">컬러를 먼저 저장하면 사이즈 측정표를 입력할 수 있습니다.</p>}{!workspace.refinementsAvailable && line.measurements && <details><summary>이전 서술형 사이즈 기록</summary><pre>{line.measurements}</pre></details>}<Field label="공장 작업 코멘트"><textarea className="textarea" rows={3} value={line.factoryComment} maxLength={10000} placeholder="생산 및 출고 관련 확인 사항" onChange={event => updateLine('factoryComment', event.target.value)} /></Field></div></>}
         </section>
+        <div hidden={tab !== 'supplier-orders'} role="tabpanel" aria-label="업체 납기·동의"><SupplierOrdersPanel style={style} workspace={workspace} profile={profile} onChanged={onRefresh} onDirtyChange={setSupplierDirty} onOpenPO={() => setTab('po')} /></div>
+        {hq && <div hidden={tab !== 'production-ledger'} role="tabpanel" aria-label="생산 차수·마감"><ProductionLedgerPanel style={style} workspace={workspace} actor={profile} onChanged={onRefresh} onDirtyChange={setLedgerDirty} /></div>}
         {hq && <div hidden={tab !== 'settlement-terms'} role="tabpanel" aria-label="을지·단가"><SettlementTermsPanel style={style} workspace={workspace} profile={profile} onSaveSettlementTerms={onSaveSettlementTerms} onDirtyChange={setSettlementDirty} /></div>}
         {hq && <div hidden={tab !== 'order-source'} role="tabpanel" aria-label="ORDER QTY 원본"><OrderSourcePanel style={style} workspace={workspace} profile={profile} onSaveOrderSource={onSaveOrderSource} onDirtyChange={setSourceDirty} onEditQuantities={lineId => { setActiveColor(lineId); setTab('production') }} /></div>}
         <div hidden={tab !== 'po'} role="tabpanel" aria-label="PO"><OperationsPanel mode="po" style={style} workspace={workspace} profile={profile} onDirtyChange={setPoDirty} onSavePO={onSavePO} onSendPO={onSendPO} onSaveShipment={onSaveShipment} onSaveOperation={onSaveOperation} onDownload={onDownload} /></div>

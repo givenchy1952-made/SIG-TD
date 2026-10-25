@@ -171,6 +171,14 @@ test('두 탭의 단가 수정 충돌 시 입력을 유지하고 모바일에서
 
 test('CP949 153열 CSV의 실제 제목 행 구조를 인식하고 선택한 16개 열만 가져온다', async ({ page }) => {
   await fixture(page, 'TESTSTYLE01')
+  await page.evaluate(key => {
+    const workspace = JSON.parse(localStorage.getItem(key)!) as Workspace
+    const project = workspace.projects.find(item => item.id === workspace.styles[0].projectId)!
+    project.code = 'TEST-PROJECT-2026'; project.name = '검증 프로젝트'; project.season = '2026FY'
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, STORAGE)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
   await navigate(page, '메인 생산')
   await page.getByRole('button', { name: '오더 엑셀 업로드', exact: true }).click()
   const modal = page.getByRole('dialog', { name: 'Excel 오더 수량 가져오기', exact: true })
@@ -191,4 +199,6 @@ test('CP949 153열 CSV의 실제 제목 행 구조를 인식하고 선택한 16�
   expect(source.rows[0].columns.A).toBe('TEST-PROJECT-2026')
   expect(Object.keys(source.rows[0].columns)).toEqual(SOURCE_COLUMNS)
   expect(source.headers.W.trim()).toBe('생산처')
+  expect(snapshot.productionRuns).toHaveLength(1)
+  expect(snapshot.productionRuns![0]).toMatchObject({ styleId: snapshot.styles[0].id, projectCode: 'TEST-PROJECT-2026', round: 1, order: line.order })
 })

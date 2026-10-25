@@ -10,7 +10,7 @@ export type OrderImportPreset = 'generic' | 'sig-order-qty'
 export const SIG_ORDER_SOURCE_COLUMNS = ORDER_SOURCE_COLUMNS
 export interface OrderSourceMetadata { rowNumber: number; columns: Record<string, ImportCell> }
 export interface OrderColumnMapping { sku: number | null; color: number | null; size: number | null; quantity: number | null; total: number | null; sizes: Partial<Record<Size, number | null>> }
-export interface OrderImportOptions { fileName?: string; preset?: OrderImportPreset; sigColors?: Record<number, string>; sigSkus?: Record<number, string>; sigBudgetFallback?: boolean; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
+export interface OrderImportOptions { createProductionRounds?: boolean; fileName?: string; preset?: OrderImportPreset; sigColors?: Record<number, string>; sigSkus?: Record<number, string>; sigBudgetFallback?: boolean; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
 export interface OrderImportPreviewRow {
   rowNumbers: number[]; sku: string; color: string; styleId: string | null; lineId: string | null; styleName: string;
   sourceMetadata?: OrderSourceMetadata[]; source?: OrderSourceData & { expectedVersion: number }; sourceChanged?: boolean; before: Quantities; imported: Quantities; after: Quantities; changed: boolean; errors: string[]; warnings: string[];
@@ -353,7 +353,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
     row.changed = SIZES.some(size => row.before[size] !== row.after[size])
   }
   if (!sourceRows) errors.push('가져올 데이터 행이 없습니다.')
-  const changed = rows.filter(row => row.styleId && row.lineId && (row.changed || row.sourceChanged) && !row.errors.length)
+  const changed = rows.filter(row => row.styleId && row.lineId && (options.createProductionRounds || row.changed || row.sourceChanged) && !row.errors.length)
   const styleChanges = new Map<string, OrderImportChange>()
   for (const row of changed) {
     const style = groups.get(`${row.styleId}:${row.lineId}`)!.style

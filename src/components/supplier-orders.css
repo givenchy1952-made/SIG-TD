@@ -1,0 +1,41 @@
+.supplier-orders { display: grid; gap: 20px; }
+.supplier-orders h2, .supplier-acceptance-record h4, .supplier-po-content summary { display: flex; align-items: center; gap: 7px; }
+.supplier-order-picker { max-width: 650px; }
+.supplier-order-card { padding: 22px; display: grid; gap: 20px; min-width: 0; }
+.supplier-order-card > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.supplier-order-card > header strong { color: var(--muted, #7f8ca0); font-size: 11px; }
+.supplier-order-card h3 { margin: 7px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+.supplier-order-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.supplier-order-facts dt, .supplier-acceptance-record dt { color: var(--muted, #7f8ca0); font-size: 11px; margin-bottom: 7px; }
+.supplier-order-facts dd, .supplier-acceptance-record dd { margin: 0; font-size: 13px; }
+.supplier-order-table { overflow-x: auto; }
+.supplier-order-table table { width: 100%; min-width: 400px; border-collapse: collapse; text-align: center; font-size: 12px; }
+.supplier-order-table th, .supplier-order-table td { padding: 12px 10px; border-bottom: 1px solid #e5eaf1; }
+.supplier-order-table th { color: #7f8ca0; font-size: 11px; font-weight: 400; background: #f7f9fc; }
+.supplier-order-table td:last-child { font-weight: 600; }
+.supplier-po-content { padding: 15px; border: 1px solid #e3e9f1; border-radius: 5px; min-width: 0; }
+.supplier-po-content summary { cursor: pointer; font-weight: 500; overflow-wrap: anywhere; }
+.supplier-po-content pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: inherit; font-size: 12px; line-height: 1.8; }
+.supplier-order-note { padding: 13px 15px; background: #f5f8fc; color: #6d7c92; border-radius: 4px; font-size: 12px; line-height: 1.8; margin: 0; }
+.supplier-accept-form { display: grid; gap: 14px; border-top: 1px solid #e5eaf1; padding-top: 20px; }
+.supplier-accept-form > .field { max-width: 300px; }
+.supplier-agreement { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.8; cursor: pointer; }
+.supplier-agreement input { margin-top: 4px; flex-shrink: 0; accent-color: #1c2a3e; }
+.supplier-accept-form > .muted { font-size: 11px; line-height: 1.8; margin: 0; }
+.supplier-accept-form > .muted svg { vertical-align: -2px; }
+.supplier-po-draft { display: grid; gap: 16px; border-top: 1px solid #e5eaf1; padding-top: 20px; }
+.supplier-po-draft h4 { margin: 0; font-size: 14px; }
+.supplier-po-draft > .muted { margin: 0; font-size: 12px; line-height: 1.8; }
+.supplier-order-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.supplier-acceptance-record { padding: 17px; background: #f0f7f3; border: 1px solid #d2e8dc; border-radius: 5px; }
+.supplier-acceptance-record h4 { margin: 0 0 17px; font-size: 13px; color: #2e7654; }
+.supplier-acceptance-record dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.supplier-acceptance-record .muted { margin: 15px 0 0; font-size: 11px; line-height: 1.8; }
+.supplier-state-accepted, .supplier-state-in_progress, .supplier-state-closed { color: #2e7654; background: #edf7f0; }
+.supplier-state-assignment_changed { color: #b84850; background: #fff0f1; }
+@media (max-width: 600px) {
+  .supplier-order-card { padding: 15px; }
+  .supplier-order-card > header { flex-direction: column; gap: 12px; }
+  .supplier-order-facts, .supplier-acceptance-record dl { grid-template-columns: 1fr; gap: 14px; }
+  .supplier-order-actions .button { width: 100%; justify-content: center; }
+}

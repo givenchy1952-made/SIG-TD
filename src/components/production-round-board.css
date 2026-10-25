@@ -1,0 +1,15 @@
+.production-round-board { margin:24px 0; min-width:0; max-width:100%; padding:0; overflow:visible; contain:layout paint; }
+.production-round-board .table-wrap { max-width:100%; overflow-x:auto; }
+.production-round-board-heading { padding:20px 22px 0; }
+.production-round-board-heading h2 { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:14px; }
+.production-round-board-heading p { font-size:11px; line-height:1.8; margin-top:8px; }
+.production-round-board-filters { display:flex; flex-wrap:wrap; gap:8px; padding:16px 22px; }
+.production-round-board-filters > div { min-width:170px; max-width:320px; }
+.production-round-board table { min-width:1060px; width:100%; border-collapse:collapse; font-size:11px; }
+.production-round-board th { background:#f7f9fc; text-align:left; color:#7a879b; font-weight:500; padding:12px 14px; }
+.production-round-board td { padding:14px; border-top:1px solid #e9edf4; white-space:nowrap; }
+.production-round-board td small { display:block; font-size:10px; color:#8c97a9; margin-top:5px; }
+.production-round-board .production-order-in_progress { color:#29826c; background:#ecf8f3; }
+.production-round-board .production-order-awaiting_acceptance { color:#a07536; background:#fff7e8; }
+.production-round-board .production-order-assignment_changed { color:#bf4b54; background:#fff0f1; }
+@media(max-width:640px) { .production-round-board-heading { padding:16px 14px 0; } .production-round-board-filters { padding:12px 14px; } .production-round-board-filters > div { flex:1; min-width:140px; } }

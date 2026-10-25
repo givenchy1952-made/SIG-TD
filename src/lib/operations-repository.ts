@@ -1,7 +1,8 @@
 import type { CalendarEvent, CalendarEventInput, OrderImportChange, OrderSourceData, PoDispatchInput, ShipmentBatchInput, StyleOperationInput, StyleOperationKind } from './operations-types'
 import type { Profile } from './types'
 import { getDemoWorkspace, locked, persist, supabase } from './repository'
-import { importOrdersInWorkspace, saveAssignmentInWorkspace, saveCalendarInWorkspace, saveCatalogInWorkspace, saveOperationInWorkspace, saveOrderSourceInWorkspace, savePoInWorkspace, saveShipmentInWorkspace } from './operations-domain'
+import { saveAssignmentInWorkspace, saveCalendarInWorkspace, saveCatalogInWorkspace, saveOperationInWorkspace, saveOrderSourceInWorkspace, savePoInWorkspace, saveShipmentInWorkspace } from './operations-domain'
+import { importProductionOrdersInWorkspace } from './round-import'
 import { assertActive } from './permissions'
 
 async function rpc(name: string, args: Record<string, unknown>) {
@@ -51,9 +52,26 @@ export async function saveOperationCatalog(id: string, kind: StyleOperationKind,
   if (supabase) { await rpc('save_operation_catalog', { p_id: id, p_kind: kind, p_name: name, p_active: active, p_expected_version: expectedVersion, p_reason: reason }); return }
   await locked(() => persist(saveCatalogInWorkspace(getDemoWorkspace(), profile, id, kind, name, active, expectedVersion, reason)))
 }
+// Keep an uncertain response retry on the same request id. A fresh preview has
+// newer expected versions, and therefore a different key and a new round.
+const orderImportRequests = new Map<string, string>()
 export async function importOrderQuantities(changes: OrderImportChange[], mode: 'replace' | 'add', reason: string, profile: Profile): Promise<void> {
-  if (supabase) { await rpc('bulk_import_order_quantities', { p_changes: changes, p_mode: mode, p_reason: reason }); return }
-  await locked(() => persist(importOrdersInWorkspace(getDemoWorkspace(), profile, changes, mode, reason)))
+  const key = JSON.stringify({ actorId: profile.id, changes, mode, reason })
+  const importId = orderImportRequests.get(key) || crypto.randomUUID()
+  orderImportRequests.set(key, importId)
+  if (orderImportRequests.size > 20) orderImportRequests.delete(orderImportRequests.keys().next().value!)
+  if (supabase) {
+    const result = await supabase.rpc('bulk_import_production_orders', { p_import_id: importId, p_changes: changes, p_mode: mode, p_reason: reason })
+    if (result.error) {
+      if (['PGRST202', 'PGRST205', '42P01'].includes(result.error.code)) throw new Error('프로젝트·생산 차수별 오더 등록 설정이 필요합니다. Supabase에 006~009 SQL을 순서대로 적용한 뒤 다시 접속해 주세요.')
+      if (/IMPORT_PROJECT_REQUIRED/.test(result.error.message)) throw new Error('A열 프로젝트 코드를 먼저 등록해 주세요. 스타일·프로젝트 등록에서 확인한 뒤 다시 업로드해 주세요.')
+      if (/IMPORT_MIXED_PROJECTS/.test(result.error.message)) throw new Error('같은 품번·컬러에 서로 다른 프로젝트가 있습니다. 프로젝트별로 나누어 업로드해 주세요.')
+      if (/IMPORT_PROJECT_MISMATCH/.test(result.error.message)) throw new Error('A열 프로젝트에 등록된 명칭·시즌이 M·L열과 다릅니다. 프로젝트 기본 정보를 확인해 주세요.')
+      throw result.error
+    }
+    return
+  }
+  await locked(() => persist(importProductionOrdersInWorkspace(getDemoWorkspace(), profile, importId, changes, mode, reason)))
 }
 export async function saveOrderSourceRecord(styleId: string, lineId: string, data: OrderSourceData, expectedVersion: number, reason: string, profile: Profile): Promise<void> {
   if (supabase) { await rpc('save_order_source_record', { p_style_id: styleId, p_line_id: lineId, p_expected_version: expectedVersion, p_data: data, p_reason: reason }); return }

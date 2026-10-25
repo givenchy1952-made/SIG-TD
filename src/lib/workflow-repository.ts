@@ -4,6 +4,7 @@ import { saveProductionDetailsInWorkspace } from './workflow-refinements'
 import { getDemoWorkspace, locked, persist, supabase } from './repository'
 import { assertActive, assertStyleSave } from './permissions'
 import { assertManagedShipmentTotals, validateOperationReason } from './operations-domain'
+import { assertProductionLedgerTotals } from './production-ledger'
 import type { SupabaseClient } from '@supabase/supabase-js'
 export interface RegistrationProject extends Project { code: string; expected?: { code: string; name: string; season: string } | null }
 export async function loadWorkflowRefinements(client: SupabaseClient): Promise<{ refinementsAvailable: boolean; productionDetails: ProductionDetails[] }> {
@@ -56,7 +57,7 @@ export function registerOrderStyleInWorkspace(workspace: Workspace, supplied: Pr
 
   if (style.projectId !== project.id || style.season !== project.season || !next.factories.some(f => f.id === style.factoryId) || !next.profiles.some(p => p.id === style.ownerId && p.active && p.approved && p.role !== 'factory')) throw new Error('프로젝트·등록 공장·본사 담당자를 확인해 주세요.')
   if (next.styles.some(s => s.id !== style.id && s.code.toUpperCase() === style.code.toUpperCase())) throw new Error('이미 등록된 품번입니다.')
-  assertStyleSave(actor, before, style, reason); assertManagedShipmentTotals(next, style)
+  assertStyleSave(actor, before, style, reason); assertManagedShipmentTotals(next, style); assertProductionLedgerTotals(next, style)
   const now = new Date().toISOString(), after = { ...structuredClone(style), version: style.version + 1, updatedAt: now, updatedBy: actor.id }
   next.styles = [...next.styles.filter(s => s.id !== style.id), after]
   next.audits.unshift({ id: crypto.randomUUID(), styleId: style.id, actorId: actor.id, actorName: actor.name, action: '오더 스타일·프로젝트 등록', reason, before: before || null, after, createdAt: now }); return next

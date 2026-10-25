@@ -44,7 +44,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   const sheet = book?.sheets[sheetIndex]
   const headers = sheet?.rows[headerRow - 1] || []
   const rawColumns = Array.from({ length: Math.min(15, headers.length) }, (_, index) => index).filter(index => preset !== 'sig-order-qty' || index !== 8)
-  const preview = useMemo(() => snapshot && sheet ? buildOrderImportPreview(snapshot, sheet, { fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }) : null, [snapshot, sheet, book?.name, preset, sigSkus, mapping, layout, headerRow, duplicateMode, missingSizes, mode])
+  const preview = useMemo(() => snapshot && sheet ? buildOrderImportPreview(snapshot, sheet, { createProductionRounds: true, fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }) : null, [snapshot, sheet, book?.name, preset, sigSkus, mapping, layout, headerRow, duplicateMode, missingSizes, mode])
   const skuRows = preset === 'sig-order-qty' && sheet ? sheet.rows.slice(headerRow).flatMap((source, index) => {
     if (!cellLabel(source[5]).trim()) return []
     const rowNumber = headerRow + index + 1
@@ -76,7 +76,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
       if (!workspace.factories.some(factory => factory.id === style.factoryId) || !workspace.profiles.some(owner => owner.id === style.ownerId && owner.active && owner.approved && owner.role !== 'factory')) throw new Error('등록된 공장과 승인된 본사 담당자를 선택해 주세요.')
       if (!/^\d{4}-\d{2}-\d{2}$/.test(style.dueDate) || new Date(`${style.dueDate}T00:00:00Z`).toISOString().slice(0, 10) !== style.dueDate) throw new Error('유효한 기준 납기일을 확인해 주세요.')
       if (registrationReason.trim().length < 2 || importReason.length < 2) throw new Error('등록·변경 사유를 두 글자 이상 입력해 주세요.')
-      const options = { fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }
+      const options = { createProductionRounds: true, fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }
       if (applyImmediately) {
         const previous = basis.styles.find(item => item.id === style.id)
         if (previous && previous.version !== style.version) throw new Error('파일 분석 이후 품번이 변경되었습니다. 최신 데이터로 다시 검증해 주세요.')
@@ -102,7 +102,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
         const failures = [...checked.errors, ...checked.rows.flatMap(row => row.errors)]
         if (failures.length) throw new Error(failures[0])
         if (checked.changes.length) await onImport(checked.changes, mode, importReason)
-        setApplied(true); setSuccess(`품번 등록과 오더 수량 적용을 완료했습니다. ${checked.changedLines}개 품번 · 파일 수량 ${formatNumber(checked.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0))}개`)
+        setApplied(true); setSuccess(`품번 등록과 새 생산 차수 생성을 완료했습니다. ${checked.changes.reduce((sum, change) => sum + change.lines.length, 0)}개 차수 · 파일 수량 ${formatNumber(checked.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0))}개`)
       } else setSuccess('품번과 프로젝트를 등록했습니다. 수량 미리보기를 확인한 뒤 오더를 적용해 주세요.')
     } catch (failure) {
       if (failure && typeof failure === 'object' && 'registrationSaved' in failure) { setRegistration(null); setError(message(failure)) }
@@ -161,7 +161,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   async function apply() {
     if (!preview || !allowed || !available || errorCount || stale || busy || applied || !preview.changes.length || reason.trim().length < 2) return
     setBusy(true); setError(''); setSuccess('')
-    try { await onImport(preview.changes, mode, reason.trim()); setApplied(true); setSuccess(`${preview.changedStyles}개 스타일에 적용했습니다. 오더 수량 ${preview.changedLines}개 컬러 · 원본 참조 정보 ${preview.sourceChangedLines}개 컬러.`) } catch (e) { setError(message(e)) } finally { setBusy(false) }
+    try { await onImport(preview.changes, mode, reason.trim()); setApplied(true); setSuccess(`${preview.changedStyles}개 스타일에 적용하고 새 생산 차수 ${preview.changes.reduce((sum, change) => sum + change.lines.length, 0)}개를 만들었습니다. 오더 수량 변경 ${preview.changedLines}개 컬러 · 원본 참조 정보 ${preview.sourceChangedLines}개 컬러.`) } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
   return <Modal title="Excel 오더 수량 가져오기" wide onClose={() => { if (!busy) onClose() }}>
     <div className="order-import">
@@ -180,7 +180,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
           <div className="import-column-grid">{columnSelect('품번', mapping.sku, v => setMapping({ ...mapping, sku: v }))}{preset !== 'sig-order-qty' && columnSelect('색상', mapping.color, v => setMapping({ ...mapping, color: v }))}{layout === 'wide' ? <>{SIZES.map(size => <div key={size}>{columnSelect(`${size} 수량`, mapping.sizes[size], v => setMapping({ ...mapping, sizes: { ...mapping.sizes, [size]: v } }))}</div>)}{columnSelect('합계 검증 (선택)', mapping.total, v => setMapping({ ...mapping, total: v }))}</> : <>{columnSelect('사이즈', mapping.size, v => setMapping({ ...mapping, size: v }))}{columnSelect('수량', mapping.quantity, v => setMapping({ ...mapping, quantity: v }))}</>}</div>
           <p className="import-formula-note">수식은 실행하지 않고 Excel에 저장된 계산 결과만 읽습니다. 합계만 있는 파일은 사이즈별 수량 파일로 다시 저장해 주세요.</p>
         </section>
-        <section className="import-step"><div className="import-step-heading"><span>03</span><h3>적용 방식</h3><p>미리보기는 선택한 방식에 따라 즉시 다시 계산됩니다.</p></div>
+        <section className="import-step"><div className="import-step-heading"><span>03</span><h3>적용 방식</h3><p>미리보기는 선택한 방식에 따라 즉시 다시 계산됩니다.</p></div><p className="import-option-warning">업로드할 때마다 파일 수량으로 프로젝트별 새 생산 차수를 만듭니다. 아래 선택은 기존 컬러 합계에만 적용됩니다. PO를 작성·발송한 뒤 업체가 예상 납기와 생산 동의를 제출하면 생산을 시작할 수 있습니다.</p>
           <div className="import-mode-options"><label className={mode === 'replace' ? 'selected' : ''}><input type="radio" name="order-mode" aria-label="기존 오더 교체" checked={mode === 'replace'} onChange={() => { setMode('replace'); changed() }} disabled={busy}/><span><strong>기존 오더 교체</strong><small>파일의 사이즈별 수량으로 바꿉니다.</small></span></label><label className={mode === 'add' ? 'selected' : ''}><input type="radio" name="order-mode" aria-label="기존 오더에 추가" checked={mode === 'add'} onChange={() => { setMode('add'); changed() }} disabled={busy}/><span><strong>기존 오더에 추가</strong><small>리오더 수량을 현재 오더에 더합니다.</small></span></label></div>
           <div className="import-check-options"><label><input type="checkbox" checked={duplicateMode === 'sum'} onChange={e => { setDuplicateMode(e.target.checked ? 'sum' : 'reject'); changed() }} disabled={busy}/>중복 품번·사이즈 수량 합산 허용</label><label><input type="checkbox" checked={missingSizes === 'zero'} onChange={e => { setMissingSizes(e.target.checked ? 'zero' : 'reject'); changed() }} disabled={busy}/>누락 사이즈를 0으로 처리</label></div><p className="import-option-warning">기본값은 중복·누락을 오류로 처리합니다. 교체 모드에서 누락 사이즈를 0으로 처리하면 해당 사이즈의 기존 오더가 0으로 바뀝니다. 지정한 사이즈 열의 빈 셀은 0으로 읽습니다.</p>
         </section>

@@ -400,9 +400,10 @@ describe('담당자 복수 공장 배정과 업무 조회 범위', () => {
     expect(next.styles.some(style => style.factoryId !== DEMO_IDS.china && canViewStyle(internal, style))).toBe(true)
   })
 
-  it('내부·공장 사용자는 배정 변경을 할 수 없고 미등록·중복 공장 및 오래된 버전은 거부한다', () => {
+  it('본사 직원은 본사 동료만 배정하며 공장 사용자·미등록·중복 공장·오래된 버전은 거부한다', () => {
     const { workspace, admin, internal, factory } = fixture()
-    expect(() => saveAssignmentInWorkspace(workspace, internal, internal.id, [], 0, reason)).toThrow('관리자')
+    expect(saveAssignmentInWorkspace(workspace, internal, internal.id, [], 0, reason).operations!.employeeFactoryAssignments[0].employeeId).toBe(internal.id)
+    expect(() => saveAssignmentInWorkspace(workspace, internal, admin.id, [], 0, reason)).toThrow('관리자')
     expect(() => saveAssignmentInWorkspace(workspace, factory, internal.id, [], 0, reason)).toThrow('본사')
     for (const ids of [[DEMO_IDS.china, DEMO_IDS.china], [uuid()]]) expect(() => saveAssignmentInWorkspace(workspace, admin, internal.id, ids, 0, reason)).toThrow()
     expect(() => saveAssignmentInWorkspace(workspace, admin, factory.id, [], 0, reason)).toThrow('본사 담당자')
@@ -416,6 +417,7 @@ describe('담당자 복수 공장 배정과 업무 조회 범위', () => {
     const ownPo = uuid(), otherPo = uuid()
     let next = savePoInWorkspace(workspace, admin, ownPo, style.id, poData(), 0, reason)
     next = savePoInWorkspace(next, admin, otherPo, other.id, poData(), 0, reason)
+    next.operations!.poDispatches = next.operations!.poDispatches.map(po => ({ ...po, status: 'sent', sentAt: stamp.createdAt, providerMessageId: `fixture-${po.id}` }))
     next.operations!.poDispatchAttempts = [ownPo, otherPo].map((dispatchId, index) => ({ id: uuid(), dispatchId, attempt: 1, status: 'failed', snapshot: { private: index ? 'foreign-only-4477' : 'own-only' }, providerMessageId: null, error: 'test', startedAt: stamp.createdAt, finishedAt: stamp.createdAt, actorId: admin.id }))
     next = saveAssignmentInWorkspace(next, admin, admin.id, [DEMO_IDS.china], 0, reason)
     const scoped = scopeOperations(next, factory)
@@ -424,6 +426,8 @@ describe('담당자 복수 공장 배정과 업무 조회 범위', () => {
     expect(scoped.operationCatalogs).toHaveLength(0)
     expect(scoped.employeeFactoryAssignments).toHaveLength(0)
     expect(JSON.stringify(scoped)).not.toContain('foreign-only-4477')
+    next.operations!.poDispatches.find(po => po.id === ownPo)!.status = 'draft'
+    expect(scopeOperations(next, factory).poDispatches).toHaveLength(0)
   })
 })
 

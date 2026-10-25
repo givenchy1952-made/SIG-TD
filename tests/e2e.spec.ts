@@ -311,7 +311,7 @@ test('관리자 삭제는 사유와 원본 이력을 보존하고 일반 목록�
 test('승인되지 않은 계정은 업무 화면 진입이 차단된다', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('sig-demo-profile', '10000000-0000-4000-8000-000000000005'))
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: '관리자 승인을 기다리고 있습니다.', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '본사 승인을 기다리고 있습니다.', exact: true })).toBeVisible()
   await expect(page.locator('.style-code')).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: '주 메뉴' })).toHaveCount(0)
 })

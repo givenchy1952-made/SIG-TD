@@ -91,7 +91,8 @@ test('PO 납기는 필수이며 체험 모드의 메일 발송은 실제 발송�
   await page.getByLabel('체험 역할').selectOption(FACTORY)
   const factoryDetail = await openStyle(page, SHIPPING_CODE)
   await operationTab(factoryDetail, 'PO 발송 이력')
-  await expect(factoryDetail.locator('.ops-po-card')).toContainText('QA PO 직접 발송 검증')
+  await expect(factoryDetail.locator('.ops-po-card')).toHaveCount(0)
+  await expect(factoryDetail).not.toContainText('QA PO 직접 발송 검증')
   await expect(factoryDetail.getByRole('button', { name: 'PO 작성', exact: true })).toHaveCount(0)
   await expect(factoryDetail.getByRole('button', { name: 'PO 메일 발송', exact: true })).toHaveCount(0)
 })
@@ -374,11 +375,18 @@ test('테스트 마감 양식의 머리글·병합·수식을 보존하며 실�
 
 test('SIG 51열 CSV의 원본 16개 열을 보존하고 본사 참조 수정과 실제 오더 수량을 분리한다', async ({ page, context }) => {
   await ready(page)
+  const initial = await stored(page), target = initial.styles.find(style => style.code === SHIPPING_CODE)!, project = initial.projects.find(item => item.id === target.projectId)!
   const sourceColumns = { A: 0, F: 5, L: 11, M: 12, S: 18, V: 21, W: 22, X: 23, Y: 24, AQ: 42, AR: 43, AS: 44, AT: 45, AU: 46, AV: 47, AY: 50 }
   const titles = Array.from({ length: 51 }, (_, index) => `QA 제목 ${index + 1}`)
   const values = Array.from({ length: 51 }, () => '')
   for (const [column, index] of Object.entries(sourceColumns)) values[index] = `QA-${column}-원본`
-  values[0] = 'QA-프로젝트, "인용"'; values[5] = `${SHIPPING_CODE}BK`; values[11] = 'QA 제품명\n다음 줄'
+  values[0] = 'QA-프로젝트, "인용"'; values[5] = `${SHIPPING_CODE}BK`; values[11] = project.season; values[12] = project.name; values[18] = 'QA 원본 메모\n다음 줄'
+  await page.evaluate(({ key, projectId, code }) => {
+    const workspace = JSON.parse(localStorage.getItem(key)!) as Workspace
+    workspace.projects.find(item => item.id === projectId)!.code = code
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, { key: STORAGE, projectId: project.id, code: values[0] })
+  await page.reload(); await ready(page)
   SIZES.forEach((size, index) => { titles[42 + index] = size; values[42 + index] = String(index + 1) })
   titles[50] = '총수량'; values[50] = '21'
   const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
@@ -397,6 +405,8 @@ test('SIG 51열 CSV의 원본 16개 열을 보존하고 본사 참조 수정과 
   expect(source.fileName).toBe('qa-controlled-order-qty.csv')
   expect(Object.keys(source.headers).sort()).toEqual(Object.keys(sourceColumns).sort())
   expect(source.rows).toHaveLength(1)
+  expect(imported.productionRuns).toHaveLength(1)
+  expect(imported.productionRuns![0]).toMatchObject({ styleId: target.id, projectId: project.id, projectCode: values[0], round: 1, order: { XXS: 1, XS: 2, S: 3, M: 4, L: 5, XL: 6 } })
   expect(source.rows[0].rowNumber).toBe(2)
   for (const [column, index] of Object.entries(sourceColumns)) {
     expect(source.headers[column as keyof typeof source.headers]).toBe(titles[index])

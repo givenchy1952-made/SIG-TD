@@ -8,11 +8,13 @@ function expectExpiredGuidance(message: string) {
   expect(message).toMatch(/인증|링크/)
   expect(message).toMatch(/만료|유효/)
   expect(message).toMatch(/다시|새로|재발송/)
+  expect(message).toContain('본사 담당자')
+  expect(message).not.toContain('인증 메일 다시 받기')
   expect(message).not.toContain('Email link is invalid')
 }
 
 describe('이메일 인증 콜백 오류 해석', () => {
-  it('실제 localhost otp_expired fragment를 한국어 재발송 안내로 바꾼다', () => {
+  it('이전 localhost otp_expired fragment를 본사 설정 확인과 재접속 안내로 바꾼다', () => {
     expectExpiredGuidance(readAuthCallbackError(expiredHash))
   })
   it('배포 주소 query의 otp_expired도 같은 안내로 처리한다', () => {

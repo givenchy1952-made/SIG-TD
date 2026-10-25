@@ -4,6 +4,10 @@ dist/
 .env.*
 !.env.example
 !.env.functions.example
+!.env.backup.example
+*.sigbackup
+*.sigbackup.sha256
+.sig-backups/
 playwright-report/
 test-results/
 *.tsbuildinfo
