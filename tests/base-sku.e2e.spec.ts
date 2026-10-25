@@ -11,26 +11,29 @@ async function ready(page: Page) {
   await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
 }
 async function snapshot(page: Page): Promise<Workspace> { return page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE) }
-async function openImport(page: Page) {
+async function openImport(page: Page, query?: string) {
   const menu = page.getByRole('button', { name: '메뉴 열기', exact: true })
   if (await menu.isVisible()) await menu.click()
   await page.getByRole('navigation', { name: '주 메뉴' }).getByRole('button', { name: '메인 생산', exact: true }).click()
+  if (query) await page.getByLabel('스타일 검색', { exact: true }).fill(query)
   await page.getByRole('button', { name: '오더 엑셀 업로드', exact: true }).click()
   return page.getByRole('dialog', { name: 'Excel 오더 수량 가져오기', exact: true })
 }
-function csv(sku: string, project = { code: 'QA-BASE-IMPORT-01', name: 'QA 기본 품번 프로젝트', season: '2026FY' }) {
+function csv(sku: string, project = { code: 'QA-BASE-IMPORT-01', name: 'QA 기본 품번 프로젝트', season: '2026FY' }, overrides: Record<number, string> = {}) {
   const headers = Array<string>(153).fill(''), row = Array<string>(153).fill('')
-  headers[0] = '프로젝트 코드'; headers[5] = '스타일코드'; headers[8] = '컬러'; headers[11] = '년도/시즌'; headers[12] = '프로젝트 명칭'
+  headers[0] = '프로젝트 코드'; headers[1] = '예산 코드'; headers[5] = '스타일코드'; headers[8] = '컬러'; headers[11] = '년도/시즌'; headers[12] = '프로젝트 명칭'
   headers[22] = '생산처'; headers[24] = '생산 담당자'; headers[50] = 'TOTAL QTY'
+  headers[40] = '입고예정일'
   row[0] = project.code; row[5] = sku; row[8] = '#REF!'; row[11] = project.season; row[12] = project.name
   row[22] = 'QA 별도 공장'; row[24] = 'QA 별도 담당자'; row[50] = '4,138'
   Object.values(QUANTITIES).forEach((quantity, index) => { headers[42 + index] = `TTL ${index + 1}`; row[42 + index] = quantity.toLocaleString('en-US') })
   row[4] = '#NAME?'; row[96] = '#REF!'
+  for (const [column, value] of Object.entries(overrides)) row[Number(column)] = value
   const quote = (value: string) => /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
   return Buffer.from('\uFEFF' + [headers, row].map(values => values.map(quote).join(',')).join('\r\n'))
 }
 
-test('컬러 없는 F 기본 품번의 실제 수량을 먼저 표시하고 명시한 컬러로 등록·적용하며 원본을 보존한다', async ({ page }) => {
+test('F 기본 품번의 실제 수량을 먼저 표시하고 입력한 전체 품번으로 등록·적용하며 원본을 보존한다', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await ready(page)
   const before = await snapshot(page), modal = await openImport(page)
@@ -41,11 +44,13 @@ test('컬러 없는 F 기본 품번의 실제 수량을 먼저 표시하고 명�
   await expect(row.locator('.import-total-cell')).toContainText('4,138')
   await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeDisabled()
   await expect(modal.getByLabel('색상 열', { exact: true })).toHaveCount(0)
-  await modal.getByLabel('원본 2행 컬러', { exact: true }).fill('BK')
-  await modal.getByRole('button', { name: '스타일·프로젝트 등록', exact: true }).click()
+  await modal.getByLabel('원본 2행 품번', { exact: true }).fill('QAFYDW9901BK')
   const registration = modal.getByRole('region', { name: '미등록 스타일 등록', exact: true })
-  await expect(registration.getByLabel('등록 기본 품번', { exact: true })).toHaveValue('QAFYDW9901')
-  await expect(registration.getByLabel('등록 컬러', { exact: true })).toHaveValue('BK')
+  await expect.poll(async () => await registration.isVisible() || await modal.getByRole('button', { name: '스타일·프로젝트 등록', exact: true }).isEnabled()).toBe(true)
+  if (!await registration.isVisible()) await modal.getByRole('button', { name: '스타일·프로젝트 등록', exact: true }).click()
+  await expect(registration.getByLabel('등록 품번', { exact: true })).toHaveValue('QAFYDW9901BK')
+  await expect(registration.getByLabel('등록 기본 품번', { exact: true })).toHaveCount(0)
+  await expect(registration.getByLabel('등록 컬러', { exact: true })).toHaveCount(0)
   await registration.getByLabel('등록 담당 공장', { exact: true }).selectOption(CHINA)
   await registration.getByLabel('등록 본사 담당자', { exact: true }).selectOption(ADMIN)
   await registration.getByLabel('등록 기준 납기일', { exact: true }).fill('2027-03-01')
@@ -77,7 +82,7 @@ test('기본 품번에 여러 컬러가 있으면 선택 전 적용을 막고 �
   await expect(modal.locator('.import-preview-table tbody tr').first().locator('.import-total-cell')).toContainText('4,138')
   await modal.getByLabel('오더 변경 사유', { exact: true }).fill('QA 여러 컬러 중 OW만 변경')
   await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeDisabled()
-  await modal.getByLabel('원본 2행 컬러', { exact: true }).fill('OW')
+  await modal.getByLabel('원본 2행 품번', { exact: true }).fill(`${original.code}OW`)
   await modal.getByRole('button', { name: '검증된 오더 적용', exact: true }).click()
   await expect(modal.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
   const after = await snapshot(page), updated = after.styles.find(item => item.id === original.id)!
@@ -109,22 +114,124 @@ test('단일 등록 컬러의 기본 품번과 기존 컬러 포함 품번을 �
   }
 })
 
-test('컬러 지정 행을 더 펼친 뒤 26번째 데이터의 컬러를 입력해도 행과 입력값을 유지한다', async ({ page }) => {
+test('품번 행을 더 펼친 뒤 26번째 데이터의 전체 품번을 입력해도 행과 입력값을 유지한다', async ({ page }) => {
   await ready(page)
   const before = await snapshot(page), modal = await openImport(page)
   const [header, row] = csv('QAFYDW9998').toString('utf8').split('\r\n')
   const buffer = Buffer.from([header, ...Array<string>(30).fill(row)].join('\r\n'))
   await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'QA-30-BASE-ROWS.csv', mimeType: 'text/csv', buffer })
-  await expect(modal.getByLabel('원본 27행 컬러', { exact: true })).toHaveCount(0)
-  await modal.getByRole('button', { name: '컬러 지정 행 더 보기', exact: true }).click()
-  const color = modal.getByLabel('원본 27행 컬러', { exact: true })
-  await expect(color).toBeVisible()
-  await color.fill('B')
-  await expect(color).toBeVisible()
-  await color.fill('BK')
-  await expect(color).toBeVisible()
-  await expect(color).toHaveValue('BK')
-  await expect(modal.getByLabel('원본 31행 컬러', { exact: true })).toBeVisible()
+  await expect(modal.getByLabel('원본 27행 품번', { exact: true })).toHaveCount(0)
+  await modal.getByRole('button', { name: '품번 행 더 보기', exact: true }).click()
+  const fullSku = modal.getByLabel('원본 27행 품번', { exact: true })
+  await expect(fullSku).toBeVisible()
+  await fullSku.fill('Q')
+  await expect(fullSku).toBeVisible()
+  await fullSku.fill('QAFYDW9998BK')
+  await expect(fullSku).toBeVisible()
+  await expect(fullSku).toHaveValue('QAFYDW9998BK')
+  await expect(modal.getByLabel('원본 31행 품번', { exact: true })).toBeVisible()
   await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeDisabled()
+  expect(await snapshot(page)).toEqual(before)
+})
+
+test('F 기본 품번과 B 예산코드의 전체 품번으로 등록 정보를 자동 채우고 한 번에 4138개를 반영한다', async ({ page }) => {
+  await ready(page)
+  await page.evaluate(({ key, factoryId }) => {
+    const workspace = JSON.parse(localStorage.getItem(key)!)
+    workspace.factories.find((factory: { id: string }) => factory.id === factoryId).name = 'QA나디아(주)'
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, { key: STORAGE, factoryId: CHINA })
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /샘플 & 생산 대시보드/ })).toBeVisible()
+  const before = await snapshot(page), modal = await openImport(page)
+  const project = { code: 'QA-2026FY-MPQ-99999', name: 'QA 2026 3Q', season: '2026FY' }, fullSku = 'QAFYDW9999BK'
+  await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({
+    name: 'QA-SIG-BASE-BUDGET-ORDER.csv', mimeType: 'text/csv', buffer: csv('QAFYDW9999', project, {
+      1: `${project.code}${fullSku}`, 22: 'QA나디아㈜', 24: '천민영', 40: '2026-10-14',
+    }),
+  })
+  const registration = modal.getByRole('region', { name: '미등록 스타일 등록', exact: true })
+  await expect(registration).toBeVisible()
+  await expect(registration.getByLabel('등록 품번', { exact: true })).toHaveValue(fullSku)
+  await expect(registration.getByLabel('등록 기본 품번', { exact: true })).toHaveCount(0)
+  await expect(registration.getByLabel('등록 컬러', { exact: true })).toHaveCount(0)
+  await expect(registration.getByLabel('등록 담당 공장', { exact: true })).toHaveValue(CHINA)
+  await expect(registration.getByLabel('등록 본사 담당자', { exact: true })).toHaveValue('10000000-0000-4000-8000-000000000002')
+  await expect(registration.getByLabel('등록 기준 납기일', { exact: true })).toHaveValue('2026-10-14')
+  await expect(registration.getByLabel('스타일 등록 사유', { exact: true })).not.toHaveValue('')
+  await expect(modal.locator('.import-preview-table tbody tr').first().locator('.import-total-cell')).toContainText('4,138')
+  await registration.getByRole('button', { name: '품번 등록 및 수량 적용', exact: true }).click()
+  await expect(modal.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
+  const after = await snapshot(page), style = after.styles.find(item => item.code === 'QAFYDW9999')!
+  expect(after.styles).toHaveLength(before.styles.length + 1)
+  expect(style).toMatchObject({ factoryId: CHINA, ownerId: '10000000-0000-4000-8000-000000000002', dueDate: '2026-10-14', colors: ['BK'] })
+  expect(style.production[0].order).toEqual(QUANTITIES)
+  expect(Object.values(style.production[0].shipped)).toEqual([0, 0, 0, 0, 0, 0])
+  expect(Object.values(style.production[0].received)).toEqual([0, 0, 0, 0, 0, 0])
+  expect(after.projects.find(item => item.id === style.projectId)).toMatchObject(project)
+  const source = after.operations!.orderSourceRecords.find(item => item.styleId === style.id)!
+  expect(source.rows[0].columns).toMatchObject({ A: project.code, F: 'QAFYDW9999', M: project.name, AY: '4,138' })
+  expect('I' in source.rows[0].columns).toBe(false)
+})
+
+test('파일 합계가 사이즈 합계와 다르면 통합 적용 전에 프로젝트·품번 등록부터 차단한다', async ({ page }) => {
+  await ready(page)
+  const before = await snapshot(page), modal = await openImport(page)
+  await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({
+    name: 'QA-BAD-TOTAL.csv', mimeType: 'text/csv', buffer: csv('QAFYDW9997BK', undefined, { 50: '4,139' }),
+  })
+  const registration = modal.getByRole('region', { name: '미등록 스타일 등록', exact: true })
+  await expect(registration).toBeVisible()
+  await registration.getByLabel('등록 담당 공장', { exact: true }).selectOption(CHINA)
+  await registration.getByLabel('등록 본사 담당자', { exact: true }).selectOption(ADMIN)
+  await registration.getByLabel('등록 기준 납기일', { exact: true }).fill('2027-03-01')
+  await registration.getByRole('button', { name: '품번 등록 및 수량 적용', exact: true }).click()
+  await expect(registration.getByRole('alert')).toContainText('사이즈 합계')
+  await expect(registration.getByLabel('등록 품번', { exact: true })).toHaveValue('QAFYDW9997BK')
+  expect(await snapshot(page)).toEqual(before)
+})
+
+test('다른 탭이 기존 품번을 변경하면 통합 가져오기에서 새 프로젝트·품번 저장 전에 재검증을 요구한다', async ({ page, context }) => {
+  await ready(page)
+  const before = await snapshot(page), original = before.styles.find(item => item.code === 'BO42FYHD0102')!
+  const modal = await openImport(page, original.code)
+  const [header, existingRow] = csv(`${original.code}BK`).toString('utf8').split('\r\n')
+  const [, newRow] = csv('QAFYDW9996', undefined, { 1: 'QA-BASE-IMPORT-01QAFYDW9996BK' }).toString('utf8').split('\r\n')
+  await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'QA-CONCURRENT-IMPORT.csv', mimeType: 'text/csv', buffer: Buffer.from([header, existingRow, newRow].join('\r\n')) })
+  const registration = modal.getByRole('region', { name: '미등록 스타일 등록', exact: true })
+  await expect(registration).toBeVisible()
+  await registration.getByLabel('등록 담당 공장', { exact: true }).selectOption(CHINA)
+  await registration.getByLabel('등록 본사 담당자', { exact: true }).selectOption(ADMIN)
+  await registration.getByLabel('등록 기준 납기일', { exact: true }).fill('2027-03-01')
+  const second = await context.newPage()
+  await ready(second)
+  await second.evaluate(({ key, styleId }) => {
+    const workspace = JSON.parse(localStorage.getItem(key)!)
+    const style = workspace.styles.find((item: { id: string }) => item.id === styleId)
+    style.production[0].order.M += 1; style.version += 1; style.updatedAt = new Date().toISOString()
+    localStorage.setItem(key, JSON.stringify(workspace))
+  }, { key: STORAGE, styleId: original.id })
+  const revisedTotal = Object.values(original.production[0].order).reduce((sum, quantity) => sum + quantity, 0) + 1
+  const dashboardRow = page.locator('.styles-table tbody tr').filter({ has: page.locator('.style-code').filter({ hasText: `${original.code}BK` }) })
+  await expect(dashboardRow.locator('.amount')).toContainText(revisedTotal.toLocaleString('ko-KR'))
+  const concurrent = await snapshot(page)
+  await registration.getByRole('button', { name: '품번 등록 및 수량 적용', exact: true }).click()
+  await expect(registration.getByRole('alert')).toContainText('최신 데이터로 다시 검증')
+  expect(await snapshot(page)).toEqual(concurrent)
+  expect(concurrent.styles.some(item => item.code === 'QAFYDW9996')).toBe(false)
+  expect(concurrent.projects).toEqual(before.projects)
+  await second.close()
+})
+
+test('자동으로 열린 등록 중 파일 형식을 바꾸면 이전 등록 폼을 닫고 데이터를 저장하지 않는다', async ({ page }) => {
+  await ready(page)
+  const before = await snapshot(page), modal = await openImport(page)
+  await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'QA-CHANGE-PRESET.csv', mimeType: 'text/csv', buffer: csv('QAFYDW9995BK') })
+  const registration = modal.getByRole('region', { name: '미등록 스타일 등록', exact: true })
+  await expect(registration).toBeVisible()
+  await modal.getByLabel('오더 파일 형식', { exact: true }).selectOption('generic')
+  await expect(registration).toHaveCount(0)
+  await expect(modal.getByRole('button', { name: '품번 등록 및 수량 적용', exact: true })).toHaveCount(0)
+  await expect(modal.getByLabel('오더 Excel 파일', { exact: true })).toBeEnabled()
   expect(await snapshot(page)).toEqual(before)
 })

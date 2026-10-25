@@ -10,7 +10,7 @@ export type OrderImportPreset = 'generic' | 'sig-order-qty'
 export const SIG_ORDER_SOURCE_COLUMNS = ORDER_SOURCE_COLUMNS
 export interface OrderSourceMetadata { rowNumber: number; columns: Record<string, ImportCell> }
 export interface OrderColumnMapping { sku: number | null; color: number | null; size: number | null; quantity: number | null; total: number | null; sizes: Partial<Record<Size, number | null>> }
-export interface OrderImportOptions { fileName?: string; preset?: OrderImportPreset; sigColors?: Record<number, string>; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
+export interface OrderImportOptions { fileName?: string; preset?: OrderImportPreset; sigColors?: Record<number, string>; sigSkus?: Record<number, string>; sigBudgetFallback?: boolean; layout: ImportLayout; mapping: OrderColumnMapping; headerRow: number; duplicateMode: 'reject' | 'sum'; missingSizes: 'reject' | 'zero'; mode: 'replace' | 'add' }
 export interface OrderImportPreviewRow {
   rowNumbers: number[]; sku: string; color: string; styleId: string | null; lineId: string | null; styleName: string;
   sourceMetadata?: OrderSourceMetadata[]; source?: OrderSourceData & { expectedVersion: number }; sourceChanged?: boolean; before: Quantities; imported: Quantities; after: Quantities; changed: boolean; errors: string[]; warnings: string[];
@@ -163,12 +163,31 @@ const columnIndex = (name: string) => [...name].reduce((value, char) => value * 
 function sourceMetadata(source: ImportCell[], rowNumber: number): OrderSourceMetadata {
   return { rowNumber, columns: Object.fromEntries(SIG_ORDER_SOURCE_COLUMNS.map(column => [column, source[columnIndex(column)] ?? null])) }
 }
-/** Column I is intentionally never used. A base-only F value needs an explicit
- * color, or a single unambiguous color already registered for that exact base. */
+/** Preserve F as the source value. An explicit user override wins; otherwise
+ * an approved budget-code fallback must be exactly A + F + two letters. */
+export function readSigRowSku(row: ImportCell[], override?: string, budgetFallback = false): string {
+  const sku = textCell(override !== undefined ? override : row[5], '품번')
+  if (override !== undefined || !budgetFallback || !sku || /[A-Z]{2}$/.test(sku)) return sku
+  const project = typeof row[0] === 'string' ? row[0].trim().toUpperCase() : ''
+  const budget = typeof row[1] === 'string' ? row[1].trim().toUpperCase() : ''
+  if (!project || !/^[A-Z0-9_-]{1,60}$/.test(sku) || !/[A-Z]/.test(sku)) return sku
+  const prefix = `${project}${sku}`
+  return budget.startsWith(prefix) && /^[A-Z]{2}$/.test(budget.slice(prefix.length)) ? budget.slice(project.length) : sku
+}
+/** Full SKU is the identity shown to the user. Both existing code+color and
+ * legacy whole-SKU style codes are accepted without changing their history. */
 export function resolveSigOrderIdentity(workspace: Workspace, value: string, selectedColor?: string): { base: string; color: string; fullSku: string } {
   const sku = value.trim().toUpperCase()
   if (!/^[A-Z0-9_-]{1,62}$/.test(sku) || !/[A-Z]/.test(sku)) throw new Error('F열 품번은 영문·숫자·밑줄·하이픈으로 입력해 주세요.')
-  if (sku.length > 2 && /[A-Z]{2}$/.test(sku)) return { base: sku.slice(0, -2), color: sku.slice(-2), fullSku: sku }
+  const active = workspace.styles.filter(style => !style.deletedAt)
+  if (sku.length > 2 && /[A-Z]{2}$/.test(sku)) {
+    const exact = active.filter(style => style.code.toUpperCase() === sku)
+    if (exact.some(style => style.production.length !== 1)) throw new Error('전체 품번과 일치하는 스타일의 생산 내역이 여러 개입니다. 가져올 대상을 먼저 확인해 주세요.')
+    const candidates = active.flatMap(style => style.production.filter(line => `${style.code}${line.color}`.toUpperCase() === sku || style.code.toUpperCase() === sku).map(line => ({ style, line })))
+    if (candidates.length > 1) throw new Error('전체 품번이 여러 스타일·생산 내역과 일치합니다. 시스템의 품번을 먼저 확인해 주세요.')
+    if (candidates.length === 1) return { base: candidates[0].style.code, color: candidates[0].line.color, fullSku: sku }
+    return { base: sku.slice(0, -2), color: sku.slice(-2), fullSku: sku }
+  }
   if (sku.length > 60) throw new Error('F열 기본 품번은 60자 이내여야 합니다.')
   const styles = workspace.styles.filter(style => !style.deletedAt && style.code.toUpperCase() === sku)
   if (styles.length > 1) throw new Error('F열 기본 품번이 여러 스타일과 일치합니다. 스타일 코드를 먼저 확인해 주세요.')
@@ -257,7 +276,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
     let preview = blankPreview(rowNumber)
     if (fixed) preview.sourceMetadata = [sourceMetadata(source, rowNumber)]
     try {
-      const sku = textCell(source[mapping.sku!], '품번'), color = mapping.color === null ? '' : textCell(source[mapping.color], '색상')
+      const sku = fixed ? readSigRowSku(source, options.sigSkus?.[rowNumber], options.sigBudgetFallback) : textCell(source[mapping.sku!], '품번'), color = mapping.color === null ? '' : textCell(source[mapping.color], '색상')
       preview.sku = sku; preview.color = color
       if (!sku) throw new Error('품번이 비어 있습니다.')
       const values = emptyQuantities()
@@ -269,12 +288,13 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
           if (total !== quantityTotal(values)) throw new Error(`사이즈 합계 ${quantityTotal(values).toLocaleString()}와 파일 합계 ${total.toLocaleString()}가 다릅니다.`)
         }
       }
-      if (fixed) preview.color = resolveSigOrderIdentity(workspace, sku, options.sigColors?.[rowNumber]).color
+      const identity = fixed ? resolveSigOrderIdentity(workspace, sku, options.sigColors?.[rowNumber]) : null
+      if (identity) preview.color = identity.color
       const { style, line } = fixed ? matchSigOrderLine(workspace, sku, options.sigColors?.[rowNumber]) : matchLine(workspace, sku, color)
       const key = `${style.id}:${line.id}`
       let group = groups.get(key)
       if (!group) {
-        preview = { ...preview, sku: `${style.code}${line.color}`, color: line.color, styleId: style.id, lineId: line.id, styleName: style.name, before: { ...line.order }, imported: emptyQuantities(), after: { ...line.order } }
+        preview = { ...preview, sku: identity?.fullSku || `${style.code}${line.color}`, color: line.color, styleId: style.id, lineId: line.id, styleName: style.name, before: { ...line.order }, imported: emptyQuantities(), after: { ...line.order } }
         group = { row: preview, style, seenSizes: new Set(), seenWide: false }; groups.set(key, group); rows.push(preview)
       } else { if (fixed) group.row.sourceMetadata!.push(...preview.sourceMetadata!); preview = group.row; preview.rowNumbers.push(rowNumber) }
       if (layout === 'wide') {

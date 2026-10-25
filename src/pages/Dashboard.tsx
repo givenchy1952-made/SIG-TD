@@ -20,7 +20,7 @@ type View = 'overview' | 'samples' | 'production' | 'settlement'
 type QuickFilter = 'all' | 'delayed' | 'upcoming' | 'approved' | 'samples' | 'unpaid'
 type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code'
 type DateField = 'dueDate' | 'samplePlanned' | 'sampleReceived' | 'sampleShipped' | 'productionShipped' | 'productionReceived' | 'confirmDue' | 'paymentDue'
-interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<void>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
+interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<Workspace>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
 interface Row { style: Style; line?: ProductionLine }
 const formatter = new Intl.NumberFormat('ko-KR')
 const number = (value: number) => formatter.format(value)

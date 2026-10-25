@@ -147,13 +147,20 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(workspace.styles[0]).toEqual(before)
   })
 
-  it('기존 기본 품번에 컬러가 잘못 포함된 경우 중복 스타일을 생성하지 않는다', () => {
+  it('기존 전체 품번이 정확히 일치하면 컬러를 다시 붙이거나 중복 스타일을 생성하지 않는다', () => {
     const { workspace, row, plan } = fixture()
     const style = workspace.styles[0]
     row[5] = `${style.code}BK`; style.code = String(row[5])
+    style.production = [style.production[0]]; style.production[0].color = 'BK'; style.colors = ['BK']
+    const before = structuredClone(style)
     const result = plan()
-    expect(result.style).toBeNull()
-    expect(result.errors.join(' ')).toContain('컬러 BK가 포함')
+    expect(result.errors).toEqual([])
+    expect(result.isNewStyle).toBe(false)
+    expect(result.isNewColor).toBe(false)
+    expect(result.fullSku).toBe(String(row[5]))
+    expect(result.style!.code).toBe(String(row[5]))
+    expect(result.style!.production).toEqual(before.production)
+    expect(style).toEqual(before)
   })
 
   it.each([0, 11, 12])('필수 프로젝트 열 %i가 없으면 등록하지 않는다', index => {
@@ -263,5 +270,92 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, 'BK')
     expect(result.style).toBeNull()
     expect(result.errors.join(' ')).toContain('F열 품번')
+  })
+
+  it('명시한 전체 품번으로 등록하면서 CSV의 기본 품번 F와 I열은 바꾸지 않는다', () => {
+    const { workspace, row, sheet, defaults } = fixture()
+    row[5] = 'QAFYTS9001'; row[8] = '#REF!'
+    const original = structuredClone(sheet)
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, undefined, 'QAFYTS9001BK')
+    expect(result.errors).toEqual([])
+    expect(result.fullSku).toBe('QAFYTS9001BK')
+    expect(result.style).toMatchObject({ code: 'QAFYTS9001', colors: ['BK'] })
+    expect(sheet).toEqual(original)
+    expect(quantityTotal(result.style!.production[0].order)).toBe(0)
+  })
+
+  it('명시한 전체 품번이 유효하지 않으면 원본 품번이 있어도 등록하지 않는다', () => {
+    const { workspace, sheet, defaults } = fixture()
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, defaults, undefined, undefined, '#REF!')
+    expect(result.style).toBeNull()
+    expect(result.errors.length).toBeGreaterThan(0)
+  })
+
+  it('W열의 ㈜·(주) 표기와 공백 차이만 정규화해 유일한 기존 공장에 연결한다', () => {
+    const { workspace, row, plan } = fixture()
+    workspace.factories[0].name = '티피 나디아 (주)'; row[22] = ' 티피나디아㈜ '
+    const result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.factoryId).toBe(workspace.factories[0].id)
+    expect(result.sourceFactory).toBe('티피나디아㈜')
+  })
+
+  it('법인 표기 정규화 뒤 여러 공장이 일치하면 그 중 하나를 임의로 고르지 않는다', () => {
+    const { workspace, row, plan, defaults } = fixture()
+    workspace.factories[0].name = '티피나디아(주)'
+    workspace.factories.push({ id: 'duplicate-factory', name: '티피 나디아㈜', country: '베트남' })
+    row[22] = '티피나디아㈜'
+    const result = plan()
+    expect(result.style!.factoryId).toBe(defaults.factoryId)
+    expect(result.style!.factoryId).not.toBe('duplicate-factory')
+  })
+
+  it('W열의 다른 구두점·빠진 법인 표기를 임의로 제거해 공장을 추측하지 않는다', () => {
+    const { workspace, row, plan, defaults } = fixture()
+    workspace.factories[0].name = '티피-나디아(주)'; row[22] = '티피나디아㈜'
+    expect(plan().style!.factoryId).toBe(defaults.factoryId)
+    workspace.factories[0].name = '티피나디아'; row[22] = '티피나디아㈜'
+    expect(plan().style!.factoryId).toBe(defaults.factoryId)
+  })
+
+  it('AO열 제목이 입고예정일이고 값이 유효한 날짜면 신규 납기를 미리 채워 출처를 표시한다', () => {
+    const { workspace, row, sheet, defaults } = fixture()
+    sheet.rows[0][40] = ' 입고 예정일 '; row[40] = ' 2026-10-14 '
+    row[18] = '2026-01-01'; row[37] = '2026-10-20'
+    const original = structuredClone(sheet)
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, { ...defaults, dueDate: '' })
+    expect(result.errors).toEqual([])
+    expect(result.style!.dueDate).toBe('2026-10-14')
+    expect(result.dueDateSource).toBe('AO열 입고예정일')
+    expect(result.style!.production[0].receivedAt).toBe('')
+    expect(sheet).toEqual(original)
+  })
+
+  it.each(['실입고일', '발주 요청일', ''])('AO열 제목이 %s이면 날짜를 납기로 추측하지 않는다', header => {
+    const { row, sheet, plan, defaults } = fixture()
+    sheet.rows[0][40] = header; row[40] = '2026-10-14'
+    const result = plan()
+    expect(result.style!.dueDate).toBe(defaults.dueDate)
+    expect(result.dueDateSource).toBeUndefined()
+  })
+
+  it.each(['2026-02-30', '2026/10/14', '2026-10-14T00:00:00Z', 20261014, { error: '#REF!' }])('AO열의 유효한 ISO 날짜가 아닌 값 %s는 수기 납기 기본값을 유지한다', value => {
+    const { row, sheet, plan, defaults } = fixture()
+    sheet.rows[0][40] = '입고예정일'; row[40] = value
+    const result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.dueDate).toBe(defaults.dueDate)
+    expect(result.dueDateSource).toBeUndefined()
+  })
+
+  it('AO 입고예정일은 이미 등록된 스타일의 납기를 바꾸지 않는다', () => {
+    const { workspace, row, sheet, plan } = fixture(), style = workspace.styles[0]
+    row[5] = `${style.code}${style.production[0].color}`
+    sheet.rows[0][40] = '입고예정일'; row[40] = '2027-12-31'
+    const before = structuredClone(style), result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.isNewStyle).toBe(false)
+    expect(result.style!.dueDate).toBe(before.dueDate)
+    expect(result.dueDateSource).toBeUndefined()
   })
 })
