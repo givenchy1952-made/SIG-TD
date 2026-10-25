@@ -7,8 +7,12 @@ export function addDays(days: number, from = new Date()): string { const d = new
 export function isOverdue(style: Style): boolean { return !!style.dueDate && style.dueDate < localDate() && style.stage !== 'approved' && !(style.stage === 'production' && style.production.length > 0 && style.production.every(p => quantityTotal(p.order) > 0 && quantityTotal(p.received) >= quantityTotal(p.order))) }
 export function isSampleStyle(style: Style): boolean {
   if (style.deletedAt || style.stage === 'production') return false
-  if (style.samples.length || ['pattern', 'sample1', 'sampleN', 'review', 'revision', 'approved'].includes(style.stage)) return true
-  return !style.production.some(line => quantityTotal(line.order) > 0 || quantityTotal(line.shipped) > 0 || quantityTotal(line.received) > 0)
+  if (['pattern', 'sample1', 'sampleN', 'review', 'revision'].includes(style.stage)) return true
+  return style.stage === 'registered' && !style.production.some(line => quantityTotal(line.order) > 0 || quantityTotal(line.shipped) > 0 || quantityTotal(line.received) > 0)
+}
+export function isMainProductionStyle(style: Style): boolean {
+  if (style.deletedAt) return false
+  return style.stage === 'production' || ['registered', 'approved'].includes(style.stage) && style.production.some(line => quantityTotal(line.order) > 0 || quantityTotal(line.shipped) > 0 || quantityTotal(line.received) > 0)
 }
 export function scopeWorkspace(workspace: Workspace, profile: import('./types').Profile): Workspace {
   const operations = scopeOperations(workspace, profile)

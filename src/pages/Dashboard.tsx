@@ -10,7 +10,7 @@ import { resolveStyleImage } from '../lib/style-images'
 import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '../lib/types'
 import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
 import { exportWorkspace } from '../lib/export'
-import { isSampleStyle } from '../lib/utils'
+import { isSampleStyle, isMainProductionStyle } from '../lib/utils'
 import type { OrderImportChange } from '../lib/operations-types'
 import type { RegistrationProject } from '../lib/order-registration'
 import './dashboard.css'
@@ -82,7 +82,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const today = localDate(new Date())
   const weekEndDate = new Date(); weekEndDate.setDate(weekEndDate.getDate() + 7)
   const weekEnd = localDate(weekEndDate)
-  const visibleStyles = workspace.styles.filter(style => !style.deletedAt && (!(view === 'samples' || tableMode === 'samples') || isSampleStyle(style)))
+  const visibleStyles = workspace.styles.filter(style => !style.deletedAt)
   const factoryName = (id: string) => workspace.factories.find(f => f.id === id)?.name || '미배정'
   const projectName = (id: string) => { const item = workspace.projects.find(p => p.id === id); return item ? [item.code, item.name].filter(Boolean).join(' · ') : '미배정' }
   const ownerName = (id: string) => workspace.profiles.find(p => p.id === id)?.name || '담당자'
@@ -94,7 +94,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const overdueCount = visibleStyles.filter(s => overdue(s, today)).length
   const upcomingCount = visibleStyles.filter(upcoming).length
   const approvedCount = visibleStyles.filter(s => s.stage === 'approved' || s.stage === 'production').length
-  const sampleCount = visibleStyles.filter(s => ['pattern', 'sample1', 'sampleN', 'review', 'revision'].includes(s.stage)).length
+  const sampleCount = visibleStyles.filter(isSampleStyle).length
   const productionMode = view === 'settlement' || tableMode === 'production'
   const activeStatuses = Object.entries(statuses).filter(([, v]) => v)
   const activeFilterCount = [season, project, factory, owner, stage, color, category, sampleStatus, round, pp, dateFrom, dateTo, ...activeStatuses.map(([, v]) => v)].filter(Boolean).length
@@ -123,7 +123,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       return matchesStatus && matchesRound
     })) return false
     if (quick === 'delayed' && !overdue(style, today) || quick === 'upcoming' && !upcoming(style) || quick === 'approved' && style.stage !== 'approved' && style.stage !== 'production') return false
-    if (quick === 'samples' && !['pattern', 'sample1', 'sampleN', 'review', 'revision'].includes(style.stage)) return false
+    if (quick === 'samples' && !isSampleStyle(style)) return false
     if (quick === 'unpaid' && !style.production.some(p => p.invoiceAmount > 0 && p.paymentStatus !== 'done' && p.paymentStatus !== 'approved')) return false
     if ((dateFrom || dateTo) && !datesFor(style, dateField).some(date => !!date && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo))) return false
     if (query.trim()) {
@@ -193,7 +193,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     </div>
 
     <div className="dashboard-progress-line">
-      <div><span className="subtle-dot"/><strong>워크플로</strong><span className="progress-separator"/>{(['pattern', 'sample1', 'sampleN', 'review', 'production'] as Stage[]).map((key, index) => <span className="workflow-count" key={key}>{index > 0 && <ChevronRight size={12}/>}<span>{STAGE_LABEL[key]}</span><b>{visibleStyles.filter(s => s.stage === key).length}</b></span>)}</div>
+      <div><span className="subtle-dot"/><strong>워크플로</strong><span className="progress-separator"/>{(['pattern', 'sample1', 'sampleN', 'review', 'production'] as Stage[]).map((key, index) => <span className="workflow-count" key={key}>{index > 0 && <ChevronRight size={12}/>}<span>{STAGE_LABEL[key]}</span><b>{visibleStyles.filter(style => key === 'production' ? isMainProductionStyle(style) : style.stage === key).length}</b></span>)}</div>
       <button onClick={() => quickClick('upcoming')} className={`upcoming-link ${quick === 'upcoming' ? 'active' : ''}`}><CalendarDays size={14}/>7일 이내 예정 <strong>{upcomingCount}</strong><ArrowRight size={13}/></button>
     </div>
 

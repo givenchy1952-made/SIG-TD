@@ -309,7 +309,7 @@ test('승인되지 않은 계정은 업무 화면 진입이 차단된다', async
 })
 
 
-test('생산 수량만 있는 가져온 품번은 샘플 집계·목록에서 제외하고 실제 샘플·신규 대기와 생산 수량은 보존한다', async ({ page }) => {
+test('통합 목록은 유지하고 현재 샘플·메인 생산 단계를 별도 집계하며 단계 전환 후 과거 샘플을 중복 집계하지 않는다', async ({ page }) => {
   await ready(page)
   await page.evaluate(key => {
     const workspace = JSON.parse(localStorage.getItem(key)!)
@@ -323,7 +323,7 @@ test('생산 수량만 있는 가져온 품번은 샘플 집계·목록에서 �
       style.production[0].order.M = quantity
       return style
     }
-    workspace.styles = [make('QAIMPORT001', 'registered', false, 4138), make('QAPENDING002', 'registered', false, 0), make('QASAMPLE003', 'sample1', true, 100), make('QAPRODUCTION004', 'production', true, 200)]
+    workspace.styles = [make('QAIMPORT001', 'registered', false, 4138), make('QAPENDING002', 'registered', false, 0), make('QASAMPLE003', 'sample1', true, 100), make('QAPRODUCTION004', 'production', true, 200), make('QAFINISHED005', 'approved', true, 300)]
     workspace.comments = []; workspace.attachments = []; workspace.audits = []
     localStorage.setItem(key, JSON.stringify(workspace))
   }, STORAGE)
@@ -333,10 +333,24 @@ test('생산 수량만 있는 가져온 품번은 샘플 집계·목록에서 �
   const sampleMenu = page.getByRole('navigation', { name: '주 메뉴' }).getByRole('button', { name: /샘플 관리/ })
   await expect(sampleMenu.locator('.nav-count')).toHaveText('2')
   await sampleMenu.click()
-  await expect(page.locator('.style-code')).toHaveCount(2)
-  await expect(page.locator('.style-code')).toContainText(['QAPENDING002', 'QASAMPLE003'])
+  await expect(page.locator('.style-code')).toHaveCount(5)
+  await expect(page.locator('.dashboard-kpis .kpi-card').filter({ hasText: '샘플 진행 중' }).locator('.kpi-number')).toContainText('2')
+  await expect(page.locator('.workflow-count').filter({ hasText: '메인 생산' }).locator('b')).toHaveText('3')
   await navigate(page, /^메인 생산$/)
-  await expect(page.locator('.style-code')).toHaveCount(4)
+  await expect(page.locator('.style-code')).toHaveCount(5)
   await expect(page.locator('.styles-table tbody tr').filter({ hasText: 'QAIMPORT001' })).toContainText('4,138')
   expect(await stored(page)).toEqual(before)
+  const detail = await openStyle(page, 'QASAMPLE003')
+  await detail.getByRole('button', { name: '기본 정보', exact: true }).click()
+  await detail.getByRole('combobox', { name: '전체 진행 단계', exact: true }).selectOption('production')
+  await save(detail, 'QA 샘플 완료 후 메인 생산 진행 단계 전환')
+  await detail.getByRole('button', { name: '상세 화면 닫기', exact: true }).click()
+  await page.getByLabel('스타일 검색', { exact: true }).fill('')
+  await expect(sampleMenu.locator('.nav-count')).toHaveText('1')
+  await expect(page.locator('.workflow-count').filter({ hasText: '메인 생산' }).locator('b')).toHaveText('4')
+  await expect(page.locator('.style-code')).toHaveCount(5)
+  const after = await stored(page), previous = before.styles.find((item: {code:string}) => item.code === 'QASAMPLE003'), changed = after.styles.find((item: {code:string}) => item.code === 'QASAMPLE003')
+  expect(changed.samples).toEqual(previous.samples)
+  expect(changed.production).toEqual(previous.production)
+  expect(after.styles.filter((item: {code:string}) => item.code !== 'QASAMPLE003')).toEqual(before.styles.filter((item: {code:string}) => item.code !== 'QASAMPLE003'))
 })
