@@ -211,9 +211,11 @@ function textCell(cell: ImportCell | undefined, label: string): string {
   if (typeof cell === 'boolean') throw new Error(`${label}에 문자 값을 입력해 주세요.`)
   return cell == null ? '' : String(cell).trim().toUpperCase()
 }
-function quantityCell(cell: ImportCell | undefined, label: string, max = MAX_QUANTITY): number {
+function quantityCell(cell: ImportCell | undefined, label: string, max = MAX_QUANTITY, accountingZero = false): number {
   if (typeof cell === 'object' && cell !== null) throw new Error(`${label}: ${cell.error}`)
-  if (cell == null || typeof cell === 'string' && !cell.trim()) return 0
+  // SIG's exported size columns use a standalone ASCII dash for accounting
+  // zero. Keep totals and other import formats strict, and retain the source.
+  if (cell == null || typeof cell === 'string' && (!cell.trim() || accountingZero && cell.trim() === '-')) return 0
   let quantity: number
   if (typeof cell === 'number') quantity = cell
   else if (typeof cell === 'string' && /^(\d+|\d{1,3}(,\d{3})+)$/.test(cell.trim())) quantity = Number(cell.trim().replaceAll(',', ''))
@@ -281,7 +283,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
       if (!sku) throw new Error('품번이 비어 있습니다.')
       const values = emptyQuantities()
       if (layout === 'wide') {
-        for (const size of sizeColumns) values[size] = quantityCell(source[mapping.sizes[size]!], size)
+        for (const size of sizeColumns) values[size] = quantityCell(source[mapping.sizes[size]!], size, MAX_QUANTITY, fixed)
         preview.imported = { ...values }
         if (mapping.total !== null && source[mapping.total] != null && source[mapping.total] !== '') {
           const total = quantityCell(source[mapping.total], '합계', MAX_QUANTITY * SIZES.length)

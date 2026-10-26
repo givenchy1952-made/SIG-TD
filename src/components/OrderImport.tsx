@@ -5,6 +5,7 @@ import { SIZES, quantityTotal } from '../lib/types'
 import type { Profile, Style, Workspace } from '../lib/types'
 import { validateStyle } from '../lib/permissions'
 import { planRegistrationFromRow, type OrderRegistrationPlan, type RegistrationProject } from '../lib/order-registration'
+import { buildBulkOrderRegistrationPlan, sourceFactoryGroups } from '../lib/bulk-order-registration'
 import type { OrderImportChange } from '../lib/operations-types'
 import { autoMapOrderColumns, buildOrderImportPreview, detectOrderHeaderRow, detectSigOrderHeaderRow, orderImportDefaults, parseOrderWorkbook, readSigRowSku, sigOrderColumnMapping, SIG_ORDER_SOURCE_COLUMNS } from '../lib/order-import'
 import type { ImportCell, ImportLayout, ImportWorkbook, OrderColumnMapping, OrderImportPreset } from '../lib/order-import'
@@ -37,10 +38,16 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   const [registration, setRegistration] = useState<OrderRegistrationPlan | null>(null)
   const [registrationReason, setRegistrationReason] = useState('')
   const [registrationError, setRegistrationError] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkOwnerId, setBulkOwnerId] = useState(profile.id)
+  const [bulkDueDate, setBulkDueDate] = useState('')
+  const [bulkFactories, setBulkFactories] = useState<Record<string, string>>({})
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const sequence = useRef(0)
   useEffect(() => () => { sequence.current += 1 }, [])
   const allowed = profile.approved && profile.active && profile.role !== 'factory'
   const available = (workspace as Workspace & { operationsAvailable?: boolean }).operationsAvailable === true
+  const productionOrdersAvailable = available && workspace.productionLedgerAvailable === true && workspace.supplierOrdersAvailable === true
   const sheet = book?.sheets[sheetIndex]
   const headers = sheet?.rows[headerRow - 1] || []
   const rawColumns = Array.from({ length: Math.min(15, headers.length) }, (_, index) => index).filter(index => preset !== 'sig-order-qty' || index !== 8)
@@ -54,7 +61,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   }) : []
   const errorCount = preview ? preview.errors.length + preview.rows.reduce((sum, row) => sum + row.errors.length, 0) : 0
   const warningCount = preview ? preview.warnings.length + preview.rows.reduce((sum, row) => sum + row.warnings.length, 0) : 0
-  const isRegistrationPending = (row: NonNullable<typeof preview>['rows'][number]) => !!registration?.style && !row.lineId && registration.fullSku === row.sku && row.errors.length > 0 && row.errors.every(item => item.includes('정확히 일치하는 스타일이 없습니다'))
+  const isRegistrationPending = (row: NonNullable<typeof preview>['rows'][number]) => !row.lineId && (bulkOpen || !!registration?.style && registration.fullSku === row.sku) && row.errors.length > 0 && row.errors.every(item => item.includes('정확히 일치하는 스타일이 없습니다'))
   const registrationPendingCount = preview?.rows.filter(isRegistrationPending).length || 0
   const visibleErrorCount = errorCount - (preview?.rows.filter(isRegistrationPending).reduce((sum, row) => sum + row.errors.length, 0) || 0)
   const stale = !applied && (preview?.changes.some(change => { const current = workspace.styles.find(style => style.id === change.styleId); return !current || current.deletedAt || current.version !== change.expectedVersion || change.lines.some(line => line.source && (workspace.operations?.orderSourceRecords?.find(source => source.styleId === change.styleId && source.lineId === line.lineId)?.version || 0) !== line.source.expectedVersion) }) || false)
@@ -63,7 +70,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
     let plan: OrderRegistrationPlan
     try { plan = planRegistrationFromRow(workspace, sheet, headerRow, rowNumber, { factoryId: '', ownerId: profile.id, dueDate: '' }, undefined, undefined, readSigRowSku(sheet.rows[rowNumber - 1], sigSkus[rowNumber], true)) } catch (failure) { setError(message(failure)); return }
     if (!plan.style || !plan.project) { setError(plan.errors.join(' ')); return }
-    setRegistration(plan); setRegistrationReason('오더 파일 품번 및 수량 등록'); setRegistrationError(''); setError('')
+    setBulkOpen(false); setRegistration(plan); setRegistrationReason('오더 파일 품번 및 수량 등록'); setRegistrationError(''); setError('')
   }
   async function registerStyle(applyImmediately = false) {
     if (!registration?.style || !registration.project || !onRegisterStyle || !allowed || workspace.refinementsAvailable !== true || busy || !sheet) return
@@ -117,11 +124,47 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
     const project = workspace.projects.find(item => item.id === style?.projectId)
     return !project || (project.code || '').trim().toUpperCase() !== projectValue(row, 'A').trim().toUpperCase() || project.name.trim() !== projectValue(row, 'M').trim() || project.season.trim() !== projectValue(row, 'L').trim()
   }
-  const changed = () => { setError(''); setSuccess(''); setApplied(false); setVisibleRows(25) }
+  const bulkOptions = useMemo(() => ({ createProductionRounds: true, fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }), [book?.name, preset, sigSkus, mapping, layout, headerRow, duplicateMode, missingSizes, mode])
+  const bulkGroups = useMemo(() => sheet && preset === 'sig-order-qty' ? sourceFactoryGroups(snapshot || workspace, sheet, headerRow, sigSkus) : [], [snapshot, workspace, sheet, preset, headerRow, sigSkus])
+  const bulkPlan = useMemo(() => bulkOpen && snapshot && sheet ? buildBulkOrderRegistrationPlan(snapshot, sheet, bulkOptions, { defaults: { ownerId: bulkOwnerId, dueDate: bulkDueDate }, factoryMappings: bulkFactories }) : null, [bulkOpen, snapshot, sheet, bulkOptions, bulkOwnerId, bulkDueDate, bulkFactories])
+  const canBulkRegister = preset === 'sig-order-qty' && !!onRegisterStyle && workspace.refinementsAvailable === true && (preview?.rows.length || 0) > 1 && preview!.rows.some(row => !row.lineId || needsProjectLink(row))
+  async function registerAll() {
+    if (!bulkPlan || !snapshot || !sheet || !onRegisterStyle || !allowed || !productionOrdersAvailable || busy || applied || stale || bulkPlan.errors.length || !bulkPlan.entries.length || reason.trim().length < 2) return
+    const plan = bulkPlan, basis = snapshot, options = bulkOptions, targetSheet = sheet
+    for (const entry of plan.entries) {
+      const before = basis.styles.find(style => style.id === entry.style.id)
+      const current = workspace.styles.find(style => style.id === entry.style.id)
+      if (before && (!current || current.deletedAt || current.version !== before.version)) { setError('파일 분석 이후 품번이 변경되었습니다. 최신 데이터로 다시 검증해 주세요.'); return }
+    }
+    setBusy(true); setError(''); setSuccess(''); setBulkProgress({ done: 0, total: plan.entries.length })
+    let prepared = structuredClone(basis), registered = 0, applying = false
+    try {
+      for (const entry of plan.entries) {
+        const fresh = await onRegisterStyle(entry.style, entry.project, reason.trim())
+        registered += 1
+        const saved = fresh.styles.find(style => style.id === entry.style.id)
+        const project = fresh.projects.find(project => project.id === entry.project.id)
+        if (!saved || !project || saved.version !== entry.style.version + 1) throw new Error('등록 직후 품번이나 프로젝트가 변경됐습니다. 최신 정보를 확인한 뒤 다시 시도해 주세요.')
+        // Rebase only records written by this batch; unrelated snapshot versions
+        // stay unchanged so the final importer still detects concurrent edits.
+        prepared = { ...prepared, styles: [...prepared.styles.filter(style => style.id !== saved.id), saved], projects: [...prepared.projects.filter(item => item.id !== project.id), project] }
+        setSnapshot(structuredClone(prepared)); setBulkProgress({ done: registered, total: plan.entries.length })
+      }
+      const checked = buildOrderImportPreview(prepared, targetSheet, options)
+      const failures = [...checked.errors, ...checked.rows.flatMap(row => row.errors)]
+      if (failures.length || !checked.changes.length) throw new Error(failures[0] || '적용할 오더 수량을 확인하지 못했습니다.')
+      applying = true
+      await onImport(checked.changes, options.mode, reason.trim())
+      setApplied(true); setBulkOpen(false); setSuccess(`품번·프로젝트 일괄 등록과 수량 적용을 완료했습니다. ${checked.rows.length}개 품번 · 새 생산 차수 ${checked.changes.reduce((sum, change) => sum + change.lines.length, 0)}개 · 총 ${formatNumber(checked.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0))}개`)
+    } catch (failure) {
+      setError(applying ? `품번 기본 정보 ${registered}개를 등록했습니다. 수량 적용 결과는 최신 데이터로 확인해 주세요. ${message(failure)}` : `품번 기본 정보 ${registered}개를 등록했고, 오더 수량은 아직 적용하지 않았습니다. 안내를 확인하고 남은 품번을 다시 등록해 주세요. ${message(failure)}`)
+    } finally { setBusy(false); setBulkProgress(null) }
+  }
+  const changed = () => { setBulkOpen(false); setError(''); setSuccess(''); setApplied(false); setVisibleRows(25) }
   async function readFile(file?: File) {
     if (!file || !allowed || busy) return
     const ticket = ++sequence.current
-    setLoading(true); setError(''); setSuccess(''); setApplied(false); setBook(null); setSnapshot(null); setSigSkus({})
+    setLoading(true); setBulkOpen(false); setBulkFactories({}); setBulkDueDate(''); setBulkOwnerId(profile.id); setError(''); setSuccess(''); setApplied(false); setBook(null); setSnapshot(null); setSigSkus({})
     try {
       const loaded = await parseOrderWorkbook(file)
       if (ticket !== sequence.current) return
@@ -168,7 +211,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
       <div className="order-import-intro"><FileSpreadsheet size={25} strokeWidth={1.4}/><div><h3>파일을 확인하고, 변경 수량을 비교한 뒤 적용하세요.</h3><p>파일의 전체 품번과 XXS~XL 오더 수량을 가져옵니다. SIG 형식의 원본 참조 열도 함께 저장합니다. 새 품번은 아래 등록 정보를 확인하면 수량과 함께 가져올 수 있습니다.</p></div></div>
       {!allowed && <div className="error-message" role="alert">오더 가져오기는 승인된 관리자·본사 직원만 사용할 수 있습니다.</div>}
       {!available && <div className="error-message" role="alert">추가 업무 기능 데이터베이스 설정이 필요합니다. 관리자가 003 마이그레이션을 적용한 뒤 다시 열어 주세요. 파일 검증은 먼저 진행할 수 있습니다.</div>}
-      <label className={`order-file-drop ${loading ? 'loading' : ''}`}><input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="오더 Excel 파일" disabled={!allowed || loading || busy || !!registration} onChange={e => { void readFile(e.target.files?.[0]); e.currentTarget.value = '' }}/><Upload size={20}/><strong>{loading ? '오더 파일을 읽고 있습니다…' : book ? book.name : 'Excel · CSV 오더 파일 선택'}</strong><span>.xlsx · UTF-8/CP949 CSV · 최대 10MB · 파일은 브라우저에서 분석됩니다.</span>{book && <span className="order-selected-file"><CheckCircle2 size={12}/>{book.sheets.length}개 시트 확인{book.encoding && <> · 문자 인코딩 {book.encoding === 'cp949' ? 'CP949 (한국어 Excel CSV)' : 'UTF-8'}</>}</span>}</label>
+      <label className={`order-file-drop ${loading ? 'loading' : ''}`}><input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="오더 Excel 파일" disabled={!allowed || loading || busy || !!registration || bulkOpen} onChange={e => { void readFile(e.target.files?.[0]); e.currentTarget.value = '' }}/><Upload size={20}/><strong>{loading ? '오더 파일을 읽고 있습니다…' : book ? book.name : 'Excel · CSV 오더 파일 선택'}</strong><span>.xlsx · UTF-8/CP949 CSV · 최대 10MB · 파일은 브라우저에서 분석됩니다.</span>{book && <span className="order-selected-file"><CheckCircle2 size={12}/>{book.sheets.length}개 시트 확인{book.encoding && <> · 문자 인코딩 {book.encoding === 'cp949' ? 'CP949 (한국어 Excel CSV)' : 'UTF-8'}</>}</span>}</label>
       <p className="import-large-file-note">큰 Excel 파일은 첫 탭 ORDER QTY만 선택해 ‘CSV UTF-8’로 저장한 후 가져오세요. 이미지와 다른 시트는 CSV에 포함되지 않습니다.</p>
       {error && <div className="error-message" role="alert">{error}</div>}
       {book && sheet && <>
@@ -185,11 +228,24 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
           <div className="import-check-options"><label><input type="checkbox" checked={duplicateMode === 'sum'} onChange={e => { setDuplicateMode(e.target.checked ? 'sum' : 'reject'); changed() }} disabled={busy}/>중복 품번·사이즈 수량 합산 허용</label><label><input type="checkbox" checked={missingSizes === 'zero'} onChange={e => { setMissingSizes(e.target.checked ? 'zero' : 'reject'); changed() }} disabled={busy}/>누락 사이즈를 0으로 처리</label></div><p className="import-option-warning">기본값은 중복·누락을 오류로 처리합니다. 교체 모드에서 누락 사이즈를 0으로 처리하면 해당 사이즈의 기존 오더가 0으로 바뀝니다. 지정한 사이즈 열의 빈 셀은 0으로 읽습니다.</p>
         </section>
         {preview && <section className="import-step import-preview"><div className="import-step-heading"><span>04</span><h3>적용 전 미리보기</h3><p>전체 데이터에 오류가 없어야 적용할 수 있습니다.</p></div>
+          {canBulkRegister && !bulkOpen && !registration && !applied && <div className="import-bulk-intro"><div><strong>여러 품번을 한 번에 등록할 수 있습니다.</strong><p>생산처별 공장과 본사 담당자·기준 납기를 확인하면 새 품번과 프로젝트를 함께 등록하고 수량을 적용합니다.</p></div><button type="button" className="button button-primary" disabled={!allowed || busy || !available} onClick={() => { setRegistration(null); setBulkOpen(true); setError(''); setSuccess('') }}>미등록 품번 일괄 등록</button></div>}
+          {bulkOpen && bulkPlan && <section className="import-registration import-bulk-registration" aria-label="품번·프로젝트 일괄 등록">
+            <div className="section-heading"><div><h3>품번·프로젝트 일괄 등록</h3><p className="muted">새 기본 스타일 {bulkPlan.newStyleCount}개 · 새 컬러 {bulkPlan.newColorCount}개 · 프로젝트 {bulkPlan.projectCount}개를 확인해 주세요.</p></div></div>
+            {!productionOrdersAvailable && <div className="import-validation-error" role="status">프로젝트·생산 차수 설정이 필요합니다. 기존 추가 SQL 007~009 적용을 완료한 뒤 일괄 등록해 주세요.</div>}
+            <div className="form-grid"><label className="field"><span className="field-label">공통 본사 담당자</span><select className="select" aria-label="일괄 등록 본사 담당자" value={bulkOwnerId} disabled={busy} onChange={event => setBulkOwnerId(event.target.value)}><option value="">담당자 선택</option>{workspace.profiles.filter(owner => owner.active && owner.approved && owner.role !== 'factory').map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select><small>신규 품번에 적용합니다. 기존 품번의 담당자는 유지합니다.</small></label>
+              <label className="field"><span className="field-label">공통 기준 납기일</span><input className="input" type="date" aria-label="일괄 등록 기준 납기일" value={bulkDueDate} disabled={busy} onChange={event => setBulkDueDate(event.target.value)}/><small>파일에 입고예정일이 없는 신규 품번의 기준 납기를 선택해 주세요.</small></label></div>
+            <div className="import-bulk-factories"><h4>파일의 생산처와 등록 공장 연결</h4><p className="muted">W열 생산처별로 신규 품번의 공장을 확인합니다. 목록에 없는 업체는 관리자가 공장 기본 정보를 먼저 등록해 주세요.</p><div className="form-grid">{bulkGroups.map(group => <label className="field" key={group.source}><span className="field-label">{group.source || '생산처 미기재'} · {group.count}개 품번</span><select className="select" aria-label={`일괄 등록 공장 ${group.source}`} value={bulkFactories[group.source] ?? group.factoryId} disabled={busy} onChange={event => setBulkFactories(current => ({ ...current, [group.source]: event.target.value }))}><option value="">등록된 공장 선택</option>{workspace.factories.map(factory => <option key={factory.id} value={factory.id}>{factory.name}</option>)}</select></label>)}</div></div>
+            {!!bulkPlan.errors.length && <div className="import-validation-error" role="status"><AlertCircle size={14}/><div><strong>등록 전에 확인해 주세요.</strong><ul>{bulkPlan.errors.slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>{bulkPlan.errors.length > 8 && <p>외 {bulkPlan.errors.length - 8}건</p>}</div></div>}
+            {!!bulkPlan.entries.length && <div className="table-wrap import-bulk-preview"><table className="data-table"><thead><tr><th>기본 품번</th><th>등록 컬러</th><th>프로젝트 코드</th><th>담당 공장</th><th>기준 납기일</th></tr></thead><tbody>{bulkPlan.entries.map(entry => <tr key={entry.style.id}><td>{entry.style.code}</td><td>{entry.style.colors.join(' / ')}</td><td>{entry.project.code}</td><td>{workspace.factories.find(factory => factory.id === entry.style.factoryId)?.name || '공장 선택 필요'}</td><td>{entry.style.dueDate || '납기 선택 필요'}</td></tr>)}</tbody></table></div>}
+            <p className="muted">전체 품번의 수량 검증이 끝난 후 기본 정보를 등록하고 오더 수량을 일괄 적용합니다. 기존 출고·입고·이전 생산 차수는 보존합니다.</p>
+            {bulkProgress && <p role="status">품번 기본 정보 등록 {bulkProgress.done} / {bulkProgress.total} · 수량 적용 준비 중</p>}
+            <div className="import-registration-actions"><button type="button" className="button" disabled={busy} onClick={() => setBulkOpen(false)}>일괄 등록 취소</button><button type="button" className="button button-primary" disabled={busy || !productionOrdersAvailable || !allowed || applied || stale || !!bulkPlan.errors.length || !bulkPlan.entries.length || reason.trim().length < 2} onClick={() => void registerAll()}>{busy ? '일괄 처리 중…' : '품번 일괄 등록 및 수량 적용'}</button></div>
+          </section>}
           <div className="import-preview-summary"><span>분석 <b>{formatNumber(preview.sourceRows)}</b>행</span><span>매칭 <b>{formatNumber(preview.matchedLines)}</b>컬러</span><span>적용 <b>{formatNumber(preview.changedStyles)}</b>스타일 · 수량 <b>{formatNumber(preview.changedLines)}</b>컬러{preview.sourceChangedLines > 0 && <> · 원본 정보 <b>{formatNumber(preview.sourceChangedLines)}</b>컬러</>}</span><span className={visibleErrorCount ? 'has-error' : 'no-error'}>오류 <b>{visibleErrorCount}</b></span>{registrationPendingCount > 0 && <span>신규 품번 등록 대기 <b>{registrationPendingCount}</b></span>}{warningCount > 0 && <span className="has-warning">확인사항 <b>{warningCount}</b></span>}</div>
           {preview.errors.map((item, i) => <p className="import-validation-error" key={i}><AlertCircle size={14}/>{item}</p>)}
           {skuRows.length > 0 && <section className="import-base-colors" aria-label="가져올 품번 확인"><h4>가져올 품번 확인</h4><p>품번을 그대로 확인합니다. F열이 기본 품번이면 B열 예산코드에서 프로젝트 코드와 정확히 일치하는 전체 품번을 자동으로 가져옵니다. I열은 읽지 않습니다.</p>{skuRows.slice(0, visibleRows).map(item => <label className="import-base-color-row import-sku-row" key={item.rowNumber}><span>{item.rowNumber}행</span><input className="input" aria-label={`원본 ${item.rowNumber}행 품번`} value={item.sku} maxLength={62} disabled={busy || applied || !!registration} onChange={event => { setSigSkus(current => ({ ...current, [item.rowNumber]: event.target.value.toUpperCase() })); setError(''); setSuccess(''); setApplied(false) }}/><small>{item.fromBudget ? '예산코드에서 전체 품번 인식' : 'F열 품번'}</small></label>)}{skuRows.length > visibleRows && <button className="button button-ghost" onClick={() => setVisibleRows(value => value + 50)}>품번 행 더 보기</button>}</section>}
           {preview.rows.some(row => !row.lineId) && <p className="import-formula-note">새 품번도 파일에서 읽은 수량을 표시합니다. 아래 등록 정보를 확인하고 품번 등록 및 수량 적용을 누르세요.</p>}
-          <div className="table-wrap import-preview-table"><table className="data-table"><thead><tr><th>원본 행</th><th>{'품번 / 제품명'}</th>{preset === 'sig-order-qty' && <><th>A · 프로젝트 코드</th><th>M · 프로젝트 명칭</th></>}{SIZES.map(size => <th key={size}>{size}</th>)}<th>총수량</th><th>검증 결과</th></tr></thead><tbody>{preview.rows.slice(0, visibleRows).map((row, i) => <tr key={row.lineId || `error-${i}`} className={row.errors.length && !isRegistrationPending(row) ? 'import-error-row' : row.changed ? 'import-changed-row' : ''}><td title={row.rowNumbers.join(', ')}>{row.rowNumbers.length > 3 ? `${row.rowNumbers[0]} 외 ${row.rowNumbers.length - 1}` : row.rowNumbers.join(', ')}</td><td><strong>{row.sku || '품번 없음'}</strong><small>{row.styleName || row.color || '미등록 품번·컬러'}</small></td>{preset === 'sig-order-qty' && <><td>{projectValue(row, 'A') || '—'}</td><td>{projectValue(row, 'M') || '—'}</td></>}{SIZES.map(size => <td key={size} className={row.before[size] !== row.after[size] ? 'changed-quantity' : ''}>{row.lineId ? <><span>{formatNumber(row.before[size])}</span><ArrowRight size={10}/><b>{formatNumber(row.after[size])}</b></> : <><span>파일 </span><b>{formatNumber(row.imported[size])}</b></>}</td>)}<td className="import-total-cell">{row.lineId ? <><span>{formatNumber(quantityTotal(row.before))}</span><ArrowRight size={10}/><b>{formatNumber(quantityTotal(row.after))}</b></> : <><span>파일 </span><b>{formatNumber(quantityTotal(row.imported))}</b></>}</td><td>{isRegistrationPending(row) ? <span className="import-row-warning">새 품번 · 등록 후 수량 적용</span> : row.errors.length ? <details open={preview.rows.length <= 5}><summary className="import-row-error"><X size={12}/>오류 {row.errors.length}건</summary>{row.errors.map((item, n) => <p key={n}>{item}</p>)}</details> : <span className={row.changed || row.sourceChanged ? 'import-row-ok' : 'muted'}><CheckCircle2 size={12}/>{row.changed ? '수량 변경 예정' : row.sourceChanged ? '원본 정보 저장' : '변경 없음'}</span>}{preset === 'sig-order-qty' && (!row.lineId || needsProjectLink(row)) && !!onRegisterStyle && <button type="button" className="button import-register-row" disabled={!allowed || busy || workspace.refinementsAvailable !== true || !!registration} onClick={() => beginRegistration(row.rowNumbers[0])}>{row.lineId ? '프로젝트 연결' : '스타일·프로젝트 등록'}</button>}{row.warnings.length > 0 && <details><summary className="import-row-warning">확인 {row.warnings.length}건</summary>{row.warnings.map((item, n) => <p key={n}>{item}</p>)}</details>}</td></tr>)}</tbody></table></div>
+          <div className="table-wrap import-preview-table"><table className="data-table"><thead><tr><th>원본 행</th><th>{'품번 / 제품명'}</th>{preset === 'sig-order-qty' && <><th>A · 프로젝트 코드</th><th>M · 프로젝트 명칭</th></>}{SIZES.map(size => <th key={size}>{size}</th>)}<th>총수량</th><th>검증 결과</th></tr></thead><tbody>{preview.rows.slice(0, visibleRows).map((row, i) => <tr key={row.lineId || `error-${i}`} className={row.errors.length && !isRegistrationPending(row) ? 'import-error-row' : row.changed ? 'import-changed-row' : ''}><td title={row.rowNumbers.join(', ')}>{row.rowNumbers.length > 3 ? `${row.rowNumbers[0]} 외 ${row.rowNumbers.length - 1}` : row.rowNumbers.join(', ')}</td><td><strong>{row.sku || '품번 없음'}</strong><small>{row.styleName || row.color || '미등록 품번·컬러'}</small></td>{preset === 'sig-order-qty' && <><td>{projectValue(row, 'A') || '—'}</td><td>{projectValue(row, 'M') || '—'}</td></>}{SIZES.map(size => <td key={size} className={row.before[size] !== row.after[size] ? 'changed-quantity' : ''}>{row.lineId ? <><span>{formatNumber(row.before[size])}</span><ArrowRight size={10}/><b>{formatNumber(row.after[size])}</b></> : <><span>파일 </span><b>{formatNumber(row.imported[size])}</b></>}</td>)}<td className="import-total-cell">{row.lineId ? <><span>{formatNumber(quantityTotal(row.before))}</span><ArrowRight size={10}/><b>{formatNumber(quantityTotal(row.after))}</b></> : <><span>파일 </span><b>{formatNumber(quantityTotal(row.imported))}</b></>}</td><td>{isRegistrationPending(row) ? <span className="import-row-warning">새 품번 · 등록 후 수량 적용</span> : row.errors.length ? <details open={preview.rows.length <= 5}><summary className="import-row-error"><X size={12}/>오류 {row.errors.length}건</summary>{row.errors.map((item, n) => <p key={n}>{item}</p>)}</details> : <span className={row.changed || row.sourceChanged ? 'import-row-ok' : 'muted'}><CheckCircle2 size={12}/>{row.changed ? '수량 변경 예정' : row.sourceChanged ? '원본 정보 저장' : '변경 없음'}</span>}{preset === 'sig-order-qty' && (!row.lineId || needsProjectLink(row)) && !!onRegisterStyle && <button type="button" className="button import-register-row" disabled={!allowed || busy || workspace.refinementsAvailable !== true || !!registration || bulkOpen} onClick={() => beginRegistration(row.rowNumbers[0])}>{row.lineId ? '프로젝트 연결' : '스타일·프로젝트 등록'}</button>}{row.warnings.length > 0 && <details><summary className="import-row-warning">확인 {row.warnings.length}건</summary>{row.warnings.map((item, n) => <p key={n}>{item}</p>)}</details>}</td></tr>)}</tbody></table></div>
           {preset === 'sig-order-qty' && preview.rows.some(row => !row.lineId || needsProjectLink(row)) && !!onRegisterStyle && workspace.refinementsAvailable !== true && <p className="import-validation-error">미등록 스타일·프로젝트 등록은 005 업데이트 적용 후 사용할 수 있습니다. 기존 등록 품번의 수량 적용은 계속 사용할 수 있습니다.</p>}
           {registration?.style && registration.project && <section className="import-registration" aria-label="미등록 스타일 등록"><div className="section-heading"><div><h3>{registration.isNewStyle ? '신규 스타일·프로젝트 등록' : registration.isNewColor ? '기존 스타일에 컬러 등록' : '기존 스타일 프로젝트 연결'}</h3><p className="muted">공장·담당자·납기를 확인하면 품번 등록과 파일 수량 적용을 함께 진행할 수 있습니다.</p></div></div><div className="form-grid">
             <label className="field"><span className="field-label">등록 품번</span><input className="input" aria-label="등록 품번" readOnly value={registration.fullSku}/></label>

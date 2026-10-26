@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Workbook } from 'exceljs'
 import { readFile } from 'node:fs/promises'
 import { createSeed } from '../src/lib/seed'
-import { SIZES, quantityTotal } from '../src/lib/types'
+import { SIZES, blankProduction, quantityTotal } from '../src/lib/types'
 import { EMPTY_OPERATIONS } from '../src/lib/operations-types'
 import { MAX_ORDER_IMPORT_FILE, autoMapOrderColumns, buildOrderImportPreview, detectOrderHeaderRow, detectSigOrderHeaderRow, orderImportCell, orderImportDefaults, parseOrderCSV, parseOrderWorkbook, sigOrderColumnMapping, SIG_ORDER_SOURCE_COLUMNS } from '../src/lib/order-import'
 import type { ImportCell, ImportSheet, OrderImportOptions } from '../src/lib/order-import'
@@ -18,6 +18,79 @@ function fixture() {
   return { workspace, style, line, headers, options, row, build }
 }
 const messages = (preview: ReturnType<typeof buildOrderImportPreview>) => [...preview.errors, ...preview.rows.flatMap(row => row.errors)].join(' ')
+
+/** Privacy-safe regression data: generic identities, projects and factories;
+ * only the exported 58×153 geometry and 26-row accounting format are modeled. */
+async function accountingFixture(registered = true) {
+  const bytes = new Uint8Array(await readFile(new URL('./fixtures/sig-order-26-cp949.csv', import.meta.url)))
+  const book = await parseOrderWorkbook(new File([bytes], 'qa-26-orders.csv'))
+  const defaults = orderImportDefaults(book), sheet = book.sheets[defaults.sheetIndex]
+  const workspace = createSeed(), template = structuredClone(workspace.styles[0])
+  workspace.styles = []
+  if (registered) for (const row of sheet.rows.slice(defaults.headerRow)) {
+    if (typeof row[5] !== 'string' || !row[5].trim()) continue
+    const full = row[5].trim(), code = full.slice(0, -2), color = full.slice(-2)
+    let style = workspace.styles.find(item => item.code === code)
+    if (!style) {
+      style = { ...structuredClone(template), id: crypto.randomUUID(), code, colors: [], production: [] }
+      workspace.styles.push(style)
+    }
+    style.colors.push(color); style.production.push(blankProduction(color))
+  }
+  const options: OrderImportOptions = { ...defaults, fileName: book.name, createProductionRounds: true, duplicateMode: 'reject', missingSizes: 'reject', mode: 'replace' }
+  const build = () => buildOrderImportPreview(workspace, sheet, options)
+  return { book, defaults, workspace, sheet, options, build }
+}
+
+describe('SIG CSV 회계식 0 표시', () => {
+  it('CP949 153열·7행 제목·26개 품번의 사이즈 하이픈을 0으로 읽고 7,950개를 보존한다', async () => {
+    const { book, defaults, workspace, build } = await accountingFixture()
+    expect(book.encoding).toBe('cp949'); expect(defaults.headerRow).toBe(7); expect(defaults.preset).toBe('sig-order-qty')
+    expect(workspace.styles).toHaveLength(19)
+    const preview = build()
+    expect(messages(preview)).toBe(''); expect(preview.rows).toHaveLength(26); expect(preview.matchedLines).toBe(26)
+    expect(preview.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0)).toBe(7950)
+    expect(preview.rows.filter(row => row.imported.XXS === 0)).toHaveLength(9)
+    expect(preview.rows[0].imported).toEqual({ XXS: 0, XS: 60, S: 60, M: 60, L: 60, XL: 60 })
+    const source = preview.changes[0].lines[0].source!
+    expect(source.rows[0].columns.AQ).toBe(' - ')
+    expect(source.rows[0].columns.F).toBe('QA26FYTS0001BK')
+    expect(Object.keys(source.rows[0].columns)).toHaveLength(16)
+    expect('I' in source.rows[0].columns).toBe(false)
+  })
+
+  it('미등록 26개 품번도 수량을 0으로 바꾸지 않고 실제 합계와 등록 안내를 표시한다', async () => {
+    const { build } = await accountingFixture(false), preview = build()
+    expect(preview.rows).toHaveLength(26); expect(preview.changes).toEqual([])
+    expect(preview.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0)).toBe(7950)
+    expect(preview.rows.every(row => row.errors.length === 1 && row.errors[0].includes('정확히 일치하는 스타일이 없습니다'))).toBe(true)
+    expect(preview.rows[0].sourceMetadata![0].columns.AQ).toBe(' - ')
+  })
+
+  it('합계 열의 하이픈은 숫자로 간주하지 않는다', async () => {
+    const { sheet, build } = await accountingFixture()
+    sheet.rows[7][50] = ' - '
+    const preview = build()
+    expect(messages(preview)).toContain('합계 수량'); expect(preview.changes).toEqual([])
+  })
+
+  it.each(['-1', '--', '−', '–', '—', '#VALUE!', { error: '수식 결과 없음' }])('SIG 사이즈 셀의 %s는 0으로 바꾸지 않고 전체 적용을 차단한다', async value => {
+    const { sheet, build } = await accountingFixture()
+    sheet.rows[7][42] = value
+    const preview = build()
+    expect(messages(preview)).toMatch(/정수|오류|수식/); expect(preview.changes).toEqual([])
+  })
+
+  it('일반 가로·세로 수량 가져오기에서 하이픈 허용 범위를 넓히지 않는다', () => {
+    const { row, build, workspace, style } = fixture()
+    const wide = row(); wide[2] = '-'
+    expect(messages(build([wide]))).toContain('정수')
+    const sheet: ImportSheet = { name: '오더', rows: [['품번', '색상', '사이즈', '수량'], [style.code, 'BK', 'S', '-']] }
+    const { mapping, layout } = autoMapOrderColumns(sheet.rows[0])
+    const preview = buildOrderImportPreview(workspace, sheet, { mapping, layout, headerRow: 1, duplicateMode: 'reject', missingSizes: 'zero', mode: 'replace' })
+    expect(messages(preview)).toContain('정수'); expect(preview.changes).toEqual([])
+  })
+})
 
 describe('실제 xlsx 파일 및 제목 행 인식', () => {
   it('제목 위에 안내 문구가 있는 실제 xlsx의 헤더와 사이즈 수량을 읽는다', async () => {
