@@ -4,7 +4,11 @@ export function canViewStyle(profile: Profile, style: Style) { return profile.ap
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function unchangedKeys(a: object, b: object, except: string[]) { for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) if (!except.includes(key) && !same(a[key as keyof typeof a], b[key as keyof typeof b])) throw new Error(`이 항목을 변경할 권한이 없습니다: ${key}`) }
 export function validateStyle(style: Style) {
-  if (!style.code.trim() || !style.name.trim() || !style.factoryId || !style.projectId || !style.ownerId || !style.dueDate) throw new Error('스타일 코드, 이름, 공장, 프로젝트, 담당자, 납기일을 입력해 주세요.')
+  if (!style.code.trim() || !style.name.trim() || !style.factoryId || !style.projectId || !style.ownerId) throw new Error('스타일 코드, 이름, 공장, 프로젝트, 담당자를 입력해 주세요.')
+  // The database permits an unknown baseline date as an empty string. Imported
+  // order drafts can therefore wait for the PO delivery date without inventing
+  // one; an explicitly supplied baseline date must still be a real ISO date.
+  if (typeof style.dueDate !== 'string' || style.dueDate !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(style.dueDate) || !Number.isFinite(Date.parse(`${style.dueDate}T00:00:00Z`)) || new Date(`${style.dueDate}T00:00:00Z`).getUTCFullYear() < 1 || new Date(`${style.dueDate}T00:00:00Z`).toISOString().slice(0, 10) !== style.dueDate)) throw new Error('기준 납기일은 미정 또는 유효한 연-월-일 형식으로 입력해 주세요.')
   if (!style.colors.length || style.colors.some(c => !/^[A-Z]{2}$/.test(c)) || new Set(style.colors).size !== style.colors.length) throw new Error('컬러는 중복 없는 영문 대문자 두 자리로 입력해 주세요.')
   if (new Set(style.samples.map(s => s.id)).size !== style.samples.length || new Set(style.production.map(p => p.id)).size !== style.production.length) throw new Error('중복 이력이 있습니다.')
   for (const p of style.production) for (const key of ['order', 'shipped', 'received', 'packing'] as const) for (const size of SIZES) { const v = p[key][size]; if (!Number.isSafeInteger(v) || v < 0 || v > 10000000) throw new Error('수량은 0~10,000,000 사이의 정수로 입력해 주세요.') }

@@ -56,7 +56,7 @@ test('동일 수량 리오더와 다른 프로젝트 발주를 별도 차수로 
   await filter.getByRole('checkbox', { name: 'QA-PROJECT-B · QA 프로젝트 B', exact: true }).check(); await page.keyboard.press('Escape')
   await expect(board.locator('tbody tr')).toHaveCount(3)
   // A registered SKU can immediately reorder under a previously unknown
-  // project through the existing reviewed registration action, without SQL.
+  // A-column project through the same apply action, without a separate form.
   const priorRuns = structuredClone(saved.productionRuns!)
   await page.getByLabel('체험 역할', { exact: true }).selectOption(INTERNAL)
   await page.getByRole('button', { name: '오더 엑셀 업로드', exact: true }).click()
@@ -66,12 +66,13 @@ test('동일 수량 리오더와 다른 프로젝트 발주를 별도 차수로 
   values[0] = 'QA-PROJECT-NEW'; values[5] = `${CODE}BK`; values[11] = '2026FY'; values[12] = 'QA 신규 리오더 프로젝트'; values[50] = '9'
   for (const [index, size] of ['XXS', 'XS', 'S', 'M', 'L', 'XL'].entries()) { headers[42 + index] = size; values[42 + index] = index === 3 ? '9' : '0' }
   await importer.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'new-project-reorder.csv', mimeType: 'text/csv', buffer: Buffer.from(`${headers.join(',')}\n${values.join(',')}\n`, 'utf8') })
-  await importer.getByRole('button', { name: '프로젝트 연결', exact: true }).click()
-  const registration = importer.getByRole('region', { name: '미등록 스타일 등록', exact: true })
-  await expect(registration.getByLabel('등록 프로젝트 명칭', { exact: true })).toHaveValue('QA 신규 리오더 프로젝트')
-  await expect(registration.getByLabel('등록 프로젝트 코드', { exact: true })).toHaveValue('QA-PROJECT-NEW')
-  await registration.getByRole('button', { name: '품번 등록 및 수량 적용', exact: true }).click()
-  await expect(importer.getByRole('status')).toContainText('새 생산 차수 생성')
+  await expect(importer.getByRole('button', { name: '프로젝트 연결', exact: true })).toHaveCount(0)
+  await expect(importer.getByRole('button', { name: '스타일·프로젝트 등록', exact: true })).toHaveCount(0)
+  await expect(importer).toContainText('QA-PROJECT-NEW')
+  await expect(importer).toContainText('QA 신규 리오더 프로젝트')
+  expect((await page.evaluate(key => JSON.parse(localStorage.getItem(key)!) as Workspace, STORAGE)).projects.some(project => project.code === 'QA-PROJECT-NEW')).toBe(false)
+  await importer.getByRole('button', { name: '검증된 오더 적용', exact: true }).click()
+  await expect(importer.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
   await importer.locator('.order-import-close').getByRole('button', { name: '닫기', exact: true }).click()
   saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!) as Workspace, STORAGE)
   expect(saved.productionRuns).toHaveLength(4)

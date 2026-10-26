@@ -111,6 +111,18 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.style!.dueDate).toBe('')
     expect(result.errors.join(' ')).toContain('직접 선택')
   })
+  it('자동 등록은 납기 미정을 빈 값으로 두고 S열 요청일로 채우지 않는다', () => {
+    const { workspace, sheet, defaults, row } = fixture()
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, { ...defaults, dueDate: '', allowMissingDueDate: true })
+    expect(result.errors).toEqual([])
+    expect(result.style!.dueDate).toBe('')
+    expect(result.style!.dueDate).not.toBe(row[18])
+  })
+  it('자동 등록이어도 명시한 잘못된 기준 납기는 허용하지 않는다', () => {
+    const { workspace, sheet, defaults } = fixture()
+    const result = planRegistrationFromRow(workspace, sheet, 1, 2, { ...defaults, dueDate: '2026-02-30', allowMissingDueDate: true })
+    expect(result.errors.join(' ')).toContain('납기일')
+  })
 
   it('기존 스타일에는 신규 컬러만 추가하고 원본 수량·샘플·담당자·납기는 보존한다', () => {
     const { workspace, row, plan } = fixture()

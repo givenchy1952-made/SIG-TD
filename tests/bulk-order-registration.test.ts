@@ -5,6 +5,7 @@ import { quantityTotal } from '../src/lib/types'
 import { buildOrderImportPreview, orderImportDefaults, parseOrderWorkbook, type OrderImportOptions } from '../src/lib/order-import'
 import { buildBulkOrderRegistrationPlan, sourceFactoryGroups } from '../src/lib/bulk-order-registration'
 import { importProductionOrdersInWorkspace } from '../src/lib/round-import'
+import { savePoInWorkspace } from '../src/lib/operations-domain'
 vi.mock('../src/lib/repository', () => ({ supabase: null, getDemoWorkspace: vi.fn(), locked: vi.fn(), persist: vi.fn() }))
 import { registerOrderStyleInWorkspace } from '../src/lib/workflow-repository'
 
@@ -119,6 +120,41 @@ describe('여러 신규 품번의 등록 계획', () => {
     const result = build()
     expect(result.errors.join(' ')).toContain('납기일')
     expect(result.entries.every(entry => entry.style.dueDate === '')).toBe(true)
+  })
+  it('자동 등록은 납기 선택 없이 A/F로 26개 품번과 7,950개를 적용하고 PO 납기는 별도로 요구한다', async () => {
+    const { workspace, actor, sheet, options, settings } = await fixture()
+    const automatic = { ...settings, automatic: true, defaults: { ...settings.defaults, dueDate: '' } }
+    const plan = buildBulkOrderRegistrationPlan(workspace, sheet, options, automatic)
+    expect(plan.errors).toEqual([])
+    expect(plan.entries).toHaveLength(19)
+    expect(plan.newColorCount).toBe(26)
+    expect(plan.entries.every(entry => entry.style.dueDate === '')).toBe(true)
+    expect(plan.preview.rows.reduce((sum, row) => sum + quantityTotal(row.imported), 0)).toBe(7950)
+    let current = workspace
+    for (const entry of plan.entries) current = registerOrderStyleInWorkspace(current, actor, entry.style, entry.project, 'QA 파일 A/F 자동 등록')
+    const preview = buildOrderImportPreview(current, sheet, options)
+    const imported = importProductionOrdersInWorkspace(current, actor, crypto.randomUUID(), preview.changes, 'replace', 'QA 파일 수량 자동 적용')
+    expect(imported.styles).toHaveLength(19); expect(imported.projects).toHaveLength(1)
+    expect(imported.styles.every(style => style.dueDate === '')).toBe(true)
+    expect(imported.productionRuns).toHaveLength(26)
+    expect(imported.productionRuns!.reduce((sum, run) => sum + quantityTotal(run.order), 0)).toBe(7950)
+    expect(imported.operations!.orderSourceRecords.every(source => source.rows.every(row => row.columns.S !== '' && !Object.hasOwn(row.columns, 'I')))).toBe(true)
+    const po = { dueDate: '', recipient: 'qa-supplier@example.test', subject: '납기 확인 PO', body: '예상 납기는 PO 발송 전에 입력합니다.', evidenceAttachmentId: null, voided: false }
+    expect(() => savePoInWorkspace(imported, actor, crypto.randomUUID(), imported.styles[0].id, po, 0, 'QA PO 납기 필수')).toThrow(/날짜/)
+    const withPo = savePoInWorkspace(imported, actor, crypto.randomUUID(), imported.styles[0].id, { ...po, dueDate: '2026-12-01' }, 0, 'QA 요청 납기 입력')
+    expect(withPo.operations!.poDispatches[0].dueDate).toBe('2026-12-01')
+    expect(withPo.styles.every(style => style.dueDate === '')).toBe(true)
+  })
+  it('자동 등록도 잘못된 날짜나 미등록 공장을 임의의 값으로 대신 채우지 않는다', async () => {
+    const { workspace, sheet, options, settings } = await fixture()
+    const invalidDate = buildBulkOrderRegistrationPlan(workspace, sheet, options, { ...settings, automatic: true, defaults: { ...settings.defaults, dueDate: '2026-02-30' } })
+    expect(invalidDate.errors.join(' ')).toContain('납기')
+    const original = structuredClone(workspace)
+    workspace.factories = workspace.factories.slice(1)
+    const missingFactory = buildBulkOrderRegistrationPlan(workspace, sheet, options, { ...settings, automatic: true, defaults: { ...settings.defaults, dueDate: '' } })
+    expect(missingFactory.errors.join(' ')).toContain('담당 공장')
+    expect(workspace.styles).toEqual(original.styles); expect(workspace.projects).toEqual(original.projects)
+    expect(workspace.factories).toHaveLength(7)
   })
   it('실제 AO 입고예정일이 있으면 공통 기본 납기보다 우선한다', async () => {
     const { sheet, build } = await fixture()

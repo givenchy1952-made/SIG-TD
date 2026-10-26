@@ -2,7 +2,7 @@ import { blankProduction, type Project, type Style, type Workspace } from './typ
 import { resolveSigOrderIdentity, type ImportCell, type ImportSheet } from './order-import'
 
 export interface RegistrationProject extends Project { code: string; expected: { code: string; name: string; season: string } | null }
-export interface RegistrationDefaults { factoryId: string; ownerId: string; dueDate: string }
+export interface RegistrationDefaults { factoryId: string; ownerId: string; dueDate: string; allowMissingDueDate?: boolean }
 export interface OrderRegistrationPlan { style: Style | null; project: RegistrationProject | null; isNewProject: boolean; isNewStyle: boolean; isNewColor: boolean; fullSku: string; color: string; errors: string[]; sourceFactory: string; sourceOwner: string; dueDateSource?: string }
 const key = (value: string) => value.trim().toLocaleUpperCase('en-US')
 const companyKey = (value: string) => key(value).replace(/\s+/g, '').replaceAll('㈜', '(주)')
@@ -73,7 +73,7 @@ export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet
       result.style = { id: makeId(), code, name: code, category: '', season, projectId: plannedProject.id, factoryId, ownerId, colors: [color], dueDate, stage: 'registered', ppApproved: false, notes: '', samples: [], production: [blankProduction(color)], version: 0, updatedAt: '', updatedBy: ownerId, deletedAt: null }
       if (!workspace.factories.some(item => item.id === factoryId)) result.errors.push('등록된 담당 공장을 선택해 주세요. 파일의 생산처를 임의로 새 공장으로 만들지 않습니다.')
       if (!workspace.profiles.some(item => item.id === ownerId && item.role !== 'factory' && item.approved && item.active)) result.errors.push('승인된 본사 담당자를 선택해 주세요.')
-      if (!validDate(dueDate)) result.errors.push('신규 스타일의 기준 납기일을 직접 선택해 주세요. 발주 요청일을 납기로 대신 사용하지 않습니다.')
+      if (!validDate(dueDate) && !(defaults.allowMissingDueDate === true && dueDate === '')) result.errors.push('신규 스타일의 기준 납기일을 직접 선택해 주세요. 발주 요청일을 납기로 대신 사용하지 않습니다.')
     }
   } catch (error) { result.errors.push(error instanceof Error ? error.message : String(error)); result.style = null }
   return result
