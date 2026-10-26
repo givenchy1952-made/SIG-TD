@@ -1,1 +1,24 @@
 .brand-logo{display:block;width:100%;height:auto;object-fit:contain;flex-shrink:0}.brand-logo-ink{filter:invert(1);mix-blend-mode:multiply}.brand-logo-white{filter:none;mix-blend-mode:screen}.brand:has(.brand-logo){padding:3px 7px 0;min-height:70px;justify-content:center}.brand>.brand-logo{width:100%;max-width:180px}.auth-brand>.auth-brand-logo{display:block;width:min(100%,320px);margin:5px 0 0;flex-shrink:0}.auth-brand-logo:focus-visible{outline:2px solid currentColor;outline-offset:8px}@media(min-width:1650px){.brand:has(.brand-logo){padding-left:10px;padding-right:10px}}@media(max-width:950px){.brand:has(.brand-logo){padding-left:6px;padding-right:6px;min-height:64px}}@media(max-width:700px){.brand:has(.brand-logo){min-height:70px}.auth-brand>.auth-brand-logo{width:min(100%,235px);margin-top:0}}
+
+.auth-brand.auth-brand-poster {
+  background: #000;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  min-height: 100svh;
+  isolation: isolate;
+}
+.auth-brand.auth-brand-poster > .auth-brand-logo {
+  width: 76%;
+  max-width: 560px;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .auth-brand.auth-brand-poster {
+    min-height: clamp(220px, 34svh, 320px);
+  }
+  .auth-brand.auth-brand-poster > .auth-brand-logo {
+    width: 76%;
+    max-width: 340px;
+  }
+}
