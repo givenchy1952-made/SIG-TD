@@ -15,6 +15,7 @@ import { loadProductionLedgerWorkspace } from './production-ledger-repository'
 import { loadSupplierProductionOrders } from './supplier-orders-repository'
 import { getDemoSupplierProductionOrders } from './supplier-orders'
 import { assertProductionLedgerTotals } from './production-ledger'
+import { loadMemberWithdrawalCapability } from './member-withdrawal-repository'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -26,7 +27,7 @@ if (url && key && !configurationError) { try { supabase = createClient(url, key)
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
 function withProductionDefaults(workspace: Workspace): Workspace {
-  const next = { ...workspace, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
+  const next = { ...workspace, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
   return { ...next, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
 }
 export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return withProductionDefaults({ ...parsed, staffApprovalsAvailable: true, settlementTerms: parsed.settlementTerms || [], settlementTermsAudits: parsed.settlementTermsAudits || [], settlementTermsAvailable: true, productionDetails: parsed.productionDetails || [], refinementsAvailable: true, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true }) } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = withProductionDefaults({ ...createSeed(), staffApprovalsAvailable: true, productionDetails: [], refinementsAvailable: true, settlementTerms: [], settlementTermsAudits: [], settlementTermsAvailable: true, styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }); localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
@@ -34,7 +35,7 @@ export function persist(workspace: Workspace) { localStorage.setItem(STORAGE_KEY
 export async function locked<T>(fn: () => T | Promise<T>): Promise<T> { if (!navigator.locks) throw new Error('안전한 동시 저장을 위해 최신 Chrome, Edge 또는 Safari를 사용해 주세요.'); return navigator.locks.request('sig-workspace-write', fn) }
 function check<T extends { error: unknown; data: unknown }>(result: T): T['data'] { if (result.error) throw result.error; return result.data }
 export function cloudStyle(row: Record<string, unknown>): Style { return { ...(row.data as Style), id: String(row.id), version: Number(row.version), updatedAt: String(row.updated_at), updatedBy: String(row.updated_by), deletedAt: row.deleted_at as string | null } }
-function cloudProfile(row: Record<string, unknown>): Profile { return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as Profile['role'], approved: !!row.approved, active: !!row.active, factoryId: row.factory_id as string | null } }
+function cloudProfile(row: Record<string, unknown>): Profile { return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as Profile['role'], approved: !!row.approved, active: !!row.active, factoryId: row.factory_id as string | null, ...('withdrawn_at' in row ? { withdrawnAt: row.withdrawn_at as string | null, withdrawnBy: row.withdrawn_by as string | null } : {}) } }
 export async function loadWorkspace(): Promise<Workspace> {
   if (!supabase) return getDemoWorkspace()
   const tables = ['styles', 'profiles', 'factories', 'projects', 'comments', 'attachments', 'audits'] as const
@@ -60,11 +61,12 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase)])
+  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability')])
   if (approvals.error && !['PGRST202', '42883'].includes(approvals.error.code)) throw approvals.error
+  if (importColorOwners.error && !['PGRST202', '42883'].includes(importColorOwners.error.code)) throw importColorOwners.error
   return {
     ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders,
-    styleImages, styleImagesAvailable, staffApprovalsAvailable: !approvals.error && approvals.data === true,
+    styleImages, styleImagesAvailable, memberWithdrawalAvailable, importColorOwnersAvailable: !importColorOwners.error && importColorOwners.data === true, staffApprovalsAvailable: !approvals.error && approvals.data === true,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),
     attachments: rows.attachments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, name: r.name, path: r.path, mime: r.mime, size: r.size, uploadedBy: r.uploaded_by, createdAt: r.created_at })),

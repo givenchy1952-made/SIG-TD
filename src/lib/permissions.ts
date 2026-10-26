@@ -4,7 +4,8 @@ export function canViewStyle(profile: Profile, style: Style) { return profile.ap
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function unchangedKeys(a: object, b: object, except: string[]) { for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) if (!except.includes(key) && !same(a[key as keyof typeof a], b[key as keyof typeof b])) throw new Error(`이 항목을 변경할 권한이 없습니다: ${key}`) }
 export function validateStyle(style: Style) {
-  if (!style.code.trim() || !style.name.trim() || !style.factoryId || !style.projectId || !style.ownerId) throw new Error('스타일 코드, 이름, 공장, 프로젝트, 담당자를 입력해 주세요.')
+  if (!style.code.trim() || !style.name.trim() || !style.factoryId || !style.projectId) throw new Error('스타일 코드, 이름, 공장, 프로젝트를 입력해 주세요.')
+  if (typeof style.ownerId !== 'string' || style.production.some(line => line.ownerId !== undefined && typeof line.ownerId !== 'string') || style.samples.some(sample => typeof sample.ownerId !== 'string')) throw new Error('담당자는 미지정 또는 본사 구성원으로 선택해 주세요.')
   // The database permits an unknown baseline date as an empty string. Imported
   // order drafts can therefore wait for the PO delivery date without inventing
   // one; an explicitly supplied baseline date must still be a real ISO date.

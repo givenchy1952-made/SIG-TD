@@ -90,6 +90,25 @@ describe('차수 마감 확정 을지', () => {
     const result = buildFrozenProductionEuljiRows(workspace, [style], actor, { projectIds: [] })
     expect(result.rows).toEqual([]); expect(result.errors).not.toEqual([])
   })
+  it('차수가 없는 기존 컬러도 자체 담당자·미지정 필터와 W 값을 따로 유지한다', () => {
+    const { workspace, actor, style } = fixture()
+    workspace.productionRuns = []
+    style.production = style.production.slice(0, 2)
+    style.production[0].ownerId = actor.id; style.production[1].ownerId = ''
+    workspace.settlementTermsAvailable = true
+    workspace.projects.find(item => item.id === style.projectId)!.code = 'LEGACY-PROJECT'
+    workspace.settlementTerms = style.production.map(line => {
+      line.receivedAt = '2026-10-25'; line.received = { ...emptyQuantities(), S: 3 }
+      return { styleId: style.id, lineId: line.id, projectCode: 'LEGACY-PROJECT', unitCost: 100, itemType: 'product' as const, version: 1, createdAt: '', updatedAt: '', updatedBy: actor.id }
+    })
+    const assigned = buildFrozenProductionEuljiRows(workspace, [style], actor, { ownerIds: [actor.id] })
+    expect(assigned.errors).toEqual([]); expect(assigned.rows).toHaveLength(1)
+    expect(assigned.rows[0].owner).toBe(actor.name)
+    const blank = buildFrozenProductionEuljiRows(workspace, [style], actor, { ownerIds: [''] })
+    expect(blank.errors).toEqual([]); expect(blank.rows).toHaveLength(1)
+    expect(blank.rows[0].owner).toBe('')
+    expect(blank.rows[0].colorStyleCode).toBe(`${style.code}${style.production[1].color}`)
+  })
   it.each(['factoryIds', 'ownerIds', 'seasons'] as const)('%s 필터도 현재 스타일 대신 차수의 업체·담당자·프로젝트 시즌으로 적용한다', field => {
     const { workspace, actor, run, style } = fixture()
     style.production = [style.production[0]]

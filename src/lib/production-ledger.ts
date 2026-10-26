@@ -71,14 +71,17 @@ export function saveProductionRunInWorkspace(workspace: ProductionLedgerWorkspac
   const receipts = (workspace.productionReceipts || []).filter(receipt => receipt.runId === id && !receipt.voided)
   if (prior && data.projectId !== prior.projectId) throw new Error('차수의 프로젝트는 변경할 수 없습니다. 새 생산 차수를 만들어 주세요.')
   if (prior && receipts.length && (data.unitCost !== prior.unitCost || data.projectCode.trim() !== prior.projectCode || data.itemType !== prior.itemType || data.poId !== prior.poId || data.correctsRunId !== prior.correctsRunId)) throw new Error('실입고가 있는 차수의 단가·프로젝트·PO는 바꿀 수 없습니다. 새 생산 차수로 기록해 주세요.')
-  const factoryId = prior?.factoryIdSnapshot || style.factoryId, ownerId = prior?.ownerIdSnapshot || style.ownerId
+  const line = style.production.find(item => item.id === lineId)!
+  const factoryId = prior?.factoryIdSnapshot || style.factoryId, ownerId = prior?.ownerIdSnapshot || (line.ownerId !== undefined ? line.ownerId : style.ownerId)
   if (data.poId && !workspace.operations?.poDispatches.some(po => po.id === data.poId && po.styleId === styleId && !po.voided && po.factoryIdSnapshot === factoryId)) throw new Error('같은 스타일·공장의 유효한 PO만 연결할 수 있습니다.')
   if (data.poId && workspace.productionRuns?.some(run => run.id !== id && run.lineId === lineId && run.poId === data.poId)) throw new Error('해당 컬러의 PO는 이미 다른 생산 차수에 연결되어 있습니다.')
   if (data.correctsRunId && !workspace.productionRuns?.some(run => run.id === data.correctsRunId && run.id !== id && run.styleId === styleId && run.lineId === lineId && run.projectId === data.projectId && !!run.closedAt)) throw new Error('같은 프로젝트·생산 컬러의 마감 확정 기록을 연결해 주세요.')
   for (const size of SIZES) if (receipts.reduce((sum, receipt) => sum + receipt.quantities[size], 0) > data.order[size]) throw new Error('차수 오더를 이미 배분한 입고 수량보다 줄일 수 없습니다.')
   const next = structuredClone(workspace), now = new Date().toISOString()
-  const line = style.production.find(item => item.id === lineId)!, factoryName = workspace.factories.find(item => item.id === factoryId)?.name, ownerName = workspace.profiles.find(item => item.id === ownerId)?.name
-  if (!factoryName?.trim() || !ownerName?.trim()) throw new Error('차수의 업체·담당자를 확인해 주세요.')
+  const factoryName = workspace.factories.find(item => item.id === factoryId)?.name
+  const assignedOwner = workspace.profiles.find(item => item.id === ownerId && item.role !== 'factory' && item.approved && item.active)
+  const ownerName = prior?.ownerIdSnapshot ? prior.ownerNameSnapshot : assignedOwner?.name || ''
+  if (!factoryName?.trim() || ownerId && !ownerName.trim()) throw new Error('차수의 업체·담당자를 확인해 주세요.')
   if (data.unitCost !== null) productionAmounts(data.unitCost, quantityTotal(data.order))
   const fullCode = /^[A-Z0-9]{12}[A-Z]{2}$/.test(style.code) && style.code.endsWith(line.color) ? style.code : `${style.code}${line.color}`
   const run: ProductionRun = { ...structuredClone(data), factoryIdSnapshot: factoryId, ownerIdSnapshot: ownerId, styleCodeSnapshot: prior?.styleCodeSnapshot || fullCode, factoryNameSnapshot: prior?.factoryNameSnapshot || factoryName, ownerNameSnapshot: prior?.ownerNameSnapshot || ownerName, name: data.name.trim(), projectCode: data.projectCode.trim(), id, styleId, lineId, round: prior?.round || Math.max(0, ...(workspace.productionRuns || []).filter(run => run.styleId === styleId && run.lineId === lineId && run.projectId === data.projectId).map(run => run.round)) + 1, version: expectedVersion + 1, createdAt: prior?.createdAt || now, updatedAt: now, updatedBy: person.id, closedAt: null, snapshot: null }
@@ -117,11 +120,15 @@ export function finalizeProductionRunInWorkspace(workspace: ProductionLedgerWork
   if (run.unitCost === null || !run.projectCode.trim() || !receipts.length) throw new Error('마감할 차수의 프로젝트·단가·입고 배분을 확인해 주세요.')
   assertAllocations(workspace, run.styleId, run.lineId)
   const receivedQuantity = receipts.reduce((sum, item) => sum + quantityTotal(item.quantities), 0), amounts = productionAmounts(run.unitCost, receivedQuantity)
-  const factory = run.factoryNameSnapshot, owner = run.ownerNameSnapshot
+  const line = workspace.styles.find(item => item.id === run.styleId)!.production.find(item => item.id === run.lineId)!
+  const currentOwnerId = line.ownerId !== undefined ? line.ownerId : workspace.styles.find(item => item.id === run.styleId)!.ownerId
+  const assignedOwner = workspace.profiles.find(item => item.id === currentOwnerId && item.role !== 'factory' && item.approved && item.active)
+  const ownerIdSnapshot = run.ownerIdSnapshot || assignedOwner?.id || '', ownerNameSnapshot = run.ownerIdSnapshot ? run.ownerNameSnapshot : assignedOwner?.name || ''
+  const factory = run.factoryNameSnapshot, owner = ownerNameSnapshot
   if (!factory?.trim() || !owner?.trim()) throw new Error('마감 시점의 업체·담당자를 확인해 주세요.')
   const now = new Date().toISOString()
-  const snapshot: ProductionSettlementSnapshot = { projectId: run.projectId, projectCode: run.projectCode, expectedDue: run.expectedDue, factoryIdSnapshot: run.factoryIdSnapshot, ownerIdSnapshot: run.ownerIdSnapshot, styleCodeSnapshot: run.styleCodeSnapshot, factoryNameSnapshot: run.factoryNameSnapshot, ownerNameSnapshot: run.ownerNameSnapshot, styleCode: run.styleCodeSnapshot, factory, owner, name: run.name, round: run.round, poId: run.poId, itemType: run.itemType, unitCost: run.unitCost, orderQuantity: quantityTotal(run.order), receivedQuantity, ...amounts, lastReceivedAt: receipts.map(item => item.receivedAt).sort().at(-1)!, receipts: structuredClone(receipts), finalizedAt: now, finalizedBy: person.id }
-  const next = structuredClone(workspace), closed = { ...structuredClone(run), version: run.version + 1, updatedAt: now, updatedBy: person.id, closedAt: now, snapshot }
+  const snapshot: ProductionSettlementSnapshot = { projectId: run.projectId, projectCode: run.projectCode, expectedDue: run.expectedDue, factoryIdSnapshot: run.factoryIdSnapshot, ownerIdSnapshot, styleCodeSnapshot: run.styleCodeSnapshot, factoryNameSnapshot: run.factoryNameSnapshot, ownerNameSnapshot, styleCode: run.styleCodeSnapshot, factory, owner, name: run.name, round: run.round, poId: run.poId, itemType: run.itemType, unitCost: run.unitCost, orderQuantity: quantityTotal(run.order), receivedQuantity, ...amounts, lastReceivedAt: receipts.map(item => item.receivedAt).sort().at(-1)!, receipts: structuredClone(receipts), finalizedAt: now, finalizedBy: person.id }
+  const next = structuredClone(workspace), closed = { ...structuredClone(run), ownerIdSnapshot, ownerNameSnapshot, version: run.version + 1, updatedAt: now, updatedBy: person.id, closedAt: now, snapshot }
   next.productionRuns = next.productionRuns!.map(item => item.id === runId ? closed : item)
   audit(next, person, closed, '생산 차수 마감 확정', reason, run, closed); return next
 }

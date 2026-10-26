@@ -111,6 +111,30 @@ describe('프로젝트·스타일·컬러의 실제 입고 기준 을지 데이�
     expect(result.rows[0]).toMatchObject({ projectCode: workspace.settlementTerms![0].projectCode, receivedQuantity: 10, netAmount: 1002.5, unit: 'EA', factory: workspace.factories.find(item => item.id === style.factoryId)!.name, owner: workspace.profiles.find(item => item.id === style.ownerId)!.name })
   })
 
+  it('컬러 담당자를 우선하고 미지정은 실제 W 빈 셀로 유지하며 전체 품번의 컬러를 중복하지 않는다', async () => {
+    const { workspace, profile, style, line } = fixture()
+    style.code = 'BP06FYHD0402BL'; line.color = 'BL'; style.colors = ['BL']
+    line.ownerId = profile.id
+    const assigned = buildSigEuljiRows(workspace, [style], profile)
+    expect(assigned.errors).toEqual([])
+    expect(assigned.rows[0]).toMatchObject({ owner: profile.name, colorStyleCode: 'BP06FYHD0402BL' })
+    line.ownerId = ''
+    const unassigned = buildSigEuljiRows(workspace, [style], profile)
+    expect(unassigned.errors).toEqual([]); expect(unassigned.rows[0].owner).toBe('')
+    const sheet = (await open(await fillSigEuljiTemplate(await source(), unassigned.rows))).worksheets[0]
+    expect(sheet.getCell('W3').value).toBeNull()
+    expect(sheet.getCell('I3').value).toBe('BP06FYHD0402BL')
+    expect(sheet.getCell('T3').value).toBe(1002.5)
+  })
+
+  it('컬러 담당자 ID가 잘못되었거나 공장이면 스타일 담당자로 조용히 대체하지 않는다', () => {
+    const { workspace, profile, style, line } = fixture()
+    for (const id of [crypto.randomUUID(), DEMO_IDS.factory]) {
+      line.ownerId = id
+      expect(buildSigEuljiRows(workspace, [style], profile)).toMatchObject({ rows: [], errors: [expect.stringContaining('본사 담당자')] })
+    }
+  })
+
   it('원단만 YDS, 제품·라벨은 EA이며 원가 0을 미입력으로 취급하지 않는다', () => {
     const { workspace, profile, style } = fixture(), terms = workspace.settlementTerms![0]
     for (const itemType of ['product', 'label', 'fabric'] as const) {

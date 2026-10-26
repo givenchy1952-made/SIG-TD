@@ -2,7 +2,6 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
 import type { Workspace } from '../src/lib/types'
 
 const STORAGE = 'sig-workspace-demo-v1'
-const ADMIN = '10000000-0000-4000-8000-000000000001'
 const FACTORY = '10000000-0000-4000-8000-000000000004'
 const CODE = 'BO42FYHD0102'
 const QUALITY = ['아우터', '니트', '티셔츠', '바지', '가방', '악세사리', '모자']
@@ -186,7 +185,7 @@ test('F열 새 품번과 A·M 프로젝트를 한 번의 오더 적용으로 자
   const modal = page.getByRole('dialog', { name: 'Excel 오더 수량 가져오기', exact: true })
   const headers = Array(51).fill(''), row = Array(51).fill('')
   headers[0] = '프로젝트 코드'; headers[5] = '스타일코드'; headers[8] = '컬러'; headers[11] = '년도/시즌'; headers[12] = '프로젝트 명칭'; headers[22] = '생산처'; headers[24] = '생산 담당자'; headers[50] = 'TOTAL QTY'
-  row[0] = 'QA-PROJECT-IMPORT-01'; row[5] = 'QAFYTS9001BK'; row[8] = '#REF!'; row[11] = '2027SS'; row[12] = 'QA 신규 프로젝트'; row[22] = 'QA 미등록 공장'; row[24] = 'QA 담당자'
+  row[0] = 'QA-PROJECT-IMPORT-01'; row[5] = 'QAFYTS9001BK'; row[8] = '#REF!'; row[11] = '2027SS'; row[12] = 'QA 신규 프로젝트'; row[22] = 'QA 미등록 공장'; row[24] = ''
   for (const [index, size] of ['XXS', 'XS', 'S', 'M', 'L', 'XL'].entries()) { headers[42 + index] = size; row[42 + index] = String(index + 1) }
   row[50] = '21'
   const csv = Buffer.from('\uFEFF' + [headers.join(','), row.join(',')].join('\r\n'))
@@ -211,7 +210,8 @@ test('F열 새 품번과 A·M 프로젝트를 한 번의 오더 적용으로 자
   const after = await snapshot(page), updated = after.styles.find(item => item.code === 'QAFYTS9001')!
   expect(after.styles).toHaveLength(before.styles.length + 1)
   expect(updated.colors).toEqual(['BK']); expect(updated.production[0].color).toBe('BK')
-  expect(updated.ownerId).toBe(ADMIN)
+  expect(updated.ownerId).toBe('')
+  expect(updated.production[0].ownerId).toBe('')
   expect(updated.factoryId).toBe('20000000-0000-4000-8000-000000000002')
   expect(updated.dueDate).toBe('')
   expect(after.projects.find(item => item.id === updated.projectId)).toMatchObject({ code: 'QA-PROJECT-IMPORT-01', name: 'QA 신규 프로젝트', season: '2027SS' })

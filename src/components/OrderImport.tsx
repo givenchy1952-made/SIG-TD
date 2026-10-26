@@ -4,7 +4,7 @@ import { Modal } from './ui'
 import { SIZES, quantityTotal } from '../lib/types'
 import type { Profile, Style, Workspace } from '../lib/types'
 import type { RegistrationProject } from '../lib/order-registration'
-import { buildBulkOrderRegistrationPlan, sourceFactoryGroups } from '../lib/bulk-order-registration'
+import { buildBulkOrderRegistrationPlan, sourceFactoryGroups, sourceOwnerGroups } from '../lib/bulk-order-registration'
 import type { OrderImportChange } from '../lib/operations-types'
 import { autoMapOrderColumns, buildOrderImportPreview, detectOrderHeaderRow, detectSigOrderHeaderRow, orderImportDefaults, parseOrderWorkbook, readSigRowSku, sigOrderColumnMapping, SIG_ORDER_SOURCE_COLUMNS } from '../lib/order-import'
 import type { ImportCell, ImportLayout, ImportWorkbook, OrderColumnMapping, OrderImportPreset } from '../lib/order-import'
@@ -36,7 +36,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   const [visibleRows, setVisibleRows] = useState(25)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [skuDetailsOpen, setSkuDetailsOpen] = useState(false)
-  const [bulkOwnerId, setBulkOwnerId] = useState(profile.id)
+  const [bulkOwners, setBulkOwners] = useState<Record<string, string>>({})
   const [bulkDueDate, setBulkDueDate] = useState('')
   const [bulkFactories, setBulkFactories] = useState<Record<string, string>>({})
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
@@ -50,10 +50,13 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   const rawColumns = Array.from({ length: Math.min(15, headers.length) }, (_, index) => index).filter(index => preset !== 'sig-order-qty' || index !== 8)
   const bulkOptions = useMemo(() => ({ createProductionRounds: true, fileName: book?.name, preset, sigSkus, sigBudgetFallback: true, mapping, layout, headerRow, duplicateMode, missingSizes, mode }), [book?.name, preset, sigSkus, mapping, layout, headerRow, duplicateMode, missingSizes, mode])
   const automatic = preset === 'sig-order-qty' && !!onRegisterStyle && workspace.refinementsAvailable === true
+  const ownerSetupRequired = automatic && workspace.importColorOwnersAvailable === false
   const filePreview = useMemo(() => snapshot && sheet ? buildOrderImportPreview(snapshot, sheet, bulkOptions) : null, [snapshot, sheet, bulkOptions])
-  const bulkPlan = useMemo(() => automatic && snapshot && sheet ? buildBulkOrderRegistrationPlan(snapshot, sheet, bulkOptions, { defaults: { ownerId: bulkOwnerId, dueDate: bulkDueDate }, factoryMappings: bulkFactories, automatic: true }) : null, [automatic, snapshot, sheet, bulkOptions, bulkOwnerId, bulkDueDate, bulkFactories])
+  const bulkPlan = useMemo(() => automatic && snapshot && sheet ? buildBulkOrderRegistrationPlan(snapshot, sheet, bulkOptions, { defaults: { ownerId: '', dueDate: bulkDueDate }, factoryMappings: bulkFactories, ownerMappings: bulkOwners, automatic: true }) : null, [automatic, snapshot, sheet, bulkOptions, bulkOwners, bulkDueDate, bulkFactories])
   const preview = bulkPlan?.preview || filePreview
   const bulkGroups = useMemo(() => sheet && preset === 'sig-order-qty' ? sourceFactoryGroups(snapshot || workspace, sheet, headerRow, sigSkus) : [], [snapshot, workspace, sheet, preset, headerRow, sigSkus])
+  const ownerGroups = useMemo(() => sheet && preset === 'sig-order-qty' ? sourceOwnerGroups(snapshot || workspace, sheet, headerRow, sigSkus) : [], [snapshot, workspace, sheet, preset, headerRow, sigSkus])
+  const needsOwnerSelection = ownerGroups.some(group => !(bulkOwners[group.source] ?? group.ownerId))
   const automaticIds = new Set(bulkPlan?.entries.map(entry => entry.style.id) || [])
   const needsFactorySelection = bulkPlan?.entries.some(entry => !snapshot?.styles.some(style => style.id === entry.style.id) && !workspace.factories.some(factory => factory.id === entry.style.factoryId)) || false
   const needsSkuCorrection = filePreview?.rows.some(row => row.errors.some(error => error.includes('F열에 기본 품번만') || error.includes('가져올 컬러') || error.includes('전체 품번이 여러') || error.includes('생산 내역이 여러') || error.includes('F열 품번은'))) || false
@@ -72,7 +75,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   const visibleErrorCount = errorCount - (preview?.rows.filter(isRegistrationPending).reduce((sum, row) => sum + row.errors.length, 0) || 0)
   const stale = !applied && (preview?.changes.some(change => { const before = snapshot?.styles.find(style => style.id === change.styleId); if (!before) return false; const current = workspace.styles.find(style => style.id === change.styleId); return !current || current.deletedAt || current.version !== change.expectedVersion || change.lines.some(line => line.source && (workspace.operations?.orderSourceRecords?.find(source => source.styleId === change.styleId && source.lineId === line.lineId)?.version || 0) !== line.source.expectedVersion) }) || false)
   async function registerAll() {
-    if (!bulkPlan || !snapshot || !sheet || !onRegisterStyle || !allowed || !productionOrdersAvailable || busy || applied || stale || bulkPlan.errors.length || !bulkPlan.entries.length || reason.trim().length < 2) return
+    if (!bulkPlan || !snapshot || !sheet || !onRegisterStyle || !allowed || !productionOrdersAvailable || ownerSetupRequired || busy || applied || stale || bulkPlan.errors.length || !bulkPlan.entries.length || reason.trim().length < 2) return
     const plan = bulkPlan, basis = snapshot, options = bulkOptions, targetSheet = sheet
     for (const entry of plan.entries) {
       const before = basis.styles.find(style => style.id === entry.style.id)
@@ -107,7 +110,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
   async function readFile(file?: File) {
     if (!file || !allowed || busy) return
     const ticket = ++sequence.current
-    setLoading(true); setSettingsOpen(false); setSkuDetailsOpen(false); setBulkFactories({}); setBulkDueDate(''); setBulkOwnerId(profile.id); setError(''); setSuccess(''); setApplied(false); setBook(null); setSnapshot(null); setSigSkus({})
+    setLoading(true); setSettingsOpen(false); setSkuDetailsOpen(false); setBulkFactories({}); setBulkDueDate(''); setBulkOwners({}); setError(''); setSuccess(''); setApplied(false); setBook(null); setSnapshot(null); setSigSkus({})
     try {
       const loaded = await parseOrderWorkbook(file)
       if (ticket !== sequence.current) return
@@ -135,7 +138,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
     return <label className="field"><span className="field-label">{label}</span><select aria-label={`${label} 열`} className="select" value={value ?? ''} onChange={e => { onChange(e.target.value === '' ? null : Number(e.target.value)); changed() }} disabled={busy || preset === 'sig-order-qty'}><option value="">지정하지 않음</option>{headers.map((header, i) => <option key={i} value={i}>{columnLetter(i)} · {cellLabel(header) || '(제목 없음)'}</option>)}</select></label>
   }
   async function apply() {
-    if (!preview || !allowed || !available || errorCount || stale || busy || applied || !preview.changes.length || reason.trim().length < 2 || bulkPlan?.errors.length) return
+    if (!preview || !allowed || !available || ownerSetupRequired || errorCount || stale || busy || applied || !preview.changes.length || reason.trim().length < 2 || bulkPlan?.errors.length) return
     if (bulkPlan?.entries.length) { await registerAll(); return }
     setBusy(true); setError(''); setSuccess('')
     try { await onImport(preview.changes, mode, reason.trim()); setApplied(true); setSuccess(`${preview.changedStyles}개 스타일에 적용하고 새 생산 차수 ${preview.changes.reduce((sum, change) => sum + change.lines.length, 0)}개를 만들었습니다. 오더 수량 변경 ${preview.changedLines}개 컬러 · 원본 참조 정보 ${preview.sourceChangedLines}개 컬러.`) } catch (e) { setError(message(e)) } finally { setBusy(false) }
@@ -163,14 +166,16 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
         </section>
         {preview && <section className="import-step import-preview"><div className="import-step-heading"><span>04</span><h3>적용 전 미리보기</h3><p>전체 데이터에 오류가 없어야 적용할 수 있습니다.</p></div>
           {bulkPlan && !applied && !!bulkPlan.entries.length && <div className="import-auto-summary"><CheckCircle2 size={16}/><div><strong>프로젝트·품번 자동 등록</strong><p>A열 프로젝트 {bulkPlan.projectCount}개 · F열 신규 기본 스타일 {bulkPlan.newStyleCount}개 · 새 컬러 품번 {bulkPlan.newColorCount}개를 오더 수량과 함께 등록합니다. 아래 오더 적용 버튼을 한 번만 눌러 주세요.</p></div></div>}
-          {automatic && <details className="import-registration import-auto-settings" open={settingsOpen || needsFactorySelection} onToggle={event => setSettingsOpen(event.currentTarget.open)}><summary>업로드 기본 설정 (선택)</summary><section aria-label="업로드 기본 설정">
-            <p className="muted">공장은 W열에서 자동 연결하고, 신규 품번의 본사 담당자는 현재 사용자로 설정합니다. 파일에 납기가 없으면 미정으로 등록합니다.</p>
-            <div className="form-grid"><label className="field"><span className="field-label">신규 품번 본사 담당자</span><select className="select" aria-label="일괄 등록 본사 담당자" value={bulkOwnerId} disabled={busy} onChange={event => setBulkOwnerId(event.target.value)}><option value="">담당자 선택</option>{workspace.profiles.filter(owner => owner.active && owner.approved && owner.role !== 'factory').map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label>
-              <label className="field"><span className="field-label">기준 납기일 (선택)</span><input className="input" type="date" aria-label="일괄 등록 기준 납기일" value={bulkDueDate} disabled={busy} onChange={event => setBulkDueDate(event.target.value)}/><small>미입력 시 납기 미정으로 등록하고, PO 발송 때 요청 납기를 입력합니다.</small></label></div>
+          {automatic && <details className="import-registration import-auto-settings" open={settingsOpen || needsFactorySelection || needsOwnerSelection} onToggle={event => setSettingsOpen(event.currentTarget.open)}><summary>업로드 기본 설정 (선택)</summary><section aria-label="업로드 기본 설정">
+            <p className="muted">공장은 W열, 담당자는 Y열의 본사 구성원 이름·이메일로 연결합니다. Y열이 비어 있으면 담당자 미지정으로 등록하며 나중에 선택할 수 있습니다. 파일에 납기가 없으면 미정으로 등록합니다.</p>
+            <div className="form-grid"><label className="field"><span className="field-label">기준 납기일 (선택)</span><input className="input" type="date" aria-label="일괄 등록 기준 납기일" value={bulkDueDate} disabled={busy} onChange={event => setBulkDueDate(event.target.value)}/><small>미입력 시 납기 미정으로 등록하고, PO 발송 때 요청 납기를 입력합니다.</small></label></div>
+            {needsOwnerSelection && <p className="import-validation-error" role="status">Y열의 담당자를 자동 연결하지 못했습니다. 아래에서 해당 본사 구성원을 한 번만 선택해 주세요.</p>}
+            {!!ownerGroups.length && <div className="form-grid">{ownerGroups.map(group => <label className="field" key={group.source}><span className="field-label">Y열 {group.source} · {group.count}개 품번</span><select className="select" aria-label={`Y열 담당자 연결 ${group.source}`} value={bulkOwners[group.source] ?? group.ownerId} disabled={busy} onChange={event => setBulkOwners(current => ({ ...current, [group.source]: event.target.value }))}><option value="">본사 구성원 선택</option>{workspace.profiles.filter(owner => owner.active && owner.approved && owner.role !== 'factory' && !owner.withdrawnAt).map(owner => <option key={owner.id} value={owner.id}>{owner.name} · {owner.email}</option>)}</select></label>)}</div>}
             {needsFactorySelection && <p className="import-validation-error" role="status">자동 연결되지 않은 생산처가 있습니다. 아래에서 해당 생산처의 공장을 한 번만 선택해 주세요.</p>}
             <div className="form-grid">{bulkGroups.map(group => <label className="field" key={group.source}><span className="field-label">{group.source || '생산처 미기재'} · {group.count}개 품번</span><select className="select" aria-label={`일괄 등록 공장 ${group.source}`} value={bulkFactories[group.source] ?? group.factoryId} disabled={busy} onChange={event => setBulkFactories(current => ({ ...current, [group.source]: event.target.value }))}><option value="">등록된 공장 선택</option>{workspace.factories.map(factory => <option key={factory.id} value={factory.id}>{factory.name}</option>)}</select></label>)}</div>
           </section></details>}
           {bulkPlan && !!bulkPlan.errors.length && <div className="import-validation-error" role="status"><AlertCircle size={14}/><div><strong>파일 또는 업로드 기본 설정을 확인해 주세요.</strong><ul>{bulkPlan.errors.slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>{bulkPlan.errors.length > 8 && <p>외 {bulkPlan.errors.length - 8}건</p>}</div></div>}
+          {ownerSetupRequired && <div className="import-validation-error" role="status">컬러별 담당자와 담당자 미지정 등록을 사용하려면 새 SQL 011 설정을 먼저 적용해 주세요.</div>}
           {bulkPlan && !!bulkPlan.entries.length && !productionOrdersAvailable && <div className="import-validation-error" role="status">프로젝트·생산 차수 설정이 필요합니다. 기존 SQL 007~009 적용을 완료한 뒤 업로드해 주세요.</div>}
           {bulkProgress && <p role="status">프로젝트·품번 자동 등록 {bulkProgress.done} / {bulkProgress.total} · 수량 적용 준비 중</p>}
           <div className="import-preview-summary"><span>분석 <b>{formatNumber(preview.sourceRows)}</b>행</span><span>매칭 <b>{formatNumber(preview.matchedLines)}</b>컬러</span><span>적용 <b>{formatNumber(preview.changedStyles)}</b>스타일 · 수량 <b>{formatNumber(preview.changedLines)}</b>컬러{preview.sourceChangedLines > 0 && <> · 원본 정보 <b>{formatNumber(preview.sourceChangedLines)}</b>컬러</>}</span><span className={visibleErrorCount ? 'has-error' : 'no-error'}>오류 <b>{visibleErrorCount}</b></span>{registrationPendingCount > 0 && <span>자동 등록 예정 <b>{registrationPendingCount}</b></span>}{warningCount > 0 && <span className="has-warning">확인사항 <b>{warningCount}</b></span>}</div>
@@ -185,7 +190,7 @@ export default function OrderImport({ workspace, profile, onClose, onImport, onR
           <div className="import-revalidate"><span>파일 분석 시점의 버전을 보관합니다. 다른 사용자가 먼저 저장하면 전체 적용이 취소됩니다.</span><button className="button button-ghost" onClick={() => { setSnapshot(structuredClone(workspace)); changed() }} disabled={busy}><RefreshCw size={13}/>최신 데이터로 다시 검증</button></div>
           <label className="field import-reason"><span className="field-label">변경 사유</span><textarea className="textarea" aria-label="오더 변경 사유" placeholder="예: 확정 오더 반영 / 추가 오더 수량 반영" value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} disabled={busy || applied}/></label>
           {success && <div className="success-message" role="status"><CheckCircle2 size={15}/>{success}</div>}
-          <div className="import-apply-footer"><p>SIG 파일의 A열 프로젝트·F열 품번을 자동 등록하고 오더 수량을 함께 적용합니다.<br/>기존 출고·입고·체크리스트와 변경 이력은 보존합니다.</p><button className="button button-primary" onClick={() => void apply()} disabled={!allowed || !available || busy || loading || !!errorCount || !!bulkPlan?.errors.length || (!!bulkPlan?.entries.length && !productionOrdersAvailable) || stale || !preview.changes.length || reason.trim().length < 2 || applied}>{busy ? '전체 오더 적용 중…' : applied ? '적용 완료' : '검증된 오더 적용'}<ArrowRight size={15}/></button></div>
+          <div className="import-apply-footer"><p>SIG 파일의 A열 프로젝트·F열 품번을 자동 등록하고 오더 수량을 함께 적용합니다.<br/>기존 출고·입고·체크리스트와 변경 이력은 보존합니다.</p><button className="button button-primary" onClick={() => void apply()} disabled={!allowed || !available || ownerSetupRequired || busy || loading || !!errorCount || !!bulkPlan?.errors.length || (!!bulkPlan?.entries.length && !productionOrdersAvailable) || stale || !preview.changes.length || reason.trim().length < 2 || applied}>{busy ? '전체 오더 적용 중…' : applied ? '적용 완료' : '검증된 오더 적용'}<ArrowRight size={15}/></button></div>
         </section>}
       </>}
       <footer className="order-import-close"><span>FIVE SPACE / SIG · ORDER IMPORT</span><button className="button button-ghost" disabled={busy} onClick={onClose}>닫기</button></footer>

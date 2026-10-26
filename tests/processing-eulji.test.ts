@@ -63,6 +63,27 @@ describe('가공·품질 을지 데이터', () => {
     expect(buildSigEuljiRows(workspace, [style], profile, 'quality').rows[0].receivedQuantity).toBeNull()
   })
 
+  it('품질검사는 컬러별 담당자를 내보내고 미지정 담당자는 공란으로 남긴다', async () => {
+    const { workspace, profile, style } = fixture()
+    style.production[0].ownerId = profile.id; style.production[1].ownerId = ''
+    const result = buildSigEuljiRows(workspace, [style], profile, 'quality')
+    expect(result.errors).toEqual([])
+    expect(result.rows.map(row => row.owner)).toEqual([profile.name, ''])
+    const { sheet } = await workbook(result.rows)
+    expect(sheet.getCell('W3').value).toBe(profile.name)
+    expect(sheet.getCell('W4').value).toBeNull()
+  })
+
+  it.each(['label', 'embroidery'] as const)('%s의 스타일 공통 작업은 서로 다른 컬러 담당자 중 하나를 임의 선택하거나 작업 수량을 중복하지 않는다', kind => {
+    const { workspace, profile, style } = fixture()
+    style.production[0].ownerId = profile.id; style.production[1].ownerId = ''
+    const result = buildSigEuljiRows(workspace, [style], profile, kind)
+    expect(result.errors).toEqual([])
+    expect(result.rows).toHaveLength(kind === 'label' ? 2 : 1)
+    expect(result.rows.every(row => row.owner === '')).toBe(true)
+    expect(result.rows[0].orderQuantity).toBe(20)
+  })
+
   it('해제·다른 스타일·다른 작업 종류와 미등록 검사 항목을 임의로 추가하지 않는다', () => {
     const { workspace, profile, style } = fixture()
     workspace.operations!.styleOperations[0].voided = true

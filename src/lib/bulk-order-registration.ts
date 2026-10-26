@@ -6,6 +6,7 @@ import { buildOrderImportPreview, readSigRowSku, type ImportCell, type ImportShe
 export interface BulkRegistrationOptions {
   defaults: { ownerId: string; dueDate: string }
   factoryMappings: Record<string, string>
+  ownerMappings?: Record<string, string>
   automatic?: boolean
 }
 export interface BulkRegistrationEntry { style: Style; project: RegistrationProject }
@@ -13,6 +14,7 @@ export interface BulkRegistrationPlan {
   entries: BulkRegistrationEntry[]; prepared: Workspace; preview: OrderImportPreview; errors: string[]
   newStyleCount: number; newColorCount: number; projectCount: number
 }
+export interface SourceOwnerGroup { source: string; count: number; ownerId: string }
 export interface SourceFactoryGroup { source: string; count: number; factoryId: string }
 const text = (value: ImportCell | undefined) => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
 const companyKey = (value: string) => value.trim().toLocaleUpperCase('en-US').replace(/주식회사|\(\s*주\s*\)|㈜|\s+/g, '')
@@ -32,6 +34,26 @@ export function sourceFactoryGroups(workspace: Workspace, sheet: ImportSheet, he
       const normalized = companyKey(source)
       const matches = normalized ? workspace.factories.filter(factory => companyKey(factory.name) === normalized) : []
       groups.set(source, { source, count: 1, factoryId: matches.length === 1 ? matches[0].id : '' })
+    }
+  }
+  return [...groups.values()]
+}
+
+/** Each nonempty Y value must resolve to one approved HQ account. Empty Y
+ * is intentionally omitted from mapping controls and remains unassigned. */
+export function sourceOwnerGroups(workspace: Workspace, sheet: ImportSheet, headerRow: number, sigSkus?: Record<number, string>): SourceOwnerGroup[] {
+  const groups = new Map<string, SourceOwnerGroup>()
+  for (let index = headerRow; index < sheet.rows.length; index++) {
+    const row = sheet.rows[index]
+    if (!text(row[5]) && !sigSkus?.[index + 1]?.trim()) continue
+    const source = text(row[24])
+    if (!source) continue
+    const group = groups.get(source)
+    if (group) group.count += 1
+    else {
+      const normalized = source.toLocaleUpperCase('en-US')
+      const matches = workspace.profiles.filter(profile => profile.role !== 'factory' && profile.active && profile.approved && !profile.withdrawnAt && [profile.name, profile.email].some(value => value.trim().toLocaleUpperCase('en-US') === normalized))
+      groups.set(source, { source, count: 1, ownerId: matches.length === 1 ? matches[0].id : '' })
     }
   }
   return [...groups.values()]
@@ -75,7 +97,7 @@ export function buildBulkOrderRegistrationPlan(workspace: Workspace, sheet: Impo
     let fullSku: string
     try { fullSku = readSigRowSku(source, options.sigSkus?.[rowNumber], options.sigBudgetFallback) }
     catch (failure) { errors.push(`${rowNumber}행: ${failure instanceof Error ? failure.message : String(failure)}`); continue }
-    const plan = planRegistrationFromRow(prepared, sheet, options.headerRow, rowNumber, { factoryId, ...settings.defaults, allowMissingDueDate: settings.automatic === true }, makeId, options.sigColors?.[rowNumber], fullSku)
+    const plan = planRegistrationFromRow(prepared, sheet, options.headerRow, rowNumber, { factoryId, ...settings.defaults, ownerMappings: settings.ownerMappings, allowMissingDueDate: settings.automatic === true }, makeId, options.sigColors?.[rowNumber], fullSku)
     if (!plan.style || !plan.project) { errors.push(...plan.errors.map(error => `${rowNumber}행: ${error}`)); continue }
     const style = plan.style, matchedProject = prepared.projects.find(project => project.id === plan.project!.id)
     const project = matchedProject?.code?.trim() ? { ...plan.project, code: matchedProject.code } : plan.project
@@ -84,13 +106,10 @@ export function buildBulkOrderRegistrationPlan(workspace: Workspace, sheet: Impo
     // still a new registration and each source vendor must agree with its ACL.
     if (!original) {
       style.factoryId = factoryId
-      style.ownerId = settings.defaults.ownerId
-      style.updatedBy = settings.defaults.ownerId
       if (!prepared.factories.some(factory => factory.id === factoryId)) errors.push(`${rowNumber}행 ${fullSku}: W열 생산처에 등록된 담당 공장을 선택해 주세요.`)
       const previous = selectedFactories.get(style.id)
       if (previous && previous !== factoryId) errors.push(`${rowNumber}행 ${fullSku}: 같은 기본 품번의 컬러별 담당 공장이 다릅니다. 생산처 배정을 확인해 주세요.`)
       selectedFactories.set(style.id, previous || factoryId)
-      if (!prepared.profiles.some(profile => profile.id === style.ownerId && profile.active && profile.approved && profile.role !== 'factory')) errors.push(`${rowNumber}행 ${fullSku}: 승인된 본사 담당자를 선택해 주세요.`)
       if (!validDate(style.dueDate) && !(settings.automatic === true && style.dueDate === '')) errors.push(`${rowNumber}행 ${fullSku}: 파일에 입고예정일이 없으므로 신규 품번의 기준 납기일을 선택해 주세요.`)
     }
     const previousProject = selectedProjects.get(style.id)

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { createSeed, DEMO_IDS } from '../src/lib/seed'
 import { quantityTotal } from '../src/lib/types'
 import { buildOrderImportPreview, orderImportDefaults, parseOrderWorkbook, type OrderImportOptions } from '../src/lib/order-import'
-import { buildBulkOrderRegistrationPlan, sourceFactoryGroups } from '../src/lib/bulk-order-registration'
+import { buildBulkOrderRegistrationPlan, sourceFactoryGroups, sourceOwnerGroups } from '../src/lib/bulk-order-registration'
 import { importProductionOrdersInWorkspace } from '../src/lib/round-import'
 import { savePoInWorkspace } from '../src/lib/operations-domain'
 vi.mock('../src/lib/repository', () => ({ supabase: null, getDemoWorkspace: vi.fn(), locked: vi.fn(), persist: vi.fn() }))
@@ -34,7 +34,7 @@ describe('여러 신규 품번의 등록 계획', () => {
     expect(new Set(plan.entries.map(entry => entry.project.id)).size).toBe(1)
     expect(workspace).toEqual(before)
     for (const { style } of plan.entries) {
-      expect(style.version).toBe(0); expect(style.ownerId).toBe(DEMO_IDS.internal); expect(style.dueDate).toBe('2026-11-20')
+      expect(style.version).toBe(0); expect(style.ownerId).toBe(''); expect(style.dueDate).toBe('2026-11-20')
       expect(style.samples).toEqual([])
       for (const line of style.production) for (const key of ['order', 'received', 'shipped', 'packing'] as const) expect(quantityTotal(line[key])).toBe(0)
     }
@@ -163,22 +163,44 @@ describe('여러 신규 품번의 등록 계획', () => {
     expect(result.errors).toEqual([])
     expect(result.entries.find(entry => entry.style.code === 'QA26FYTS0001')?.style.dueDate).toBe('2026-11-25')
   })
-  it.each(['factory', 'inactive', 'pending'])('유효하지 않은 기본 담당자 %s를 신규 품번에 배정하지 않는다', async kind => {
-    const { workspace, settings, build } = await fixture()
+  it.each(['factory', 'inactive', 'pending'])('Y열 담당자의 %s 계정은 배정하지 않는다', async kind => {
+    const { workspace, settings, sheet, options, build } = await fixture()
     const profile = workspace.profiles.find(person => person.id === settings.defaults.ownerId)!
+    for (const row of sheet.rows.slice(options.headerRow)) if (row[5]) row[24] = profile.name
     if (kind === 'factory') profile.role = 'factory'
     if (kind === 'inactive') profile.active = false
     if (kind === 'pending') profile.approved = false
-    expect(build().errors.join(' ')).toContain('본사 담당자')
+    expect(build().errors.join(' ')).toContain('Y열 담당자')
   })
-  it('명시적으로 선택한 공통 담당자는 신규 품번의 Y열 자동 매칭보다 우선한다', async () => {
+  it('Y열을 공통 담당자 기본값보다 우선하고 빈 Y는 공란으로 유지한다', async () => {
     const { workspace, sheet, settings, build } = await fixture()
     sheet.rows[7][24] = workspace.profiles.find(person => person.id === DEMO_IDS.admin)!.name
     settings.defaults.ownerId = DEMO_IDS.internal
     const result = build()
     expect(result.errors).toEqual([])
-    expect(result.entries.every(entry => entry.style.ownerId === DEMO_IDS.internal)).toBe(true)
+    const matched = result.entries.find(entry => entry.style.code === 'QA26FYTS0001')!
+    expect(matched.style.ownerId).toBe(DEMO_IDS.admin)
+    expect(matched.style.production[0].ownerId).toBe(DEMO_IDS.admin)
+    expect(result.entries.filter(entry => entry !== matched).every(entry => entry.style.ownerId === '' && entry.style.production.every(line => line.ownerId === ''))).toBe(true)
     expect(result.preview.rows.find(row => row.rowNumbers.includes(8))!.source!.rows[0].columns.Y).toBe(sheet.rows[7][24])
+  })
+  it('같은 기본 품번이어도 컬러별 Y열 담당자를 독립적으로 연결한다', async () => {
+    const { workspace, sheet, build } = await fixture()
+    sheet.rows.find(row => row[5] === 'QA26FYTS0003BK')![24] = workspace.profiles.find(person => person.id === DEMO_IDS.admin)!.name
+    sheet.rows.find(row => row[5] === 'QA26FYTS0003NV')![24] = workspace.profiles.find(person => person.id === DEMO_IDS.internal)!.name
+    const result = build(), style = result.entries.find(entry => entry.style.code === 'QA26FYTS0003')!.style
+    expect(result.errors).toEqual([])
+    expect(style.production.find(line => line.color === 'BK')!.ownerId).toBe(DEMO_IDS.admin)
+    expect(style.production.find(line => line.color === 'NV')!.ownerId).toBe(DEMO_IDS.internal)
+  })
+  it('Y열 매칭이 모호하면 선택을 요구하고 명시한 연결만 사용한다', async () => {
+    const { workspace, sheet, options, settings, build } = await fixture()
+    sheet.rows[7][24] = '파일 담당자'
+    expect(sourceOwnerGroups(workspace, sheet, options.headerRow)).toEqual([{ source: '파일 담당자', count: 1, ownerId: '' }])
+    expect(build().errors.join(' ')).toContain('Y열 담당자')
+    const result = buildBulkOrderRegistrationPlan(workspace, sheet, options, { ...settings, ownerMappings: { '파일 담당자': DEMO_IDS.internal } })
+    expect(result.errors).toEqual([])
+    expect(result.entries.find(entry => entry.style.code === 'QA26FYTS0001')!.style.production[0].ownerId).toBe(DEMO_IDS.internal)
   })
   it('기존 스타일의 공장·담당자·납기와 수량은 파일 기본값으로 덮어쓰지 않는다', async () => {
     const { workspace, actor, settings, sheet, options, build } = await fixture()
@@ -190,7 +212,7 @@ describe('여러 신규 품번의 등록 계획', () => {
     settings.defaults.dueDate = '2027-01-01'; settings.factoryMappings = { 'QA 공장 1': workspace.factories[7].id }
     const plan = buildBulkOrderRegistrationPlan(current, sheet, options, settings)
     const retained = plan.prepared.styles.find(style => style.id === first.style.id)!
-    expect(retained).toEqual(before)
+    expect(retained).toEqual({ ...before, production: before.production.map(line => ({ ...line, ownerId: '' })) })
     expect(plan.entries.some(entry => entry.style.id === first.style.id)).toBe(false)
     expect(current.styles.find(style => style.id === first.style.id)).toEqual(before)
   })

@@ -8,6 +8,10 @@ function client(capability: {data:unknown;error:unknown}, pages:Record<string,Re
   return {value:{rpc:vi.fn(async()=>capability),from} as unknown as SupabaseClient,from}
 }
 describe('생산 원장 클라우드 로딩',()=>{
+  it('미지정 담당자 UUID null은 빈칸으로 읽고 이미 확정된 이름은 보존한다',async()=>{
+    const mock=client({data:true,error:null},{production_runs:[[{id:'blank',owner_id_snapshot:null,owner_name_snapshot:'',unit_cost:null},{id:'assigned',owner_id_snapshot:'owner',owner_name_snapshot:'담당자',unit_cost:null}]]})
+    expect((await loadProductionLedgerWorkspace(mock.value)).productionRuns).toMatchObject([{id:'blank',ownerIdSnapshot:'',ownerNameSnapshot:''},{id:'assigned',ownerIdSnapshot:'owner',ownerNameSnapshot:'담당자'}])
+  })
   it('공장·미승인 계정에는 금융 테이블을 요청하지 않는다',async()=>{
     const mock=client({data:false,error:null}),result=await loadProductionLedgerWorkspace(mock.value)
     expect(mock.from).not.toHaveBeenCalled();expect(result).toEqual({productionRuns:[],productionReceipts:[],productionRunAudits:[],productionLedgerAvailable:false})

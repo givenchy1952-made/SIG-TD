@@ -9,7 +9,7 @@ function fixture() {
   const headers: ImportCell[] = Array.from({ length: 51 }, () => '')
   Object.assign(headers, { 0: '프로젝트 코드', 5: '스타일코드', 11: '년도/시즌', 12: '프로젝트 명칭', 42: 'XXS', 43: 'XS', 44: 'S', 45: 'M', 46: 'L', 47: 'XL', 50: 'TOTAL QTY' })
   const row: ImportCell[] = Array.from({ length: 51 }, () => null)
-  Object.assign(row, { 0: 'QA-PROJECT-2026', 5: 'QAFYTS9001BK', 6: '이 값은 제품명으로 사용하지 않음', 8: 'WH', 11: '2026FY', 12: 'QA 프로젝트 명칭', 18: '2026-01-01', 22: '등록되지 않은 공장', 24: '등록되지 않은 담당자', 42: 1, 43: 2, 44: 3, 45: 4, 46: 5, 47: 6, 50: 21 })
+  Object.assign(row, { 0: 'QA-PROJECT-2026', 5: 'QAFYTS9001BK', 6: '이 값은 제품명으로 사용하지 않음', 8: 'WH', 11: '2026FY', 12: 'QA 프로젝트 명칭', 18: '2026-01-01', 22: '등록되지 않은 공장', 24: workspace.profiles.find(person => person.id === DEMO_IDS.internal)!.name, 42: 1, 43: 2, 44: 3, 45: 4, 46: 5, 47: 6, 50: 21 })
   const sheet: ImportSheet = { name: 'ORDER QTY', rows: [headers, row] }
   const defaults = { factoryId: DEMO_IDS.china, ownerId: DEMO_IDS.internal, dueDate: '2026-11-30' }
   const plan = () => planRegistrationFromRow(workspace, sheet, 1, 2, defaults)
@@ -17,6 +17,62 @@ function fixture() {
 }
 
 describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
+  it('Y열이 비면 기본 담당자가 있어도 품번과 해당 컬러 담당자를 공란으로 등록한다', () => {
+    const { row, plan } = fixture()
+    row[24] = '   '
+    const result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.ownerId).toBe('')
+    expect(result.style!.production[0].ownerId).toBe('')
+    expect(result.sourceOwner).toBe('')
+  })
+
+  it('Y열 이메일은 대소문자·앞뒤 공백을 정규화해 승인된 본사 계정과 연결한다', () => {
+    const { workspace, row, plan } = fixture()
+    const owner = workspace.profiles.find(person => person.id === DEMO_IDS.internal)!
+    row[24] = ` ${owner.email.toUpperCase()} `
+    const result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.production[0].ownerId).toBe(owner.id)
+  })
+
+  it('Y열 담당자를 찾지 못하면 업로더 기본값으로 대신 채우지 않는다', () => {
+    const { row, plan, defaults } = fixture()
+    row[24] = '아직 가입하지 않은 담당자'
+    const result = plan()
+    expect(result.errors.join(' ')).toContain('Y열 담당자')
+    expect(result.style!.ownerId).toBe('')
+    expect(result.style!.production[0].ownerId).toBe('')
+    expect(result.style!.ownerId).not.toBe(defaults.ownerId)
+  })
+
+  it.each(['동명이인', '비활성', '승인 대기', '공장', '탈퇴'])('Y열 %s 담당자는 자동으로 임의 선택하지 않는다', kind => {
+    const { workspace, row, plan } = fixture()
+    const owner = workspace.profiles.find(person => person.id === DEMO_IDS.internal)!
+    row[24] = owner.name
+    if (kind === '동명이인') workspace.profiles.push({ ...owner, id: crypto.randomUUID(), email: 'other@example.test' })
+    if (kind === '비활성') owner.active = false
+    if (kind === '승인 대기') owner.approved = false
+    if (kind === '공장') owner.role = 'factory'
+    if (kind === '탈퇴') owner.withdrawnAt = '2026-10-26T00:00:00Z'
+    const result = plan()
+    expect(result.errors.join(' ')).toContain('Y열 담당자')
+    expect(result.style!.production[0].ownerId).toBe('')
+  })
+
+  it('기존 품번의 Y열은 해당 컬러 담당자만 바꾸고 다른 컬러·기본 담당자는 보존한다', () => {
+    const { workspace, row, plan } = fixture()
+    const style = workspace.styles[0], before = structuredClone(style)
+    row[5] = `${style.code}${style.production[1].color}`
+    row[24] = ''
+    const result = plan()
+    expect(result.errors).toEqual([])
+    expect(result.style!.ownerId).toBe(before.ownerId)
+    expect(result.style!.production[1]).toEqual({ ...before.production[1], ownerId: '' })
+    expect(result.style!.production[0]).toEqual(before.production[0])
+    expect(style).toEqual(before)
+  })
+
   it('F 끝 두 자리만 컬러로 읽고 충돌하는 I열과 제품명 G열은 사용하지 않는다', () => {
     const { row, plan } = fixture()
     row[8] = { error: '#REF!' }
@@ -98,7 +154,7 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.style!.ownerId).toBe(workspace.profiles[0].id)
   })
 
-  it('매칭되지 않는 공장·담당자는 사용자가 선택한 기본값을 사용하며 새 업체를 추측하지 않는다', () => {
+  it('매칭되지 않는 공장은 명시한 공장 기본값을 사용하며 새 업체를 추측하지 않는다', () => {
     const { workspace, plan, defaults } = fixture()
     const before = structuredClone(workspace), result = plan()
     expect(result.style).toMatchObject({ factoryId: defaults.factoryId, ownerId: defaults.ownerId, dueDate: defaults.dueDate })
@@ -151,7 +207,7 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.color).toBe(style.colors[0])
     expect(result.style!.projectId).toBe(result.project!.id)
     expect(result.project).toMatchObject({ code: 'QA-PROJECT-2026', name: 'QA 프로젝트 명칭' })
-    expect(result.style!.production).toEqual(before.production)
+    expect(result.style!.production.map(({ ownerId: _ownerId, ...line }) => line)).toEqual(before.production.map(({ ownerId: _ownerId, ...line }) => line))
     expect(result.style!.colors).toEqual(before.colors)
     expect(result.style!.samples).toEqual(before.samples)
     expect(result.style!.factoryId).toBe(before.factoryId)
@@ -171,7 +227,7 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.isNewColor).toBe(false)
     expect(result.fullSku).toBe(String(row[5]))
     expect(result.style!.code).toBe(String(row[5]))
-    expect(result.style!.production).toEqual(before.production)
+    expect(result.style!.production.map(({ ownerId: _ownerId, ...line }) => line)).toEqual(before.production.map(({ ownerId: _ownerId, ...line }) => line))
     expect(style).toEqual(before)
   })
 
@@ -218,7 +274,7 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     const before = structuredClone(style), result = plan()
     expect(result.errors).toEqual([])
     expect(result.style!.code).toBe(before.code)
-    expect(result.style!.production).toEqual(before.production)
+    expect(result.style!.production.map(({ ownerId: _ownerId, ...line }) => line)).toEqual(before.production.map(({ ownerId: _ownerId, ...line }) => line))
     expect(result.color).toBe(before.colors[0])
     expect(result.isNewStyle).toBe(false)
     expect(result.isNewColor).toBe(false)
@@ -242,7 +298,7 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     expect(result.errors).toEqual([])
     expect(result.color).toBe(color)
     expect(result.isNewColor).toBe(false)
-    expect(result.style!.production).toEqual(before.production)
+    expect(result.style!.production.map(({ ownerId: _ownerId, ...line }) => line)).toEqual(before.production.map(({ ownerId: _ownerId, ...line }) => line))
     expect(result.style!.factoryId).toBe(before.factoryId)
   })
 

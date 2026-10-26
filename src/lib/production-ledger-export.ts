@@ -22,7 +22,7 @@ export function buildFrozenProductionEuljiRows(workspace: ProductionLedgerWorksp
       if (!line || seenLines.has(selectedLine.id)) { errors.push(`${style.code}: 선택한 컬러가 변경되었거나 중복되었습니다.`); continue }
       seenLines.add(line.id)
       const runs = (workspace.productionRuns || []).filter(run => run.styleId === style.id && run.lineId === line.id)
-      if (!runs.length) { if (inScope(style.projectId, style.factoryId, style.ownerId, style.season)) legacyLines.push(line) }
+      if (!runs.length) { if (inScope(style.projectId, style.factoryId, line.ownerId ?? style.ownerId, style.season)) legacyLines.push(line) }
       else for (const run of runs.filter(item => inScope(item.projectId, item.factoryIdSnapshot, item.ownerIdSnapshot, workspace.projects.find(project => project.id === item.projectId)?.season || style.season))) {
         if (run.closedAt && run.snapshot) runIds.push(run.id)
         else errors.push(`${style.code} ${line.color} · ${run.projectCode} ${run.round}차: 마감 확정 후 다운로드해 주세요. 확정 차수 한 건은 스타일 상세에서 별도로 내려받을 수 있습니다.`)

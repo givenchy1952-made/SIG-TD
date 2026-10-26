@@ -18,6 +18,50 @@ function run() {
 const received=(workspace:ProductionLedgerWorkspace,admin:ReturnType<typeof seed>['admin'],id:string,count=2)=>allocateProductionReceiptInWorkspace(workspace,admin,crypto.randomUUID(),id,{receivedAt:'2026-11-01',quantities:qty(count)},workspace.productionRuns!.find(item=>item.id===id)!.version,'실입고 확인')
 
 describe('프로젝트·차수별 정산 도메인',()=>{
+  it('컬러 담당자가 빈칸이면 스타일 담당자로 대체하지 않고 미지정 차수를 만든다',()=>{
+    const {workspace,style,admin,data}=seed()
+    style.production[0].ownerId=''
+    const next=saveProductionRunInWorkspace(workspace,admin,crypto.randomUUID(),style.id,style.production[0].id,data,0,'미지정 오더 업로드')
+    expect(next.productionRuns![0]).toMatchObject({ownerIdSnapshot:'',ownerNameSnapshot:''})
+    expect(style.ownerId).not.toBe('')
+  })
+  it('각 컬러의 담당자를 사용하고 컬러 지정이 없는 예전 스타일은 기존 담당자를 쓴다',()=>{
+    const {workspace,style,admin,internal,data}=seed()
+    style.production[0].ownerId=internal.id
+    const first=saveProductionRunInWorkspace(workspace,admin,crypto.randomUUID(),style.id,style.production[0].id,data,0,'컬러 담당자 오더')
+    expect(first.productionRuns![0]).toMatchObject({ownerIdSnapshot:internal.id,ownerNameSnapshot:internal.name})
+    delete style.production[0].ownerId
+    const next=saveProductionRunInWorkspace(workspace,admin,crypto.randomUUID(),style.id,style.production[0].id,data,0,'기존 담당자 오더')
+    expect(next.productionRuns![0].ownerIdSnapshot).toBe(style.ownerId)
+  })
+  it('공장 계정이나 미승인·비활성 본사를 새 차수 담당자로 지정하지 못한다',()=>{
+    const {workspace,style,admin,data}=seed()
+    for(const invalid of workspace.profiles.filter(item=>item.role==='factory'||!item.approved||!item.active)){
+      style.production[0].ownerId=invalid.id
+      expect(()=>saveProductionRunInWorkspace(workspace,admin,crypto.randomUUID(),style.id,style.production[0].id,data,0,'담당자 검증')).toThrow(/담당자/)
+    }
+  })
+  it('미지정 차수는 나중에 저장한 컬러 담당자를 한 번 채운 뒤 변경 이력을 보존한다',()=>{
+    const {workspace,style,admin,internal,data}=seed(),id=crypto.randomUUID()
+    style.production[0].ownerId=''
+    const first=saveProductionRunInWorkspace(workspace,admin,id,style.id,style.production[0].id,data,0,'미지정 차수')
+    first.styles.find(item=>item.id===style.id)!.production[0].ownerId=internal.id
+    const assigned=saveProductionRunInWorkspace(first,admin,id,style.id,style.production[0].id,data,1,'담당자 배정')
+    expect(assigned.productionRuns![0]).toMatchObject({ownerIdSnapshot:internal.id,ownerNameSnapshot:internal.name})
+    assigned.styles.find(item=>item.id===style.id)!.production[0].ownerId=admin.id
+    const preserved=saveProductionRunInWorkspace(assigned,admin,id,style.id,style.production[0].id,data,2,'차수 내용 확인')
+    expect(preserved.productionRuns![0]).toMatchObject({ownerIdSnapshot:internal.id,ownerNameSnapshot:internal.name})
+  })
+  it('미지정 차수는 마감을 막고 수동 담당자 배정 후 처음 확정한 담당자를 보존한다',()=>{
+    const {workspace,style,admin,internal,data}=seed(),id=crypto.randomUUID()
+    style.production[0].ownerId=''
+    const draft=saveProductionRunInWorkspace(workspace,admin,id,style.id,style.production[0].id,data,0,'미지정 차수')
+    const next=received(draft,admin,id)
+    expect(()=>finalizeProductionRunInWorkspace(next,admin,id,2,'미지정 마감')).toThrow(/담당자/)
+    next.styles.find(item=>item.id===style.id)!.production[0].ownerId=internal.id
+    const closed=finalizeProductionRunInWorkspace(next,admin,id,2,'담당자 배정 후 확정')
+    expect(closed.productionRuns![0]).toMatchObject({ownerIdSnapshot:internal.id,ownerNameSnapshot:internal.name,snapshot:{ownerIdSnapshot:internal.id,owner:internal.name}})
+  })
   it('컬러를 포함한 14자리 품번에 컬러 코드를 다시 붙이지 않는다',()=>{
     const {workspace,style,admin,data}=seed()
     style.code='BP06FYDW0101BK';style.production[0].color='BK'

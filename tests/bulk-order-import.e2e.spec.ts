@@ -76,7 +76,7 @@ test('CP949 26개 품번은 별도 등록과 납기 입력 없이 한 번 적용
   for (const row of expected) {
     const code = String(row[5]).trim(), style = saved.styles.find(item => `${item.code}${String(row[5]).trim().slice(-2)}` === code)!
     const line = style.production.find(item => item.color === code.slice(-2))!
-    expect(style.ownerId).toBe(INTERNAL); expect(style.dueDate).toBe('')
+    expect(style.ownerId).toBe(''); expect(line.ownerId).toBe(''); expect(style.dueDate).toBe('')
     expect(style.factoryId).toBe(factoryId(Number(String(row[22]).trim().split(' ').at(-1))))
     expect(style.samples).toEqual([]); expect(style.ppApproved).toBe(false)
     expect(Object.values(line.shipped)).toEqual([0, 0, 0, 0, 0, 0]); expect(Object.values(line.received)).toEqual([0, 0, 0, 0, 0, 0])
@@ -133,3 +133,47 @@ for (const invalid of [{ name: '음수 사이즈', column: 42, value: '-1' }, { 
     expect(saved.styles).toHaveLength(0); expect(saved.projects).toHaveLength(0); expect(saved.productionRuns).toHaveLength(0)
   })
 }
+
+test('Y열은 컬러별 담당자를 연결하고 빈칸은 업로더로 채우지 않는다', async ({ page }) => {
+  await ready(page)
+  const before = await workspace(page), rows = await fixtureRows()
+  const admin = before.profiles.find(person => person.role === 'admin')!
+  const internal = before.profiles.find(person => person.id === INTERNAL)!
+  rows.find(row => row[5] === 'QA26FYTS0003BK')![24] = admin.name
+  rows.find(row => row[5] === 'QA26FYTS0003NV')![24] = internal.email.toUpperCase()
+  const modal = await upload(page, csvBytes(rows), 'qa-Y-owner.csv')
+  await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeEnabled()
+  await modal.getByRole('button', { name: '검증된 오더 적용', exact: true }).click()
+  await expect(modal.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
+  const saved = await workspace(page), style = saved.styles.find(item => item.code === 'QA26FYTS0003')!
+  const black = style.production.find(line => line.color === 'BK')!, navy = style.production.find(line => line.color === 'NV')!
+  expect(black.ownerId).toBe(admin.id)
+  expect(navy.ownerId).toBe(internal.id)
+  expect(saved.productionRuns!.find(run => run.styleId === style.id && run.lineId === black.id)!.ownerIdSnapshot).toBe(admin.id)
+  expect(saved.productionRuns!.find(run => run.styleId === style.id && run.lineId === navy.id)!.ownerIdSnapshot).toBe(internal.id)
+  const blankStyle = saved.styles.find(item => item.code === 'QA26FYTS0001')!
+  expect(blankStyle.ownerId).toBe('')
+  expect(blankStyle.production[0].ownerId).toBe('')
+  const blankRun = saved.productionRuns!.find(run => run.styleId === blankStyle.id)!
+  expect(blankRun.ownerIdSnapshot).toBe('')
+  expect(blankRun.ownerNameSnapshot).toBe('')
+})
+
+test('Y열의 모르는 이름만 한 번 연결하고 빈 담당자 행은 그대로 둔다', async ({ page }) => {
+  await ready(page)
+  const rows = await fixtureRows()
+  rows[7][24] = 'CSV 담당자 별칭'
+  rows[8][24] = 'CSV 담당자 별칭'
+  const modal = await upload(page, csvBytes(rows), 'qa-Y-unmatched.csv')
+  const apply = modal.getByRole('button', { name: '검증된 오더 적용', exact: true })
+  await expect(apply).toBeDisabled()
+  await expect(modal.getByLabel('Y열 담당자 연결 CSV 담당자 별칭', { exact: true })).toHaveValue('')
+  await modal.getByLabel('Y열 담당자 연결 CSV 담당자 별칭', { exact: true }).selectOption(INTERNAL)
+  await expect(apply).toBeEnabled()
+  await apply.click()
+  await expect(modal.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
+  const saved = await workspace(page)
+  expect(saved.styles.find(item => item.code === 'QA26FYTS0001')!.production[0].ownerId).toBe(INTERNAL)
+  expect(saved.styles.find(item => item.code === 'QA26FYTS0002')!.production[0].ownerId).toBe(INTERNAL)
+  expect(saved.styles.find(item => item.code === 'QA26FYTS0003')!.production.every(line => line.ownerId === '')).toBe(true)
+})

@@ -8,7 +8,7 @@ const missing = (code: string) => ['PGRST202', 'PGRST205', '42P01', '42883'].inc
 const camel = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key === 'order_quantities' ? 'order' : key.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase()), value]))
 function run(row: Record<string, unknown>): ProductionRun {
   const mapped = camel(row)
-  return { ...mapped, expectedDue: mapped.expectedDue || '', unitCost: mapped.unitCost === null ? null : Number(mapped.unitCost) } as unknown as ProductionRun
+  return { ...mapped, ownerIdSnapshot: mapped.ownerIdSnapshot || '', ownerNameSnapshot: mapped.ownerNameSnapshot || '', expectedDue: mapped.expectedDue || '', unitCost: mapped.unitCost === null ? null : Number(mapped.unitCost) } as unknown as ProductionRun
 }
 function receipt(row: Record<string, unknown>): ProductionReceipt {
   const mapped = camel(row)

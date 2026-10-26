@@ -43,7 +43,7 @@ function csv(sku: string, project = { code: 'QA-BASE-IMPORT-01', name: 'QA 기�
   headers[22] = '생산처'; headers[24] = '생산 담당자'; headers[50] = 'TOTAL QTY'
   headers[40] = '입고예정일'
   row[0] = project.code; row[5] = sku; row[8] = '#REF!'; row[11] = project.season; row[12] = project.name
-  row[22] = 'QA 별도 공장'; row[24] = 'QA 별도 담당자'; row[50] = '4,138'
+  row[22] = 'QA 별도 공장'; row[24] = 'admin@example.test'; row[50] = '4,138'
   Object.values(QUANTITIES).forEach((quantity, index) => { headers[42 + index] = `TTL ${index + 1}`; row[42 + index] = quantity.toLocaleString('en-US') })
   row[4] = '#NAME?'; row[96] = '#REF!'
   for (const [column, value] of Object.entries(overrides)) row[Number(column)] = value
@@ -75,6 +75,7 @@ test('F 기본 품번의 실제 수량을 표시하고 전체 품번 보정 후 
   const after = await snapshot(page), style = after.styles.find(item => item.code === 'QAFYDW9901')!
   expect(after.styles).toHaveLength(before.styles.length + 1)
   expect(style.production[0].order).toEqual(QUANTITIES)
+  expect(style.production[0].ownerId).toBe(style.ownerId)
   expect(Object.values(style.production[0].shipped)).toEqual([0, 0, 0, 0, 0, 0])
   expect(Object.values(style.production[0].received)).toEqual([0, 0, 0, 0, 0, 0])
   expect(style).toMatchObject({ factoryId: CHINA, ownerId: ADMIN, dueDate: '', colors: ['BK'] })
@@ -179,8 +180,9 @@ test('F 기본 품번과 B 예산코드의 전체 품번으로 등록 정보를 
   await expect(modal.getByRole('button', { name: '적용 완료', exact: true })).toBeVisible()
   const after = await snapshot(page), style = after.styles.find(item => item.code === 'QAFYDW9999')!
   expect(after.styles).toHaveLength(before.styles.length + 1)
-  expect(style).toMatchObject({ factoryId: CHINA, ownerId: ADMIN, dueDate: '2026-10-14', colors: ['BK'] })
+  expect(style).toMatchObject({ factoryId: CHINA, ownerId: '10000000-0000-4000-8000-000000000002', dueDate: '2026-10-14', colors: ['BK'] })
   expect(style.production[0].order).toEqual(QUANTITIES)
+  expect(style.production[0].ownerId).toBe(style.ownerId)
   expect(Object.values(style.production[0].shipped)).toEqual([0, 0, 0, 0, 0, 0])
   expect(Object.values(style.production[0].received)).toEqual([0, 0, 0, 0, 0, 0])
   expect(after.projects.find(item => item.id === style.projectId)).toMatchObject(project)

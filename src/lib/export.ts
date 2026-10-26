@@ -1,5 +1,6 @@
 import { CHECKS, SIZES, STAGE_LABEL, STATUS_LABEL, quantityTotal } from './types'
 import type { Style, Workspace } from './types'
+import { fullStyleSku } from './style-identity'
 
 export type ExportView = 'overview' | 'samples' | 'production' | 'settlement'
 type Cell = string | number | boolean | null | undefined
@@ -42,7 +43,7 @@ export function buildExportSheets(workspace: Workspace, styles: Style[]): Export
       const label = { order: '오더', packing: '패킹리스트', shipped: '실 출고', received: '실 입고' }[key]
       return [...SIZES.map(size => `${label} ${size}`), `${label} 합계`]
     }), '컨펌 예정일', '실 출고일', '실 입고일', '세금계산서 발행', '정산 금액(KRW)', '결제 마감일', '결제 상태', '사이즈 측정', '공장 코멘트', '최종 수정일'],
-    rows: styles.flatMap(style => style.production.map(line => [style.season, projectName(style.projectId), factoryName(style.factoryId), ownerName(style.ownerId), style.code, style.name, `${style.code}${line.color}`, line.color, style.dueDate, style.ppApproved ? '승인' : '미승인', ...CHECKS.map(([key]) => STATUS_LABEL[line.checks[key]]), ...(['order', 'packing', 'shipped', 'received'] as const).flatMap(key => [...SIZES.map(size => line[key][size]), quantityTotal(line[key])]), line.confirmDue, line.shippedAt, line.receivedAt, STATUS_LABEL[line.invoice], line.invoiceAmount, line.paymentDue, STATUS_LABEL[line.paymentStatus], line.measurements, line.factoryComment, style.updatedAt])),
+    rows: styles.flatMap(style => style.production.map(line => [style.season, projectName(style.projectId), factoryName(style.factoryId), ownerName(line.ownerId ?? style.ownerId), style.code, style.name, fullStyleSku(style.code, line.color), line.color, style.dueDate, style.ppApproved ? '승인' : '미승인', ...CHECKS.map(([key]) => STATUS_LABEL[line.checks[key]]), ...(['order', 'packing', 'shipped', 'received'] as const).flatMap(key => [...SIZES.map(size => line[key][size]), quantityTotal(line[key])]), line.confirmDue, line.shippedAt, line.receivedAt, STATUS_LABEL[line.invoice], line.invoiceAmount, line.paymentDue, STATUS_LABEL[line.paymentStatus], line.measurements, line.factoryComment, style.updatedAt])),
   }
   const auditSheet: ExportSheet = {
     name: '변경 이력',

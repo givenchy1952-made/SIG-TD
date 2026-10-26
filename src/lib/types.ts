@@ -6,7 +6,7 @@ import type { SupplierOrderFields } from './supplier-orders'
 export type Role = 'admin' | 'internal' | 'factory'
 export type Status = 'unset' | 'todo' | 'progress' | 'done' | 'approved' | 'delayed'
 export type Stage = 'registered' | 'pattern' | 'sample1' | 'sampleN' | 'review' | 'revision' | 'approved' | 'production'
-export interface Profile { id: string; name: string; email: string; role: Role; approved: boolean; active: boolean; factoryId: string | null }
+export interface Profile { id: string; name: string; email: string; role: Role; approved: boolean; active: boolean; factoryId: string | null; withdrawnAt?: string | null; withdrawnBy?: string | null }
 export interface Factory { id: string; name: string; country: string }
 export interface Project { code?: string; id: string; name: string; season: string }
 export const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL'] as const
@@ -24,7 +24,7 @@ export interface Sample {
   tracking: string; request: string; factoryComment: string; updatedAt: string;
 }
 export interface ProductionLine {
-  id: string; color: string; order: Quantities; shipped: Quantities; received: Quantities; packing: Quantities;
+  id: string; color: string; ownerId?: string; order: Quantities; shipped: Quantities; received: Quantities; packing: Quantities;
   checks: Record<CheckKey, Status>; confirmDue: string; shippedAt: string; receivedAt: string;
   invoice: Status; invoiceAmount: number; paymentDue: string; paymentStatus: Status; measurements: string; factoryComment: string;
 }
@@ -37,7 +37,7 @@ export interface Comment { id: string; styleId: string; sampleId: string | null;
 export interface Attachment { id: string; styleId: string; sampleId: string | null; name: string; path: string; mime: string; size: number; uploadedBy: string; createdAt: string }
 export interface Audit { id: string; styleId: string | null; actorId: string; actorName: string; action: string; reason: string; before: unknown; after: unknown; createdAt: string }
 export interface StyleImage { styleId: string; color: string; attachmentId: string | null; version: number; updatedAt: string; updatedBy: string }
-export interface Workspace extends SettlementWorkspaceFields, ProductionLedgerFields, SupplierOrderFields { staffApprovalsAvailable?: boolean; productionDetails?: ProductionDetails[]; refinementsAvailable?: boolean; styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[]; styleImages?: StyleImage[]; styleImagesAvailable?: boolean; operations?: OperationsWorkspace; operationsAvailable?: boolean }
+export interface Workspace extends SettlementWorkspaceFields, ProductionLedgerFields, SupplierOrderFields { importColorOwnersAvailable?: boolean; memberWithdrawalAvailable?: boolean; staffApprovalsAvailable?: boolean; productionDetails?: ProductionDetails[]; refinementsAvailable?: boolean; styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[]; styleImages?: StyleImage[]; styleImagesAvailable?: boolean; operations?: OperationsWorkspace; operationsAvailable?: boolean }
 export interface StyleSave { (style: Style, reason: string): Promise<void> }
 export const STATUS_LABEL: Record<Status, string> = { unset: '미기재', todo: '미완료', progress: '진행 중', done: '완료', approved: '최종 컨펌', delayed: '일정 지연' }
 export const STAGE_LABEL: Record<Stage, string> = { registered: '스타일 등록', pattern: '패턴 진행', sample1: '1차 샘플', sampleN: '2차 이상 샘플', review: '샘플 리뷰', revision: '수정 요청', approved: '최종 컨펌', production: '메인 생산' }

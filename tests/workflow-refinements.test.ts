@@ -150,4 +150,20 @@ describe('프로젝트 코드·명칭 및 스타일 등록 트랜잭션', () => 
     const { workspace, factory } = fixture(), { p, style } = registration(workspace)
     expect(() => registerOrderStyleInWorkspace(workspace, { ...factory, role: 'admin' }, style, p, reason)).toThrow('본사')
   })
+  it('탈퇴 담당자의 기존 참조는 보존하면서 한 컬러를 배정하되 새로 탈퇴자를 지정하지 않는다', () => {
+    const { workspace, admin, internal, style } = fixture()
+    style.ownerId = internal.id; style.production[0].ownerId = internal.id
+    internal.active = false; internal.approved = false
+    const old = workspace.projects.find(project => project.id === style.projectId)!
+    const project = { ...old, code: 'QA-OLD-OWNER', expected: { code: old.code || '', name: old.name, season: old.season } }
+    const edited = structuredClone(style)
+    edited.production[1].ownerId = admin.id
+    const next = registerOrderStyleInWorkspace(workspace, admin, edited, project, reason)
+    const saved = next.styles.find(item => item.id === style.id)!
+    expect(saved.ownerId).toBe(internal.id)
+    expect(saved.production[0].ownerId).toBe(internal.id)
+    expect(saved.production[1].ownerId).toBe(admin.id)
+    const invalid = structuredClone(style); invalid.production[1].ownerId = internal.id
+    expect(() => registerOrderStyleInWorkspace(workspace, admin, invalid, project, reason)).toThrow('담당자')
+  })
 })

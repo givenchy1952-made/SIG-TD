@@ -245,7 +245,7 @@ test('개인 휴가와 본사 전용 업체 휴가는 권한대로 숨기고 런
 test('본사 직원 담당 공장 배정은 공장 계정의 스타일 접근 권한을 변경하지 않는다', async ({ page }) => {
   await ready(page)
   const before = await stored(page), factoryProfile = before.profiles.find(profile => profile.id === FACTORY)!
-  const expectedCodes = before.styles.filter(style => style.factoryId === factoryProfile.factoryId).map(style => style.code).sort()
+  const expectedCodes = before.styles.filter(style => style.factoryId === factoryProfile.factoryId).flatMap(style => style.production.map(line => `${style.code}${line.color}`)).sort()
   await navigate(page, '사용자 · 기본 설정')
   await page.getByRole('button', { name: '천민영 담당 공장 배정', exact: true }).click()
   const modal = page.getByRole('dialog', { name: '담당 공장 배정', exact: true })
@@ -395,6 +395,11 @@ test('SIG 51열 CSV의 원본 16개 열을 보존하고 본사 참조 수정과 
   await modal.getByLabel('오더 Excel 파일', { exact: true }).setInputFiles({ name: 'qa-controlled-order-qty.csv', mimeType: 'text/csv', buffer: bytes })
   await expect(modal.getByLabel('오더 파일 형식', { exact: true })).toHaveValue('sig-order-qty')
   await expect(modal).toContainText('원본 정보')
+  // This fixture intentionally preserves an unmatched Y literal in the raw
+  // source. Explicitly map it instead of assigning the uploader implicitly.
+  await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeDisabled()
+  await modal.getByLabel('Y열 담당자 연결 QA-Y-원본', { exact: true }).selectOption(INTERNAL)
+  await expect(modal.getByRole('button', { name: '검증된 오더 적용', exact: true })).toBeEnabled()
   await modal.getByLabel('오더 변경 사유', { exact: true }).fill('QA 합성 51열 CSV 수량 및 원본 열 저장')
   await modal.getByRole('heading', { name: '적용 전 미리보기', exact: true }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: 'docs/screenshots/order-import.png' })
@@ -406,6 +411,8 @@ test('SIG 51열 CSV의 원본 16개 열을 보존하고 본사 참조 수정과 
   expect(Object.keys(source.headers).sort()).toEqual(Object.keys(sourceColumns).sort())
   expect(source.rows).toHaveLength(1)
   expect(imported.productionRuns).toHaveLength(1)
+  expect(imported.styles.find(style => style.id === target.id)!.production.find(line => line.color === 'BK')!.ownerId).toBe(INTERNAL)
+  expect(imported.productionRuns![0].ownerIdSnapshot).toBe(INTERNAL)
   expect(imported.productionRuns![0]).toMatchObject({ styleId: target.id, projectId: project.id, projectCode: values[0], round: 1, order: { XXS: 1, XS: 2, S: 3, M: 4, L: 5, XL: 6 } })
   expect(source.rows[0].rowNumber).toBe(2)
   for (const [column, index] of Object.entries(sourceColumns)) {
