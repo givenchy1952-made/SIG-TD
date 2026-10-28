@@ -11,7 +11,7 @@
 
 ## 가입과 승인
 
-Supabase **Authentication → Sign In / Providers → Email → Confirm email**을 OFF로 저장합니다. SQL이나 앱 배포로 이 설정이 바뀌지는 않습니다. 비밀번호 재설정에는 메일을 계속 사용하므로 Site URL·Redirect URLs·메일 발송 설정을 유지하세요.
+Supabase **Authentication → Sign In / Providers → User Signups → Confirm email**을 OFF로 저장합니다. SQL이나 앱 배포로 이 설정이 바뀌지는 않습니다. 비밀번호 재설정에는 메일을 계속 사용하므로 Site URL·Redirect URLs·메일 발송 설정을 유지하세요.
 
 가입 요청 후에는 업무 화면에 들어가지 않습니다. 관리자 또는 본사 직원이 **사용자·기본 설정 → 사용자 관리**에서 승인하고 역할을 지정합니다. 외부 공장은 등록된 소속 공장도 반드시 선택해야 합니다. 승인·활성·공장 배정이 완료된 후 다시 로그인합니다.
 

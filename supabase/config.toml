@@ -2,3 +2,6 @@
 # independently enforce approved HQ permissions. Never remove that verification.
 [functions.send-po-email]
 verify_jwt = false
+
+[functions.send-po-outlook]
+verify_jwt = false

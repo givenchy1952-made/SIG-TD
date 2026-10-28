@@ -17,11 +17,13 @@ export async function savePoDispatch(id: string, styleId: string, data: PoDispat
   if (supabase) { await rpc('save_po_dispatch', { p_id: id, p_style_id: styleId, p_expected_version: expectedVersion, p_data: data, p_reason: reason }); return }
   await locked(() => persist(savePoInWorkspace(getDemoWorkspace(), profile, id, styleId, data, expectedVersion, reason)))
 }
-export async function sendPoEmail(id: string, expectedVersion: number, profile: Profile): Promise<void> {
+export async function sendPoEmail(id: string, expectedVersion: number, profile: Profile, outlookAccessToken?: string, outlookIdToken?: string): Promise<void> {
   assertActive(profile)
   if (profile.role === 'factory') throw new Error('PO 메일은 관리자·본사 직원만 발송할 수 있습니다.')
   if (!supabase) throw new Error('체험 모드에서는 실제 메일을 발송하지 않습니다. Supabase 메일 함수와 발신 서비스 설정이 필요합니다.')
-  const result = await supabase.functions.invoke('send-po-email', { body: { id, expectedVersion } })
+  const outlook = outlookAccessToken !== undefined
+  if (outlook && (!outlookAccessToken.trim() || outlookAccessToken.length > 24576 || !outlookIdToken?.trim() || outlookIdToken.length > 24576)) throw new Error('Outlook 계정을 다시 연결한 뒤 발송해 주세요.')
+  const result = await supabase.functions.invoke(outlook ? 'send-po-outlook' : 'send-po-email', { body: { id, expectedVersion, ...(outlook ? { outlookAccessToken, outlookIdToken } : {}) } })
   if (result.error) {
     let text = 'PO 메일 발송을 확인하지 못했습니다. 발송 이력의 상태를 확인하고, 발송 접수가 불확실하면 재발송하지 말고 관리자에게 확인해 주세요.'
     if ('context' in result.error && result.error.context instanceof Response) {
@@ -29,7 +31,8 @@ export async function sendPoEmail(id: string, expectedVersion: number, profile: 
     }
     throw new Error(text)
   }
-  if (result.data?.status !== 'sent' || !result.data?.providerMessageId) throw new Error('메일 서비스의 접수 근거를 확인하지 못했습니다. 발송 상태를 다시 확인해 주세요.')
+  const receipt = outlook ? result.data?.provider === 'outlook' && result.data?.providerRequestId : result.data?.providerMessageId
+  if (result.data?.status !== 'sent' || !receipt) throw new Error('메일 서비스의 접수 근거를 확인하지 못했습니다. 발송 상태를 다시 확인해 주세요.')
 }
 export async function saveShipmentBatch(id: string, styleId: string, lineId: string, data: ShipmentBatchInput, expectedVersion: number, expectedStyleVersion: number, reason: string, profile: Profile): Promise<void> {
   if (supabase) { await rpc('save_shipment_batch', { p_id: id, p_style_id: styleId, p_line_id: lineId, p_expected_version: expectedVersion, p_expected_style_version: expectedStyleVersion, p_data: data, p_reason: reason }); return }

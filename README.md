@@ -44,11 +44,13 @@ npm run dev
 
 추가한 여덟 가지 업무 기능의 화면 위치·사용법·PO 메일 서버 설정은 [추가 업무 설정 가이드](docs/OPERATIONS_SETUP.md)를 참고하세요. 전체 범위와 한계는 [구현 범위 문서](docs/IMPLEMENTATION.md), 실제 실행 결과는 [테스트 결과](docs/TEST_RESULTS.md)에 구분합니다.
 
+**회사 Microsoft 365 Outlook 발송**은 [Outlook 연결 가이드](docs/OUTLOOK_SETUP.md)를 따릅니다. 회사 공용 Microsoft 앱을 한 번 등록하고 각 본사 담당자가 자신의 계정을 연결합니다. 회사 도메인 DNS 변경·직원 메일 비밀번호·앱 비밀키 없이 발송하며 Microsoft 접수 추적 ID와 발신자를 보존합니다. 기존 프로젝트는 012 SQL과 최신 앱·함수 배포가 필요합니다.
+
 ## Supabase 실제 연결
 
-1. 새 Supabase 프로젝트는 SQL Editor에서 `supabase/migrations`의 **001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011**를 순서대로 각각 한 번 실행합니다. **기존 프로젝트는 아직 적용하지 않은 후속 SQL만 번호 순서대로 추가 적용**합니다. 이미 적용한 파일은 다시 실행하지 않습니다. 기존 샘플·수량·출고 이력은 초기화하지 않습니다. 새 파일 링크와 사용법은 [생산 차수 가이드](docs/PRODUCTION_ROUNDS.md)에 있습니다.
+1. 새 Supabase 프로젝트는 SQL Editor에서 `supabase/migrations`의 **001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012**를 순서대로 각각 한 번 실행합니다. **기존 프로젝트는 아직 적용하지 않은 후속 SQL만 번호 순서대로 추가 적용**합니다. 이미 적용한 파일은 다시 실행하지 않습니다. 기존 샘플·수량·출고 이력은 초기화하지 않습니다. 새 파일 링크와 사용법은 [생산 차수 가이드](docs/PRODUCTION_ROUNDS.md)에 있습니다.
 2. 아래 환경변수를 `.env.local` 또는 호스팅 환경에 입력합니다.
-3. Supabase Auth의 **Site URL**과 **Redirect URLs**에 실제 접속 주소를 등록합니다. 로컬 개발 주소와 배포 주소가 다르면 각각 추가하세요. Authentication → Sign In / Providers → Email에서 **Confirm email을 OFF**로 저장합니다. 가입 확인 메일은 사용하지 않으며, 비밀번호 재설정 메일을 위한 발송·URL 설정은 유지합니다.
+3. Supabase Auth의 **Site URL**과 **Redirect URLs**에 실제 접속 주소를 등록합니다. 로컬 개발 주소와 배포 주소가 다르면 각각 추가하세요. Authentication → Sign In / Providers → User Signups에서 **Confirm email을 OFF**로 저장하고, **Enable email provider는 ON**으로 유지합니다. 가입 확인 메일은 사용하지 않으며, 비밀번호 재설정 메일을 위한 발송·URL 설정은 유지합니다.
 4. 앱을 다시 실행하거나 다시 빌드한 후 첫 관리자 계정으로 회원가입합니다. 가입 직후 발급된 세션은 앱이 종료하며 첫 가입은 승인 대기 상태입니다.
 5. 아래의 첫 관리자 설정 SQL을 Supabase SQL Editor에서 실행합니다. 그다음 다시 로그인하거나 화면을 새로고침합니다.
 6. 관리자 화면에서 공장·프로젝트를 등록합니다. 다른 담당자가 회원가입하면 관리자 또는 본사 직원이 **사용자·기본 설정 → 사용자 관리**에서 역할·소속 공장을 지정하고 승인합니다. 외부 공장은 공장 배정과 승인·활성 상태가 모두 갖춰져야 로그인할 수 있습니다. 본사 직원은 관리자 권한을 부여하거나 기존 승인된 본사 계정의 권한을 변경할 수 없습니다. 본사 담당 공장은 별도 복수 배정할 수 있습니다. 003에는 사용자가 제공한 라벨 23종·자수 33종 목록이 포함됩니다. 종류명·구분은 고정하며 관리자는 기존 종류의 사용 여부만 바꿉니다. 실제 작업·수량을 임의로 만들지 않습니다.
@@ -69,7 +71,7 @@ VITE_ENABLE_DEMO=false
 
 ### 가입 승인과 로그인 설정
 
-새 가입은 메일 인증 대신 본사 승인으로 관리합니다. **006_staff_approvals.sql**을 한 번 적용하고 Supabase의 **Authentication → Sign In / Providers → Email → Confirm email**을 OFF로 저장하세요. 이 Auth 설정은 앱 배포나 SQL만으로 바뀌지 않습니다. 기존 미인증 계정이 계속 메일 인증 오류를 받으면 Supabase Authentication → Users에서 해당 계정 상태를 확인하세요. 앱은 인증 여부를 임의로 조작하지 않습니다.
+새 가입은 메일 인증 대신 본사 승인으로 관리합니다. **006_staff_approvals.sql**을 한 번 적용하고 Supabase의 **Authentication → Sign In / Providers → User Signups → Confirm email**을 OFF로 저장하세요. 이 Auth 설정은 앱 배포나 SQL만으로 바뀌지 않습니다. 기존 미인증 계정이 계속 메일 인증 오류를 받으면 Supabase Authentication → Users에서 해당 계정 상태를 확인하세요. 앱은 인증 여부를 임의로 조작하지 않습니다.
 
 가입자는 이름·이메일·비밀번호로 가입 요청하고, 본사 담당자는 사용자 관리에서 **외부 공장 + 등록된 공장** 또는 **본사 직원**을 명시적으로 선택해 승인합니다. 미승인·비활성·공장 미배정 계정은 로그인 시 로컬 세션을 종료하며 데이터베이스 RLS도 업무 접근을 막습니다. 관리자 역할 부여와 승인된 본사 계정 관리는 관리자만 가능합니다.
 
