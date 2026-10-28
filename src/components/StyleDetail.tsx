@@ -12,6 +12,7 @@ import ProductionLedgerPanel from './ProductionLedgerPanel'
 import SupplierOrdersPanel from './SupplierOrdersPanel'
 import type { ProductionDetailsInput } from '../lib/workflow-refinements'
 import { fullStyleSku } from '../lib/style-identity'
+import { isMainProductionStyle } from '../lib/utils'
 import './style-detail.css'
 const SettlementTemplateExport = lazy(() => import('./SettlementTemplateExport'))
 
@@ -78,7 +79,7 @@ function diffSummary(audit: Audit): string[] {
 export default function StyleDetail({ style, initialColor, workspace, profile, onClose, onRefresh, onSave, onDelete, onComment, onUpload, onDownload, onSetImage, onUploadImage, onSavePO, onSendPO, onSaveShipment, onSaveOperation, onSaveOrderSource, onSaveSettlementTerms, onSaveProductionDetails }: Props) {
   const [base, setBase] = useState(() => copy(style))
   const [draft, setDraft] = useState(() => copy(style))
-  const [tab, setTab] = useState(() => workspace.supplierProductionOrders?.some(order => order.styleId === style.id) ? 'supplier-orders' : 'samples')
+  const [tab, setTab] = useState(() => workspace.supplierProductionOrders?.some(order => order.styleId === style.id) ? 'supplier-orders' : isMainProductionStyle(style) && !style.samples.length ? 'production' : 'samples')
   const [infoOpen, setInfoOpen] = useState(false)
   const [activeSample, setActiveSample] = useState(style.samples.at(-1)?.id || '')
   const [activeColor, setActiveColor] = useState(style.production.find(line => line.color === initialColor)?.id || style.production[0]?.id || '')
@@ -112,6 +113,7 @@ export default function StyleDetail({ style, initialColor, workspace, profile, o
   const hasUnsavedChanges = dirty || operationsDirty || sourceDirty || settlementDirty || poDirty || shipmentDirty || qualityDirty || measurementsDirty || ledgerDirty || supplierDirty
   const stale = style.version !== base.version
   const line = draft.production.find(item => item.id === activeColor) || draft.production[0]
+  const orderUnreceived = line ? SIZES.map(size => Math.max(0, line.order[size] - line.received[size])) : []
   const shipmentManaged = !!line && !!workspace.operations?.shipmentLedgers.some(ledger => ledger.styleId === style.id && ledger.lineId === line.id)
   const shipmentBaseline = workspace.operations?.shipmentLedgers.find(item => item.styleId === style.id && item.lineId === line?.id)
   const shipmentBatches = (workspace.operations?.shipmentBatches || []).filter(item => item.styleId === style.id && item.lineId === line?.id).sort((a, b) => a.round - b.round)
@@ -268,7 +270,7 @@ export default function StyleDetail({ style, initialColor, workspace, profile, o
             const editable = key === 'received' ? admin : key === 'shipped' ? !shipmentManaged && (admin || !hq) : hq
             const labels = { order: '오더 수량', packing: '패킹리스트', shipped: '실 출고 수량', received: '실 입고 수량' }
             return <Fragment key={key}><tr><th>{labels[key]}{!editable && <LockKeyhole size={11} />}</th>{SIZES.map(size => <td key={size}><input className="input" type="number" min="0" max="10000000" step="1" aria-label={`${line.color} ${labels[key]} ${size}`} value={line[key][size]} disabled={!editable} onChange={event => { const value = event.target.valueAsNumber; updateLine(key, { ...line[key], [size]: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0 } as Quantities) }} /></td>)}<td><strong>{quantityTotal(line[key]).toLocaleString()}</strong></td></tr>{key === 'shipped' && <>{shipmentBaseline && <tr className="variance-row"><th>이전 출고 기록<small>{shipmentBaseline.baselineDate}</small></th>{SIZES.map(size => <td key={size}>{shipmentBaseline.baselineQuantities[size].toLocaleString()}</td>)}<td>{quantityTotal(shipmentBaseline.baselineQuantities).toLocaleString()}</td></tr>}{shipmentBatches.map(batch => <tr key={batch.id} className={batch.voided ? 'ops-voided-row' : ''}><th>{batch.round}차 출고 {batch.voided ? '· 무효' : ''}<small style={{ display: 'block', marginTop: 5 }}>{batch.shippedAt}</small></th>{SIZES.map(size => <td key={size}>{batch.quantities[size].toLocaleString()}</td>)}<td>{quantityTotal(batch.quantities).toLocaleString()}</td></tr>)}</>}</Fragment>
-          })}<tr className="variance-row"><th>출고 대비 미입고</th>{SIZES.map(size => <td key={size}>{(line.shipped[size] - line.received[size]).toLocaleString()}</td>)}<td><strong>{(quantityTotal(line.shipped) - quantityTotal(line.received)).toLocaleString()}</strong></td></tr></tbody></table></div>
+          })}<tr className="variance-row"><th scope="row">오더 대비 미입고</th>{orderUnreceived.map((quantity, index) => <td key={SIZES[index]}>{quantity.toLocaleString()}</td>)}<td><strong>{orderUnreceived.reduce((total, quantity) => total + quantity, 0).toLocaleString()}</strong></td></tr><tr className="variance-row"><th>출고 대비 미입고</th>{SIZES.map(size => <td key={size}>{(line.shipped[size] - line.received[size]).toLocaleString()}</td>)}<td><strong>{(quantityTotal(line.shipped) - quantityTotal(line.received)).toLocaleString()}</strong></td></tr></tbody></table></div>
             <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #e5e8ec' }}>
               {workspace.operationsAvailable !== true ? <p className="muted">출고 차수 관리는 관리자 설정 후 사용할 수 있습니다.</p> : style.production.some(item => item.id === line.id) ? <ShipmentPanel key={line.id} fixedLineId={line.id} parentDirty={dirty} style={style} workspace={workspace} profile={profile} onDirtyChange={setShipmentDirty} onSavePO={onSavePO} onSendPO={onSendPO} onSaveShipment={onSaveShipment} onSaveOperation={onSaveOperation} onDownload={onDownload} /> : <p className="muted">컬러를 먼저 변경 저장한 뒤 출고 차수를 등록해 주세요.</p>}
             </div></div>

@@ -100,7 +100,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const invoicePaid = visibleStyles.reduce((sum, s) => sum + s.production.reduce((n, p) => n + (p.paymentStatus === 'done' || p.paymentStatus === 'approved' ? p.invoiceAmount : 0), 0), 0)
   const overdueCount = visibleStyles.filter(s => overdue(s, today)).length
   const upcomingCount = visibleStyles.filter(upcoming).length
-  const approvedCount = visibleStyles.filter(s => s.stage === 'approved' || s.stage === 'production').length
+  const approvedCount = visibleStyles.filter(s => s.stage === 'approved' || s.ppApproved).length
   const sampleCount = visibleStyles.filter(isSampleStyle).length
   const productionMode = view === 'settlement' || tableMode === 'production'
   const activeStatuses = Object.entries(statuses).filter(([, value]) => value !== null && value !== undefined)
@@ -129,7 +129,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       const matchesRound = round === null || round.some(value => value === 'pp' ? sample.isPP : !sample.isPP && (value === '3+' ? sample.round >= 3 : sample.round === Number(value)))
       return matchesStatus && matchesRound
     })) return false
-    if (quick === 'delayed' && !overdue(style, today) || quick === 'upcoming' && !upcoming(style) || quick === 'approved' && style.stage !== 'approved' && style.stage !== 'production') return false
+    if (quick === 'delayed' && !overdue(style, today) || quick === 'upcoming' && !upcoming(style) || quick === 'approved' && style.stage !== 'approved' && !style.ppApproved) return false
     if (quick === 'samples' && !isSampleStyle(style)) return false
     if (quick === 'unpaid' && !style.production.some(p => p.invoiceAmount > 0 && p.paymentStatus !== 'done' && p.paymentStatus !== 'approved')) return false
     if ((dateFrom || dateTo) && !datesFor(style, dateField).some(date => !!date && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo))) return false
