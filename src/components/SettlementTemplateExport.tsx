@@ -2,6 +2,7 @@ import { useMemo, useState, type ChangeEvent } from 'react'
 import { Download, FileSpreadsheet, Upload } from 'lucide-react'
 import type { Profile, Style, Workspace } from '../lib/types'
 import { message } from '../lib/utils'
+import { fullStyleSku } from '../lib/style-identity'
 import { MAX_SETTLEMENT_TEMPLATE_BYTES, SETTLEMENT_FIELDS, autoMapSettlementColumns, buildSettlementRows, fillSettlementTemplate, inspectSettlementSheet, loadSettlementTemplate, preflightSettlementTemplate, type SettlementFieldKey, type SettlementTemplate, type SettlementTemplateOptions } from '../lib/settlement-template'
 import { buildSigEuljiRows, fillSigEuljiTemplate, loadBundledSigEuljiTemplate, type SigEuljiRow, type SigEuljiKind } from '../lib/sig-eulji'
 import { buildFrozenProductionEuljiRows, type ProductionExportScope } from '../lib/production-ledger-export'
@@ -9,13 +10,28 @@ import { Modal } from './ui'
 import './settlement-template.css'
 
 export default function SettlementTemplateExport({ workspace, profile, styles, productionScope, onClose }: { workspace: Workspace; profile: Profile; styles: Style[]; productionScope?: ProductionExportScope; onClose: () => void }) {
-  const productionProjectIds = productionScope?.projectIds ?? null
-  const rows = useMemo(() => buildSettlementRows(workspace, styles, profile), [workspace, styles, profile])
+  // Checkboxes define the exact export scope, independently of dashboard search/pagination.
+  const projectOptions = useMemo(() => workspace.projects.filter(project =>
+    styles.some(style => style.projectId === project.id || workspace.productionRuns?.some(run => run.styleId === style.id && run.projectId === project.id))), [workspace, styles])
+  const skuOptions = useMemo(() => styles.flatMap(style => style.production.map(line => ({
+    key: `${style.id}:${line.id}`, label: fullStyleSku(style.code, line.color), styleId: style.id, lineId: line.id,
+  }))), [styles])
+  const [checkedProjectIds, setCheckedProjectIds] = useState<string[]>(() => projectOptions.map(item => item.id))
+  const [checkedSkuKeys, setCheckedSkuKeys] = useState<string[]>(() => skuOptions.map(item => item.key))
+  const [skuSearch, setSkuSearch] = useState('')
+  const chosenStyles = useMemo(() => styles.map(style => ({
+    ...style, production: style.production.filter(line => checkedSkuKeys.includes(`${style.id}:${line.id}`)),
+  })).filter(style => style.production.length), [styles, checkedSkuKeys])
+  const chosenScope: ProductionExportScope = useMemo(() => ({
+    ...productionScope, projectIds: checkedProjectIds,
+  }), [productionScope, checkedProjectIds])
+  const productionProjectIds = checkedProjectIds
+  const rows = useMemo(() => buildSettlementRows(workspace, chosenStyles.filter(style => checkedProjectIds.includes(style.projectId)), profile), [workspace, chosenStyles, checkedProjectIds, profile])
   const [sigKind, setSigKind] = useState<SigEuljiKind>('product')
   const sigKinds: { value: SigEuljiKind; label: string }[] = [{ value: 'product', label: '메인 제품' }, { value: 'label', label: '중화라벨' }, { value: 'embroidery', label: '비와이 자수' }, { value: 'quality', label: '품질검사' }]
   const sigKindLabel = sigKinds.find(item => item.value === sigKind)!.label
-  const managed = styles.some(style => style.production.some(line => workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)))
-  const sig = useMemo(() => sigKind === 'product' ? buildFrozenProductionEuljiRows(workspace, styles, profile, productionScope) : buildSigEuljiRows(workspace, styles, profile, sigKind), [workspace, styles, profile, sigKind, productionScope])
+  const managed = chosenStyles.some(style => style.production.some(line => workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)))
+  const sig = useMemo(() => sigKind === 'product' ? buildFrozenProductionEuljiRows(workspace, chosenStyles, profile, chosenScope) : buildSigEuljiRows(workspace, chosenStyles.filter(style => checkedProjectIds.includes(style.projectId)), profile, sigKind), [workspace, chosenStyles, profile, sigKind, chosenScope, checkedProjectIds])
   const sigReady = profile.role !== 'factory' && (sigKind === 'product' ? workspace.settlementTermsAvailable === true || managed && workspace.productionLedgerAvailable === true : sigKind === 'quality' ? workspace.refinementsAvailable === true : workspace.operationsAvailable === true)
   const [mode, setMode] = useState<'sig' | 'generic'>(profile.role === 'factory' ? 'generic' : 'sig')
   const [template, setTemplate] = useState<SettlementTemplate>()
@@ -66,7 +82,7 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
   }
 
   async function downloadSig() {
-    if (busy || !sigReady || sig.errors.length || !sig.rows.length) return
+    if (busy || !sigReady || !checkedProjectIds.length || !checkedSkuKeys.length || sig.errors.length || !sig.rows.length) return
     setBusy(true); setError(''); setSuccess('')
     try {
       const bytes = await fillSigEuljiTemplate(await loadBundledSigEuljiTemplate(), sig.rows)
@@ -87,6 +103,26 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
     {error && <div className="error-message" role="alert">{error}</div>}
     {success && <div className="settlement-template-success" role="status">{success}</div>}
     <div hidden={mode !== 'sig'} className="sig-eulji-export" role="tabpanel" aria-label="SIG 을지 자동 작성">
+      <section className="panel" aria-label="을지 다운로드 선택 범위" style={{ padding: 12, marginBottom: 12 }}>
+        <strong>다운로드할 프로젝트 · 스타일코드 선택</strong>
+        <p className="muted">복수 선택한 프로젝트와 품번·컬러가 일치하는 내역을 한 파일로 묶습니다. 완료된 차수의 확정 금액만 사용합니다.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}><strong>프로젝트 ({checkedProjectIds.length}/{projectOptions.length})</strong><button className="button button-ghost" type="button" disabled={busy} onClick={() => setCheckedProjectIds(checkedProjectIds.length === projectOptions.length ? [] : projectOptions.map(p => p.id))}>{checkedProjectIds.length === projectOptions.length ? '전체 해제' : '전체 선택'}</button></div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border, #dce3e9)', borderRadius: 6, padding: 8 }}>
+              {projectOptions.map(project => <label key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}><input type="checkbox" disabled={busy} checked={checkedProjectIds.includes(project.id)} onChange={e => setCheckedProjectIds(current => e.target.checked ? [...current, project.id] : current.filter(id => id !== project.id))}/><span>{project.code ? `${project.code} · ${project.name}` : project.name}</span></label>)}
+            </div>
+          </div>
+          <div style={{ flex: '2 1 280px', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}><strong>스타일코드 ({checkedSkuKeys.length}/{skuOptions.length})</strong><button className="button button-ghost" type="button" disabled={busy} onClick={() => setCheckedSkuKeys(checkedSkuKeys.length === skuOptions.length ? [] : skuOptions.map(p => p.key))}>{checkedSkuKeys.length === skuOptions.length ? '전체 해제' : '전체 선택'}</button></div>
+            <input className="input" type="search" aria-label="을지 스타일코드 검색" value={skuSearch} placeholder="전체 품번·컬러 검색" onChange={e => setSkuSearch(e.target.value)}/>
+            <div style={{ maxHeight: 145, overflowY: 'auto', border: '1px solid var(--border, #dce3e9)', borderRadius: 6, padding: 8 }}>
+              {skuOptions.filter(item => item.label.toLowerCase().includes(skuSearch.trim().toLowerCase())).map(item => <label key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}><input type="checkbox" disabled={busy} checked={checkedSkuKeys.includes(item.key)} onChange={e => setCheckedSkuKeys(current => e.target.checked ? [...current, item.key] : current.filter(key => key !== item.key))}/><span>{item.label}</span></label>)}
+            </div>
+          </div>
+        </div>
+        {(!checkedProjectIds.length || !checkedSkuKeys.length) && <p className="error-message" role="status">다운로드할 프로젝트와 스타일코드를 각각 하나 이상 선택해 주세요.</p>}
+      </section>
       <p className="settlement-template-intro">제공한 <strong>SIG_을지.xlsx · 대금지급(을)</strong> 양식에 지정한 열을 자동으로 채웁니다. 매번 양식을 업로드하거나 열을 연결할 필요가 없습니다.</p>
       <div className="settlement-export-modes" role="tablist" aria-label="을지 작성 항목">{sigKinds.map(item => <button key={item.value} type="button" role="tab" aria-selected={sigKind === item.value} disabled={busy} onClick={() => { setSigKind(item.value); setError(''); setSuccess('') }}>{item.label}</button>)}</div>
       {sigKind === 'product' && managed && <p className="settlement-template-help">차수 프로젝트 범위: {productionProjectIds === null ? '전체 프로젝트' : productionProjectIds.length ? productionProjectIds.map(id => { const project = workspace.projects.find(item => item.id === id); return project ? [project.code, project.name].filter(Boolean).join(' · ') : id }).join(', ') : '선택 없음'}. 아래 미리보기의 프로젝트 코드와 금액을 확인해 주세요.</p>}
