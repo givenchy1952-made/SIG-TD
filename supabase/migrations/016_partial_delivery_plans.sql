@@ -102,7 +102,7 @@ begin
     or item->>'id' is null or (item->>'id') !~ '^[0-9a-fA-F-]{36}$'
     or item->>'id'=any(seen_ids)
     or coalesce(item->>'quantity','') !~ '^[1-9][0-9]{0,7}$'
-    or coalesce(item->>'dueDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}
+    or coalesce(item->>'dueDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
     or jsonb_typeof(item->'note') is distinct from 'string'
     or char_length(item->>'note')>500
   then raise exception 'INVALID_DELIVERY_ITEM';end if;
