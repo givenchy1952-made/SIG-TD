@@ -33,9 +33,49 @@
 .supplier-acceptance-record .muted { margin: 15px 0 0; font-size: 11px; line-height: 1.8; }
 .supplier-state-accepted, .supplier-state-in_progress, .supplier-state-closed { color: #2e7654; background: #edf7f0; }
 .supplier-state-assignment_changed { color: #b84850; background: #fff0f1; }
+.supplier-state-awaiting_po { color: #748194; background: #f1f4f8; }
+.supplier-state-awaiting_supplier { color: #3d6d9b; background: #edf4fc; }
+.supplier-state-awaiting_approval { color: #936f22; background: #fff7e4; }
+.supplier-state-revision_requested { color: #8b5c91; background: #f7edf8; }
+.supplier-state-approved { color: #2e7654; background: #edf7f0; }
+.supplier-state-rejected { color: #b84850; background: #fff0f1; }
+.production-conditions-review { display: grid; gap: 18px; min-width: 0; }
+.production-conditions-review h4 { font-size: 13px; margin: 0 0 10px; }
+.conditions-mode { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; font-size: 12px; padding: 14px 0; border-bottom: 1px solid #e5eaf1; }
+.conditions-mode > span { color: #8390a2; }
+.conditions-mode .button { margin-left: auto; }
+.conditions-editor { padding: 18px; border: 1px solid #dae3ee; background: #fafbfd; border-radius: 5px; display: grid; gap: 15px; min-width: 0; }
+.conditions-editor .muted { font-size: 11px; line-height: 1.8; margin: 0; }
+.conditions-editor .form-grid { margin: 0; }
+.conditions-comparison-wrap { overflow-x: auto; }
+.conditions-comparison { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 11px; }
+.conditions-comparison th, .conditions-comparison td { border-bottom: 1px solid #e5eaf1; padding: 13px 12px; text-align: left; vertical-align: top; }
+.conditions-comparison thead th { font-weight: 500; color: #7c8a9d; background: #f5f8fc; }
+.conditions-comparison tbody th { font-weight: 500; white-space: nowrap; color: #596a80; }
+.conditions-comparison td { color: #43566d; min-width: 120px; }
+.conditions-comparison small, .conditions-internal-label { display: block; color: #8a96a6; font-size: 10px; line-height: 1.7; margin-top: 4px; }
+.conditions-comparison .conditions-delay { color: #bc5359; }
+.conditions-proposal-record { padding: 15px; background: #f5f7fb; border-radius: 5px; }
+.conditions-proposal-record p { color: #718096; font-size: 11px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+.conditions-edit-footer { display: grid; gap: 14px; padding-top: 16px; border-top: 1px solid #e3e9f1; }
+.conditions-edit-footer > .field { max-width: none; }
+.conditions-legacy { display: flex; align-items: flex-start; gap: 8px; }
+.conditions-legacy svg { margin-top: 4px; flex-shrink: 0; }
+.conditions-timeline { padding-top: 20px; border-top: 1px solid #e3e9f1; min-width: 0; }
+.conditions-timeline h4 { display: flex; align-items: center; gap: 7px; }
+.conditions-timeline ol { margin: 14px 0 0 7px; padding: 0 0 0 18px; list-style: none; border-left: 1px solid #dce5ef; }
+.conditions-timeline li { position: relative; padding: 0 0 18px; font-size: 11px; }
+.conditions-timeline li::before { content: ''; position: absolute; left: -22px; top: 4px; width: 6px; height: 6px; background: #8999ad; border-radius: 50%; }
+.conditions-timeline li > strong { display: block; font-weight: 500; color: #4e6179; }
+.conditions-timeline li > span { display: block; color: #93a0b1; font-size: 10px; margin-top: 5px; }
+.conditions-timeline li p { color: #7a899e; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
 @media (max-width: 600px) {
   .supplier-order-card { padding: 15px; }
   .supplier-order-card > header { flex-direction: column; gap: 12px; }
   .supplier-order-facts, .supplier-acceptance-record dl { grid-template-columns: 1fr; gap: 14px; }
   .supplier-order-actions .button { width: 100%; justify-content: center; }
+  .conditions-mode { gap: 10px; }
+  .conditions-mode .button { margin-left: 0; width: 100%; justify-content: center; }
+  .conditions-editor { padding: 14px; }
+  .conditions-editor .form-grid { grid-template-columns: 1fr!important; }
 }

@@ -4,6 +4,7 @@ import { emptyQuantities } from '../src/lib/types'
 import { EMPTY_OPERATIONS, type PoDispatch } from '../src/lib/operations-types'
 import { saveProductionRunInWorkspace, allocateProductionReceiptInWorkspace, finalizeProductionRunInWorkspace, scopeProductionLedgerWorkspace } from '../src/lib/production-ledger'
 import { acceptSupplierOrderInWorkspace, createProductionOrderPoInWorkspace, assertProductionRunStarted, getDemoSupplierProductionOrders, scopeSupplierOrders, startSupplierOrderInWorkspace, type SupplierOrderWorkspace } from '../src/lib/supplier-orders'
+import { configureProductionConditionsInWorkspace, getDemoProductionConditions, getProductionCondition, reviewProductionConditionsInWorkspace, submitProductionConditionsInWorkspace } from '../src/lib/production-conditions'
 
 function fixture() {
   let workspace: SupplierOrderWorkspace = { ...createSeed(), operations: structuredClone(EMPTY_OPERATIONS), productionLedgerAvailable: true, supplierOrdersAvailable: true, productionRuns: [], productionReceipts: [], supplierProductionOrders: [] }
@@ -15,7 +16,7 @@ function fixture() {
   workspace.supplierProductionOrders = getDemoSupplierProductionOrders(workspace)
   return { workspace, admin, factory, style, line, id, input, po }
 }
-describe('supplier production order domain', () => {
+describe('기존 008 생산 동의 프로세스의 이력·호환성', () => {
   it('PO 내용·수량·프로젝트·업체 동의 계정과 시각을 보존하고 가격은 공개하지 않는다', () => {
     const { workspace, factory, id } = fixture()
     const next = acceptSupplierOrderInWorkspace(workspace, factory, id, 1, 3, '2026-12-12', true)
@@ -26,7 +27,7 @@ describe('supplier production order domain', () => {
     expect(order.acceptance?.poSnapshot).toMatchObject({ body: '생산 발주 내용', providerMessageId: 'provider-id', dueDate: '2026-12-10' })
     expect(JSON.stringify(order)).not.toContain('13000'); expect(getDemoSupplierProductionOrders(workspace)[0].acceptance).toBe(null)
   })
-  it('공급자 동의 전 생산·실입고를 차단하고 동의와 동시에 생산을 시작한다', () => {
+  it('014 도입 전 프로세스는 공급자 동의 전 생산·실입고를 차단하고 기존 시작 기록을 유지한다', () => {
     const { workspace, factory, admin, id } = fixture()
     expect(() => assertProductionRunStarted(workspace, id)).toThrow(/생산 동의/)
     expect(() => allocateProductionReceiptInWorkspace(workspace, admin, crypto.randomUUID(), id, { receivedAt: '2026-12-13', quantities: { ...emptyQuantities(), S: 1 } }, 1, '실입고 기록')).toThrow(/생산 동의/)
@@ -111,5 +112,82 @@ describe('supplier production order domain', () => {
       const changed = structuredClone(agreed); alter(changed)
       expect(() => allocateProductionReceiptInWorkspace(changed, admin, crypto.randomUUID(), id, { receivedAt: '2026-12-13', quantities: { ...emptyQuantities(), S: 3 } }, 2, '과거 차수 입고')).toThrow(/생산 동의/)
     }
+  })
+})
+
+describe('014 본사 최종 승인과 기존 생산 경로의 호환성', () => {
+  function current() {
+    const data = fixture()
+    data.workspace.productionConditionsAvailable = true
+    data.workspace.productionConditions = getDemoProductionConditions(data.workspace)
+    return data
+  }
+  function approved() {
+    const data = current()
+    let next = configureProductionConditionsInWorkspace(data.workspace, data.admin, data.id, 1, 0, 'full_package', 12000, '본사 검토 조건 설정')
+    next = submitProductionConditionsInWorkspace(next, data.factory, data.id, 2, 3, 1, {
+      expectedDeliveryDate: '2026-12-29', unitCost: 14000, canProduce: true, quantityConfirmed: true, agreed: true,
+      comment: '원단 입고를 반영한 제안', delayReason: '원단 입고 지연', priceReason: '가공비 변경', confirmedQuantities: { ...data.input.order },
+    })
+    next = reviewProductionConditionsInWorkspace(next, data.admin, data.id, 3, 2, 'approve', '2026-12-25', 13500, '협의한 납기와 단가 최종 승인')
+    return { ...data, workspace: next }
+  }
+  it('기존 동의·수동 시작 경로로 신규 발주의 본사 최종 승인을 우회하지 못한다', () => {
+    const { workspace, factory, admin, id } = current(), before = structuredClone(workspace)
+    expect(() => acceptSupplierOrderInWorkspace(workspace, factory, id, 1, 3, '2026-12-29', true)).toThrow(/HQ_APPROVAL_REQUIRED/)
+    expect(() => startSupplierOrderInWorkspace(workspace, admin, id, 1)).toThrow(/HQ_APPROVAL_REQUIRED/)
+    expect(() => allocateProductionReceiptInWorkspace(workspace, admin, crypto.randomUUID(), id, { receivedAt: '2026-12-30', quantities: { ...emptyQuantities(), S: 1 } }, 1, '실입고 기록')).toThrow(/본사 최종 승인/)
+    expect(() => finalizeProductionRunInWorkspace(workspace, admin, id, 1, '조기 마감 시도')).toThrow(/본사 최종 승인/)
+    expect(workspace).toEqual(before)
+  })
+  it('업체 제안만 제출한 상태는 입고와 마감이 차단되며 본사 승인 단가만 입고 원본에 보존한다', () => {
+    const { workspace, factory, admin, id, input } = current()
+    let next = configureProductionConditionsInWorkspace(workspace, admin, id, 1, 0, 'cmt', 12500, '임가공 기준 설정')
+    next = submitProductionConditionsInWorkspace(next, factory, id, 2, 3, 1, {
+      expectedDeliveryDate: '2026-12-29', unitCost: 14000, canProduce: true, quantityConfirmed: true, agreed: true,
+      comment: '', delayReason: '', priceReason: '', confirmedQuantities: { ...input.order },
+    })
+    expect(getProductionCondition(next, id).status).toBe('awaiting_approval')
+    expect(getDemoSupplierProductionOrders(next)[0]).toMatchObject({ startedAt: null, acceptance: null })
+    expect(() => assertProductionRunStarted(next, id)).toThrow(/본사 최종 승인/)
+    expect(() => finalizeProductionRunInWorkspace(next, admin, id, 3, '승인 전 마감')).toThrow(/본사 최종 승인/)
+    next = reviewProductionConditionsInWorkspace(next, admin, id, 3, 2, 'approve', '2026-12-25', 13500, '본사 최종 협의 승인')
+    expect(() => assertProductionRunStarted(next, id)).not.toThrow()
+    expect(next.productionRuns![0]).toMatchObject({ unitCost: 13500, expectedDue: '2026-12-10' })
+    next = allocateProductionReceiptInWorkspace(next, admin, crypto.randomUUID(), id, { receivedAt: '2026-12-25', quantities: { ...emptyQuantities(), S: 2 } }, 4, '승인 후 실제 입고')
+    expect(next.productionReceipts![0]).toMatchObject({ unitCost: 13500, netAmount: 27000 })
+    next = finalizeProductionRunInWorkspace(next, admin, id, 5, '승인된 실제 입고 마감')
+    expect(next.productionRuns![0].snapshot).toMatchObject({ unitCost: 13500, receivedQuantity: 2, netAmount: 27000 })
+  })
+  it('실입고 전에도 승인 단가·품목을 일반 차수 편집으로 덮어쓰지 못한다', () => {
+    const { workspace, admin, id, style, line } = approved(), run = workspace.productionRuns![0]
+    const input = { name: run.name, projectId: run.projectId, projectCode: run.projectCode, expectedDue: run.expectedDue, poId: run.poId, unitCost: run.unitCost, itemType: run.itemType, order: { ...run.order }, correctsRunId: run.correctsRunId }
+    expect(() => saveProductionRunInWorkspace(workspace, admin, id, style.id, line.id, { ...input, unitCost: 13501 }, 4, '일반 단가 변경')).toThrow(/최종 승인된/)
+    expect(() => saveProductionRunInWorkspace(workspace, admin, id, style.id, line.id, { ...input, itemType: 'fabric' }, 4, '일반 품목 변경')).toThrow(/최종 승인된/)
+    expect(workspace.productionReceipts).toEqual([])
+  })
+  it('최종 승인 상태만 위조하거나 승인 단가와 차수 단가가 다르면 실제 입고를 차단한다', () => {
+    const { workspace, id } = approved(), changed = structuredClone(workspace)
+    changed.productionRuns![0].unitCost = 999
+    expect(() => assertProductionRunStarted(changed, id)).toThrow(/최종 승인 단가와 다릅니다/)
+    changed.productionConditions![0].approval = null
+    expect(() => assertProductionRunStarted(changed, id)).toThrow(/본사 최종 승인/)
+    const missingStart = structuredClone(workspace)
+    missingStart.supplierOrdersAvailable = false
+    expect(() => assertProductionRunStarted(missingStart, id)).toThrow(/PO 시작 기록/)
+  })
+  it('도입 전에 시작한 생산은 명시적인 기존 프로세스 구분으로 유지하고 이미 사용한 단가를 보존한다', () => {
+    const { workspace, factory, admin, id } = fixture()
+    let next = acceptSupplierOrderInWorkspace(workspace, factory, id, 1, 3, '2026-12-12', true)
+    const before = structuredClone(next)
+    next.productionConditions = getDemoProductionConditions(next)
+    next.productionConditionsAvailable = true
+    expect(next.productionConditions[0]).toMatchObject({ legacy: true, approval: null, status: 'approved' })
+    expect(() => assertProductionRunStarted(next, id)).not.toThrow()
+    expect(next.productionRuns).toEqual(before.productionRuns)
+    next = allocateProductionReceiptInWorkspace(next, admin, crypto.randomUUID(), id, { receivedAt: '2026-12-13', quantities: { ...emptyQuantities(), S: 2 } }, 2, '기존 생산 실제 입고')
+    next = finalizeProductionRunInWorkspace(next, admin, id, 3, '기존 프로세스 차수 마감')
+    expect(next.productionRuns![0].snapshot).toMatchObject({ unitCost: 13000, netAmount: 26000 })
+    expect(next.productionConditions![0].approval).toBeNull()
   })
 })

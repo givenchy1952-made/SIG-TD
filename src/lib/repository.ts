@@ -16,6 +16,10 @@ import { loadSupplierProductionOrders } from './supplier-orders-repository'
 import { getDemoSupplierProductionOrders } from './supplier-orders'
 import { assertProductionLedgerTotals } from './production-ledger'
 import { loadMemberWithdrawalCapability } from './member-withdrawal-repository'
+import { loadProcessingUnitPrices } from './processing-prices-repository'
+import { loadProductionConditions } from './production-conditions-repository'
+import { getDemoProductionConditions } from './production-conditions'
+import { loadProductionPoLinks } from './production-po-links-repository'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -27,8 +31,9 @@ if (url && key && !configurationError) { try { supabase = createClient(url, key)
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
 function withProductionDefaults(workspace: Workspace): Workspace {
-  const next = { ...workspace, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
-  return { ...next, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
+  const next = { ...workspace, processingUnitPrices: workspace.processingUnitPrices || [], processingPricesAvailable: true, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
+  const withOrders = { ...next, productionPoContexts: workspace.productionPoContexts || [], productionPoLinksAvailable: true, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
+  return { ...withOrders, productionConditions: getDemoProductionConditions(withOrders), productionConditionsAvailable: true }
 }
 export function getDemoWorkspace(): Workspace { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { try { const parsed = JSON.parse(raw); if (parsed.styles && parsed.profiles && parsed.factories && parsed.projects && parsed.comments && parsed.attachments && parsed.audits) { const operations = freshOperations(parsed.operations); if (!parsed.operations?.operationCatalogs) operations.operationCatalogs = createDefaultOperationCatalogs(); return withProductionDefaults({ ...parsed, staffApprovalsAvailable: true, settlementTerms: parsed.settlementTerms || [], settlementTermsAudits: parsed.settlementTermsAudits || [], settlementTermsAvailable: true, productionDetails: parsed.productionDetails || [], refinementsAvailable: true, styleImages: parsed.styleImages || [], styleImagesAvailable: true, operations, operationsAvailable: true }) } } catch { throw new Error('브라우저 체험 데이터가 손상되었습니다. 설정에서 체험 데이터를 초기화해 주세요.') } } const operations = freshOperations(); operations.operationCatalogs = createDefaultOperationCatalogs(); const seed = withProductionDefaults({ ...createSeed(), staffApprovalsAvailable: true, productionDetails: [], refinementsAvailable: true, settlementTerms: [], settlementTermsAudits: [], settlementTermsAvailable: true, styleImages: [], styleImagesAvailable: true, operations, operationsAvailable: true }); localStorage.setItem(STORAGE_KEY, JSON.stringify(seed)); return seed }
 export function persist(workspace: Workspace) { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); window.dispatchEvent(new Event('sig-workspace-change')) }
@@ -61,11 +66,11 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability')])
+  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners, processingPrices, productionConditions, productionPoLinks] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability'), loadProcessingUnitPrices(supabase), loadProductionConditions(supabase), loadProductionPoLinks(supabase)])
   if (approvals.error && !['PGRST202', '42883'].includes(approvals.error.code)) throw approvals.error
   if (importColorOwners.error && !['PGRST202', '42883'].includes(importColorOwners.error.code)) throw importColorOwners.error
   return {
-    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders,
+    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders, ...processingPrices, ...productionConditions, ...productionPoLinks,
     styleImages, styleImagesAvailable, memberWithdrawalAvailable, importColorOwnersAvailable: !importColorOwners.error && importColorOwners.data === true, staffApprovalsAvailable: !approvals.error && approvals.data === true,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),
