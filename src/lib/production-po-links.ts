@@ -4,13 +4,15 @@ import { canViewStyle } from './permissions'
 import { validateOperationReason } from './operations-domain'
 import { validateRunQuantities } from './production-ledger'
 import { fullStyleSku } from './style-identity'
+import type { ProductionRun } from './production-ledger'
+import type { PoDispatch } from './operations-types'
 
 export interface ProductionPoSourceLine { lineId: string; color: string; styleCode: string; order: Quantities }
 export interface ProductionPoContext {
   poId: string; source: 'style' | 'run'; capturedAt: string;
   snapshot: { styleId: string; projectId: string; projectCode: string; factoryId: string; runId: string | null; lineId: string | null; styleCode: string; color: string | null; order: Quantities | null; lines: ProductionPoSourceLine[]; productionMode: 'full_package' | 'cmt' | null }
 }
-export interface ProductionPoLinkFields { productionPoContexts?: ProductionPoContext[]; productionPoLinksAvailable?: boolean }
+export interface ProductionPoLinkFields { productionPoContexts?: ProductionPoContext[]; productionPoLinksAvailable?: boolean; productionPoRecoveryAvailable?: boolean }
 export interface ProductionPoLinkConfirmation { documentConfirmed: boolean; scopeDifferenceConfirmed: boolean; sourceSnapshotMissingConfirmed: boolean; projectId: string; styleCode: string; color: string; factoryId: string; order: Quantities }
 type LinkWorkspace = Workspace & ProductionPoLinkFields
 const sameQuantities = (left: Quantities, right: Quantities) => SIZES.every(size => left[size] === right[size])
@@ -41,7 +43,36 @@ export function captureRunPoContextInWorkspace(workspace: LinkWorkspace, runId: 
 export function scopeProductionPoLinks(workspace: LinkWorkspace, supplied: Profile): ProductionPoLinkFields {
   const actor = workspace.profiles.find(item => item.id === supplied.id)
   const ids = new Set(actor?.active && actor.approved && actor.role !== 'factory' ? workspace.styles.filter(style => canViewStyle(actor, style)).map(style => style.id) : [])
-  return { productionPoLinksAvailable: workspace.productionPoLinksAvailable, productionPoContexts: (workspace.productionPoContexts || []).filter(context => ids.has(context.snapshot.styleId)) }
+  return { productionPoLinksAvailable: workspace.productionPoLinksAvailable, productionPoRecoveryAvailable: workspace.productionPoRecoveryAvailable, productionPoContexts: (workspace.productionPoContexts || []).filter(context => ids.has(context.snapshot.styleId)) }
+}
+
+/** Only an archived draft with no dispatch or production history is recoverable.
+ * The server repeats these checks under locks before changing the linkage. */
+export function getArchivedProductionPoCandidate(workspace: LinkWorkspace, run: ProductionRun): PoDispatch | null {
+  const po = workspace.operations?.poDispatches.find(item => item.id === run.poId)
+  const condition = workspace.productionConditions?.find(item => item.runId === run.id)
+  if (run.closedAt || !po || !po.voided || po.status !== 'draft' || po.attempts !== 0 || po.sentAt || po.providerMessageId != null || po.providerRequestId != null || po.senderEmailSnapshot != null || po.lastError != null || po.styleId !== run.styleId || po.factoryIdSnapshot !== run.factoryIdSnapshot) return null
+  if (workspace.operations?.poDispatchAttempts.some(item => item.dispatchId === po.id) || workspace.productionReceipts?.some(item => item.runId === run.id)) return null
+  if (workspace.productionRuns?.some(item => item.id !== run.id && item.poId === po.id)) return null
+  if (workspace.supplierProductionOrders?.some(item => item.runId === run.id && (item.acceptance || item.startedAt))) return null
+  if (condition?.legacy || condition?.proposal || condition?.approval || condition?.changeRequests.length || condition?.changeRequestId || condition?.priorRunId || condition && ['awaiting_approval', 'revision_requested', 'approved', 'rejected', 'closed'].includes(condition.status)) return null
+  return po
+}
+
+export function replaceArchivedProductionPoLinkInWorkspace(workspace: LinkWorkspace, supplied: Profile, runId: string, previousPoId: string, poId: string, expectedRunVersion: number, expectedPreviousPoVersion: number, expectedPoVersion: number, confirmation: ProductionPoLinkConfirmation, reason: string): LinkWorkspace {
+  const actor = workspace.profiles.find(item => item.id === supplied.id)
+  if (!actor?.active || !actor.approved || actor.role === 'factory') throw new Error('생산 차수 PO 연결 교체는 승인된 본사만 가능합니다.')
+  if (workspace.productionPoRecoveryAvailable !== true) throw new Error('보관된 PO 연결 복구 설정을 먼저 적용해 주세요.')
+  const run = workspace.productionRuns?.find(item => item.id === runId)
+  const previous = workspace.operations?.poDispatches.find(item => item.id === previousPoId)
+  if (!run || !previous || run.version !== expectedRunVersion || previous.version !== expectedPreviousPoVersion || run.poId !== previousPoId) throw new Error('VERSION_CONFLICT')
+  if (!getArchivedProductionPoCandidate(workspace, run)) throw new Error('발송·협의·생산·입고 이력이 없는 보관된 초안만 연결을 교체할 수 있습니다.')
+  const temporary = structuredClone(workspace)
+  temporary.productionRuns = temporary.productionRuns!.map(item => item.id === runId ? { ...item, poId: null } : item)
+  // Reuse the complete sent-document validation; a failure never persists the temporary unlink.
+  const next = linkProductionPoInWorkspace(temporary, supplied, runId, poId, expectedRunVersion, expectedPoVersion, confirmation, reason)
+  next.audits.unshift({ id: crypto.randomUUID(), styleId: run.styleId, actorId: actor.id, actorName: actor.name, action: '보관된 생산 차수 PO 연결 교체', reason: reason.trim(), before: { runId, poId: previous.id, poVersion: previous.version }, after: { runId, poId, previousPoId, confirmation: structuredClone(confirmation) }, createdAt: new Date().toISOString() })
+  return next
 }
 /** Link only after the reviewer checks the actual sent document. A style snapshot
  * identifies its capture scope; it does not prove the mail body contained it. */

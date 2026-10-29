@@ -36,6 +36,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   const selected = orders.find(order => order.runId === selectedId) || orders[0]
   const dirty = conditionsDirty || !!poDraft || refreshRequired
   const currentCondition = selected ? getProductionCondition(workspace, selected.runId) : null
+  const selectedPo = hq && selected?.poId ? workspace.operations?.poDispatches.find(po => po.id === selected.poId) : null
   const poStale = !!poDraft && (!selected || poDraft.runId !== selected.runId || poDraft.runVersion !== selected.runVersion || selected.poId !== null || selected.status !== 'awaiting_po')
   useEffect(() => { onDirtyChange?.(dirty || busy); return () => onDirtyChange?.(false) }, [dirty, busy, onDirtyChange])
   if (!actor?.active || !actor.approved) return null
@@ -100,7 +101,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
         <dl className="supplier-order-facts"><div><dt>본사 요청 납기</dt><dd>{selected.requestedDue || selected.expectedDue || '미입력'}</dd></div><div><dt>PO 발송 접수</dt><dd>{time(selected.sentAt)}</dd></div><div><dt>오더 수량</dt><dd>{quantityTotal(selected.order).toLocaleString('ko-KR')} pcs</dd></div></dl>
         <div className="supplier-order-table"><table aria-label="생산 발주 사이즈별 수량"><thead><tr>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr>{SIZES.map(size => <td key={size}>{selected.order[size].toLocaleString('ko-KR')}</td>)}<td>{quantityTotal(selected.order).toLocaleString('ko-KR')}</td></tr></tbody></table></div>
         {selected.poId && <details className="supplier-po-content"><summary><FileText size={14} />{selected.subject || '연결된 PO 내용 확인'}</summary><p className="muted">아래 PO 내용과 본사 요청 납기를 확인해 주세요.</p><pre>{selected.body}</pre></details>}
-        {selected.status === 'awaiting_po' && <p className="supplier-order-note">{hq ? selected.poId ? '이 생산 차수에 PO가 연결되어 있습니다. PO 탭에서 수신인과 내용을 확인한 뒤 메일을 발송해 주세요.' : '이 차수 PO 작성으로 수신인과 본사 요청 납기를 입력해 주세요. 초안을 연결한 뒤 PO 탭에서 내용을 확인하고 메일을 발송합니다.' : '본사에서 PO를 발송하면 생산 조건을 회신할 수 있습니다.'}</p>}
+        {selected.status === 'awaiting_po' && <p className="supplier-order-note">{hq ? selectedPo?.voided ? '보관된 미발송 초안이 이 차수에 연결되어 있어 발송 대기로 표시됩니다. PO 탭에서 관리자가 ‘연결된 초안 복원’을 누른 뒤 내용을 확인해 발송해 주세요. 이미 발송한 문서가 이 차수와 일치하는 경우에는 확인 후 연결을 교체할 수 있습니다.' : selected.poId ? '이 생산 차수에 PO가 연결되어 있습니다. PO 탭에서 수신인과 내용을 확인한 뒤 메일을 발송해 주세요.' : '이 차수 PO 작성으로 수신인과 본사 요청 납기를 입력해 주세요. 초안을 연결한 뒤 PO 탭에서 내용을 확인하고 메일을 발송합니다.' : '본사에서 PO를 발송하면 생산 조건을 회신할 수 있습니다.'}</p>}
         {hq && selected.status === 'awaiting_po' && selected.poId === null && !poDraft && <div className="supplier-order-actions"><button className="button" type="button" disabled={busy || dirty} onClick={beginPo}><FileText size={14} />이 차수 PO 작성</button></div>}
         {hq && poDraft && <section className="supplier-po-draft" aria-label="생산 차수 PO 초안">
           <h4>이 생산 차수의 PO 초안</h4><p className="muted">프로젝트·품번·차수·사이즈별 수량을 미리 채웠습니다. 초안 저장 후 수신인과 내용을 확인하고 메일을 발송합니다.</p>

@@ -4,10 +4,10 @@ import { freshOperations } from '../src/lib/operations-domain'
 import { saveProductionRunInWorkspace } from '../src/lib/production-ledger'
 import { emptyQuantities } from '../src/lib/types'
 import type { PoDispatch } from '../src/lib/operations-types'
-import { captureStylePoContextInWorkspace, captureRunPoContextInWorkspace, linkProductionPoInWorkspace, scopeProductionPoLinks, type ProductionPoLinkConfirmation } from '../src/lib/production-po-links'
+import { captureStylePoContextInWorkspace, captureRunPoContextInWorkspace, linkProductionPoInWorkspace, scopeProductionPoLinks, getArchivedProductionPoCandidate, replaceArchivedProductionPoLinkInWorkspace, type ProductionPoLinkConfirmation } from '../src/lib/production-po-links'
 
 function fixture() {
-  let workspace = { ...createSeed(), operations: freshOperations(), productionLedgerAvailable: true, productionPoLinksAvailable: true, productionRuns: [], productionReceipts: [] }
+  let workspace = { ...createSeed(), operations: freshOperations(), productionLedgerAvailable: true, productionPoLinksAvailable: true, productionPoRecoveryAvailable: true, productionRuns: [], productionReceipts: [] }
   const style = workspace.styles[1], line = style.production[0], admin = workspace.profiles.find(item => item.id === DEMO_IDS.admin)!, factory = workspace.profiles.find(item => item.id === DEMO_IDS.factory)!
   const runId = crypto.randomUUID(), poId = crypto.randomUUID()
   workspace = saveProductionRunInWorkspace(workspace, admin, runId, style.id, line.id, { name: 'QA 차수', projectId: style.projectId, projectCode: 'QA-PROJECT', expectedDue: '2026-12-01', poId: null, unitCost: null, itemType: 'product', order: { ...emptyQuantities(), S: 10 }, correctsRunId: null }, 0, 'QA 차수 등록') as typeof workspace
@@ -73,5 +73,61 @@ describe('생산 차수 PO 명시적 연결', () => {
     const result = captureRunPoContextInWorkspace(workspace, runId, 'cmt')
     expect(result.productionPoContexts![0]).toMatchObject({ source: 'run', snapshot: { runId, lineId: run.lineId, styleCode: run.styleCodeSnapshot, order: run.order, productionMode: 'cmt' } })
     expect(JSON.stringify(result.productionPoContexts)).not.toMatch(/unitCost|internal/)
+  })
+})
+
+function recoveryFixture() {
+  const fixtureData = fixture(), { workspace, po, run, admin, confirmation } = fixtureData
+  const previous: PoDispatch = { ...structuredClone(po), id: crypto.randomUUID(), subject: '보관된 차수 PO 초안', body: '기존 초안 보존', status: 'draft', attempts: 0, voided: true, sentAt: '', providerRequestId: null, senderEmailSnapshot: null, version: 2 }
+  workspace.operations!.poDispatches.push(previous)
+  run.poId = previous.id
+  const recover = (overrides: Partial<ProductionPoLinkConfirmation> = {}, actor = admin, oldVersion = previous.version) => replaceArchivedProductionPoLinkInWorkspace(workspace, actor, run.id, previous.id, po.id, run.version, oldVersion, po.version, { ...confirmation, ...overrides }, '보관 초안 연결을 확인한 발송 PO로 교체')
+  return { ...fixtureData, previous, recover }
+}
+
+describe('보관된 생산 차수 PO 연결 복구', () => {
+  it('보관된 초안 연결을 실제 발송 PO로 한 번만 교체하며 문서·접수·수량·단가를 보존한다', () => {
+    const { workspace, recover, po, previous } = recoveryFixture(), before = structuredClone(workspace)
+    const next = recover()
+    expect(next.productionRuns![0]).toMatchObject({ poId: po.id, version: 2, order: before.productionRuns![0].order, unitCost: null })
+    expect(next.operations).toEqual(before.operations)
+    expect(next.styles).toEqual(before.styles)
+    expect(next.audits[0]).toMatchObject({ action: '보관된 생산 차수 PO 연결 교체', before: { poId: previous.id, poVersion: 2 }, after: { poId: po.id, previousPoId: previous.id } })
+    expect(workspace).toEqual(before)
+  })
+  it('문서 확인이나 신규 발송 PO 검증이 실패하면 기존 연결을 해제하지 않는다', () => {
+    const { workspace, recover, po } = recoveryFixture(), before = structuredClone(workspace)
+    expect(() => recover({ documentConfirmed: false })).toThrow(/발송 문서/)
+    expect(workspace).toEqual(before)
+    po.status = 'unknown'
+    expect(() => recover()).toThrow(/발송된/)
+    expect(workspace.productionRuns![0].poId).toBe(before.productionRuns![0].poId)
+  })
+  it('기존 초안의 발송 시도·접수 흔적·일반 미보관 상태와 버전 충돌을 거부한다', () => {
+    const { workspace, run, previous, recover } = recoveryFixture()
+    expect(getArchivedProductionPoCandidate(workspace, run)?.id).toBe(previous.id)
+    expect(() => recover({}, undefined, 1)).toThrow(/VERSION_CONFLICT/)
+    for (const change of [{ voided: false }, { attempts: 1 }, { sentAt: '2026-10-29T00:00:00Z' }, { providerMessageId: 'receipt' }, { providerRequestId: 'receipt' }, { senderEmailSnapshot: 'sender@example.test' }]) {
+      const original = structuredClone(previous)
+      Object.assign(previous, change)
+      expect(getArchivedProductionPoCandidate(workspace, run)).toBeNull()
+      expect(() => recover()).toThrow(/이력이 없는/)
+      Object.assign(previous, original)
+    }
+  })
+  it('실제 본사 권한과 적용된 서버 복구 기능이 필요하다', () => {
+    const { workspace, recover, factory } = recoveryFixture()
+    expect(() => recover({}, { ...factory, role: 'admin' })).toThrow(/본사/)
+    workspace.productionPoRecoveryAvailable = false
+    expect(() => recover()).toThrow(/복구 설정/)
+  })
+  it('입고 또는 협의·승인 이력이 있는 차수는 복구 후보가 아니다', () => {
+    const { workspace, run, recover } = recoveryFixture()
+    workspace.productionConditions = [{ runId: run.id, runVersion: 1, poVersion: 2, version: 1, productionMode: 'cmt', status: 'revision_requested', legacy: false, proposal: null, approval: null, timeline: [], changeRequests: [] }]
+    expect(getArchivedProductionPoCandidate(workspace, run)).toBeNull()
+    expect(() => recover()).toThrow(/협의/)
+    workspace.productionConditions = []
+    run.closedAt = '2026-10-29T00:00:00Z'
+    expect(getArchivedProductionPoCandidate(workspace, run)).toBeNull()
   })
 })

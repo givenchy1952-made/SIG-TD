@@ -68,7 +68,7 @@ export function savePoInWorkspace(workspace: Workspace, profile: Profile, id: st
   validateOperationDate(data.dueDate, true)
   if (!/^[^\s@\r\n]+@[^\s@\r\n]+\.[^\s@\r\n]+$/.test(data.recipient) || !data.subject.trim() || data.subject.length > 500 || /[\r\n]/.test(data.subject) || !data.body.trim() || data.body.length > 20000) throw new Error('수신 이메일·제목·본문과 납기일을 확인해 주세요.')
   if (data.evidenceAttachmentId && !next.attachments.some(file => file.id === data.evidenceAttachmentId && file.styleId === styleId)) throw new Error('이 스타일의 첨부파일만 근거자료로 연결할 수 있습니다.')
-  const after = { id, styleId, dueDate: data.dueDate, recipient: data.recipient.trim(), subject: data.subject.trim(), body: data.body, evidenceAttachmentId: data.evidenceAttachmentId, voided: !!data.voided, status: 'draft' as const, sentAt: '', providerMessageId: null, lastError: null, attempts: 0, idempotencyKey: `sig-po-${id}`, factoryIdSnapshot: style.factoryId, styleCodeSnapshot: style.code, ...stamp(before, actor) }
+  const after = { status: 'draft' as const, sentAt: '', providerMessageId: null, lastError: null, attempts: 0, idempotencyKey: `sig-po-${id}`, ...before, id, styleId, dueDate: data.dueDate, recipient: data.recipient.trim(), subject: data.subject.trim(), body: data.body, evidenceAttachmentId: data.evidenceAttachmentId, voided: !!data.voided, factoryIdSnapshot: style.factoryId, styleCodeSnapshot: style.code, ...stamp(before, actor) }
   ops.poDispatches = replace(ops.poDispatches, after, item => item.id === id); audit(next, styleId, actor, 'PO 초안 저장', reason, before, after); return before ? next : captureStylePoContextInWorkspace(next, id)
 }
 
