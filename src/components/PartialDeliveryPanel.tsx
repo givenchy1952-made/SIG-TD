@@ -13,17 +13,18 @@ interface Props {
   order: SupplierOrder
   onChanged: () => Promise<unknown>
   onDirtyChange?: (value: boolean) => void
+  poDraftOpen?: boolean
 }
 const number = (value: number) => value.toLocaleString('ko-KR')
 
-export default function PartialDeliveryPanel({ workspace, profile, order, onChanged, onDirtyChange }: Props) {
+export default function PartialDeliveryPanel({ workspace, profile, order, onChanged, onDirtyChange, poDraftOpen = false }: Props) {
   const plan = workspace.partialDeliveryPlans?.find(item => item.runId === order.runId)
   const condition = workspace.productionConditions?.find(item => item.runId === order.runId)
   const run = workspace.productionRuns?.find(item => item.id === order.runId)
   const actor = workspace.profiles.find(item => item.id === profile.id)
   const hq = actor?.active && actor.approved && actor.role !== 'factory'
   const frozen = !!condition?.proposal || !!condition?.approval || !!condition?.legacy || condition?.status === 'rejected' || !!order.startedAt || !!run?.closedAt || !!workspace.productionReceipts?.some(item => item.runId === order.runId)
-  const canEdit = hq && !frozen && workspace.partialDeliveryAvailable === true
+  const canEdit = hq && !frozen && !poDraftOpen && workspace.partialDeliveryAvailable === true
   const [draft, setDraft] = useState<PartialDeliveryInstallment[] | null>(null)
   const [version, setVersion] = useState(0)
   const [reason, setReason] = useState('')
@@ -65,6 +66,7 @@ export default function PartialDeliveryPanel({ workspace, profile, order, onChan
       <div><h3>부분 납기 · 파샬 입고 계획</h3><p className="muted">생산 오더는 {number(quantity)}장 그대로 유지하고, 납기 일정만 1차·2차 등으로 분리합니다. 실제 입고는 별도 기록입니다.</p></div>
       {canEdit && !draft && <button type="button" className="button" onClick={begin}>{plan ? '부분 납기 수정' : '부분 납기 등록'}</button>}
     </div>
+    {poDraftOpen && <p className="muted">PO 초안 작성 중에는 분할 납기를 변경할 수 없습니다. 초안을 먼저 취소하거나 발송한 후 다시 수정해 주세요.</p>}
     {workspace.partialDeliveryAvailable !== true && <p className="muted">분할 납기 설정을 적용한 후 사용할 수 있습니다. 기존 생산 기록은 그대로 유지됩니다.</p>}
     {!!items.length && <div className="table-wrap"><table className="data-table" aria-label="차수별 부분 납기 일정"><thead><tr><th>납기 차수</th><th>납기일</th><th>예정 수량 (pcs)</th><th>비고</th>{draft && <th>관리</th>}</tr></thead><tbody>
       {items.map((item, index) => <tr key={item.id}><th>{index + 1}차</th><td>{draft ? <input className="input" aria-label={`${index + 1}차 납기일`} type="date" disabled={busy} value={item.dueDate} onChange={e => update(index, { dueDate: e.target.value })}/> : item.dueDate}</td>
