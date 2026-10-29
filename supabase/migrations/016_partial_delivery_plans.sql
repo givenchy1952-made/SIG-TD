@@ -102,7 +102,30 @@ begin
     or item->>'id' is null or (item->>'id') !~ '^[0-9a-fA-F-]{36}$'
     or item->>'id'=any(seen_ids)
     or coalesce(item->>'quantity','') !~ '^[1-9][0-9]{0,7}$'
-    or coalesce(item->>'dueDate','') !~ '^\\d{4}-\\d{2}-\\d{2}$'
+    or coalesce(item->>'dueDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}
+    or jsonb_typeof(item->'note') is distinct from 'string'
+    or char_length(item->>'note')>500
+  then raise exception 'INVALID_DELIVERY_ITEM';end if;
+  perform public.validate_sig_date(item->>'dueDate');
+  if previous_date<>'' and (item->>'dueDate') < previous_date then raise exception 'INVALID_DELIVERY_ORDER';end if;
+  previous_date:=item->>'dueDate';
+  seen_ids:=array_append(seen_ids,item->>'id');
+  qty:=qty+(item->>'quantity')::bigint;
+ end loop;
+ if qty<>public.production_quantity_total(run.order_quantities) then
+  raise exception 'DELIVERY_TOTAL_MISMATCH: schedule quantity must equal order total';end if;
+ before_value:=case when oldplan.run_id is null then null else jsonb_build_object('items',oldplan.items,'version',oldplan.version) end;
+ insert into public.production_partial_delivery_plans(run_id,version,items,updated_at,updated_by)
+ values(p_run_id,p_expected_version+1,p_items,stamp,actor.id)
+ on conflict (run_id) do update set version=excluded.version, items=excluded.items, updated_at=excluded.updated_at, updated_by=excluded.updated_by;
+ updated_value:=jsonb_build_object('items',p_items,'version',p_expected_version+1);
+ insert into public.production_partial_delivery_plan_events(run_id,actor_id,actor_name,reason,before,after,created_at)
+ values(p_run_id,actor.id,actor.name,btrim(p_reason),before_value,updated_value,stamp);
+end $$;
+revoke execute on function public.save_partial_delivery_plan(uuid,integer,jsonb,text) from public, anon;
+grant execute on function public.save_partial_delivery_plan(uuid,integer,jsonb,text) to authenticated;
+commit;
+
     or jsonb_typeof(item->'note') is distinct from 'string'
     or char_length(item->>'note')>500
   then raise exception 'INVALID_DELIVERY_ITEM';end if;
