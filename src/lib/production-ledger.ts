@@ -66,6 +66,7 @@ export function saveProductionRunInWorkspace(workspace: ProductionLedgerWorkspac
   if (!project || project.code?.trim() && project.code.trim() !== data.projectCode.trim()) throw new Error('등록된 프로젝트와 프로젝트 코드를 확인해 주세요.')
   if (!isUuid(id) || !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) throw new Error('생산 차수 버전을 확인해 주세요.')
   const prior = workspace.productionRuns?.find(run => run.id === id)
+  if (workspace.productionPoLinksAvailable === true && data.poId && (!prior || prior.poId !== data.poId)) throw new Error('PO_LINK_CONFIRMATION_REQUIRED: 차수를 먼저 저장한 뒤 PO 탭에서 발송 문서와 수량을 확인해 연결해 주세요.')
   if ((prior?.version || 0) !== expectedVersion) throw new Error('VERSION_CONFLICT')
   if (prior && (prior.closedAt || prior.styleId !== styleId || prior.lineId !== lineId)) throw new Error('마감 확정된 차수 또는 다른 생산 컬러는 수정할 수 없습니다.')
   const receipts = (workspace.productionReceipts || []).filter(receipt => receipt.runId === id && !receipt.voided)

@@ -6,6 +6,8 @@ FIVE SPACE / SIG의 샘플 진행, 메인 생산, 일정 및 업체 결제 마�
 
 [대시보드 화면](docs/screenshots/dashboard.png) · [생산 상세](docs/screenshots/production.png) · [캘린더](docs/screenshots/calendar.png) · [모바일](docs/screenshots/mobile.png)
 
+**2026-10-29 검증 브랜치 안내:** [생산 조건 협의·본사 최종 승인](docs/PRODUCTION_CONDITIONS.md)과 [가공·품질 단가·을지](docs/PROCESSING_PRICES.md)를 추가하고 있습니다. 업체 회신만으로 생산을 시작하지 않고 본사 최종 승인 이후 실입고·마감을 진행하며, 미연결 PO는 실제 발송 문서를 확인한 뒤 차수에 연결합니다. 현재 작업은 별도 브랜치의 PR 검토 대상입니다. SQL 013~015의 운영 적용, 운영 자동 배포와 실제 업체 대상 시험 발송은 수행하지 않습니다. 아래 기존 기능 설명과 함께 최신 가이드를 참고하세요.
+
 ## 빠른 실행
 
 Node.js 22 이상과 npm을 권장합니다. 개발 환경에서 다음 명령을 실행하세요.
@@ -48,7 +50,7 @@ npm run dev
 
 ## Supabase 실제 연결
 
-1. 새 Supabase 프로젝트는 SQL Editor에서 `supabase/migrations`의 **001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012**를 순서대로 각각 한 번 실행합니다. **기존 프로젝트는 아직 적용하지 않은 후속 SQL만 번호 순서대로 추가 적용**합니다. 이미 적용한 파일은 다시 실행하지 않습니다. 기존 샘플·수량·출고 이력은 초기화하지 않습니다. 새 파일 링크와 사용법은 [생산 차수 가이드](docs/PRODUCTION_ROUNDS.md)에 있습니다.
+1. 별도 Supabase 검증 프로젝트에서 SQL Editor의 `supabase/migrations`를 **001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014 → 015** 순서로 각각 적용합니다. **기존 검증 프로젝트는 아직 적용하지 않은 후속 SQL만 번호 순서대로 추가 적용**합니다. 기존 샘플·수량·출고 이력은 초기화하지 않으며 이미 적용한 파일을 무작정 재실행하지 않습니다. 현재 브랜치의 운영 SQL 실행·배포는 보류하며, 추가 SQL과 기존 생산 보존 방식은 [생산 조건 가이드](docs/PRODUCTION_CONDITIONS.md#검증-환경-준비와-sql-순서)를 확인하세요.
 2. 아래 환경변수를 `.env.local` 또는 호스팅 환경에 입력합니다.
 3. Supabase Auth의 **Site URL**과 **Redirect URLs**에 실제 접속 주소를 등록합니다. 로컬 개발 주소와 배포 주소가 다르면 각각 추가하세요. Authentication → Sign In / Providers → User Signups에서 **Confirm email을 OFF**로 저장하고, **Enable email provider는 ON**으로 유지합니다. 가입 확인 메일은 사용하지 않으며, 비밀번호 재설정 메일을 위한 발송·URL 설정은 유지합니다.
 4. 앱을 다시 실행하거나 다시 빌드한 후 첫 관리자 계정으로 회원가입합니다. 가입 직후 발급된 세션은 앱이 종료하며 첫 가입은 승인 대기 상태입니다.

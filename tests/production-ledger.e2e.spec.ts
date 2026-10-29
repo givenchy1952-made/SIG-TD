@@ -47,7 +47,7 @@ async function open(page: Page) {
   return { detail, ledger: detail.getByRole('region', { name: '프로젝트별 생산 차수 및 마감', exact: true }) }
 }
 
-test('프로젝트 차수의 실제 입고와 단가로 마감을 확정하고 과거 금액을 잠가 보관한다', async ({ page }) => {
+test('기존 프로세스로 시작한 프로젝트 차수의 실제 입고와 단가로 마감을 확정하고 과거 금액을 보존한다', async ({ page }) => {
   await fixture(page)
   const { ledger } = await open(page)
   await expect(ledger.locator('.ledger-summary')).toContainText('100원')
@@ -96,7 +96,9 @@ test('전체 을지에서 같은 품번의 차수별 과거 단가를 보존하�
   const detail = page.getByRole('dialog').filter({ has: page.getByRole('heading', { level: 1 }) })
   await expect(detail.getByRole('tab', { name: /생산 차수·마감/ })).toHaveCount(0)
   await expect(detail.getByRole('tab', { name: /을지·단가/ })).toHaveCount(0)
-  await expect(detail.getByRole('tab', { name: /업체 납기·동의/ })).toBeVisible()
+  await expect(detail.getByRole('tab', { name: /생산 조건 협의·승인/ })).toBeVisible()
+  await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click()
+  await expect(detail.getByRole('region', { name: '생산 조건 협의·승인', exact: true })).toContainText('기존 프로세스 승인 기록')
 })
 
 test('동일 품번을 새 프로젝트의 별도 생산 차수로 등록하고 이전 차수 수량을 보존한다', async ({ page }) => {
@@ -108,7 +110,7 @@ test('동일 품번을 새 프로젝트의 별도 생산 차수로 등록하고 
   await ledger.getByLabel('생산 차수명', { exact: true }).fill('QA 다른 프로젝트 리오더')
   await ledger.getByLabel('생산 차수 프로젝트', { exact: true }).selectOption(project.id)
   await ledger.getByLabel('생산 차수 프로젝트 코드', { exact: true }).fill('QA-SECOND-PROJECT-2026')
-  await ledger.getByLabel('생산 차수 단가', { exact: true }).fill('225')
+  await expect(ledger.getByLabel('생산 차수 단가', { exact: true })).toBeDisabled()
   await ledger.getByLabel('차수 오더 S', { exact: true }).fill('25')
   await ledger.getByLabel('생산 차수 변경 사유', { exact: true }).fill('QA 다른 프로젝트 독립 리오더')
   await ledger.getByRole('button', { name: '차수 저장', exact: true }).click()
@@ -116,7 +118,7 @@ test('동일 품번을 새 프로젝트의 별도 생산 차수로 등록하고 
   const after = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
   expect(after.productionRuns).toHaveLength(2)
   expect(after.productionRuns.find((item: { id: string }) => item.id === before.productionRuns[0].id)).toEqual(before.productionRuns[0])
-  expect(after.productionRuns.find((item: { projectId: string }) => item.projectId === project.id)).toMatchObject({ projectCode: 'QA-SECOND-PROJECT-2026', unitCost: 225, order: { S: 25 }, round: 1 })
+  expect(after.productionRuns.find((item: { projectId: string }) => item.projectId === project.id)).toMatchObject({ projectCode: 'QA-SECOND-PROJECT-2026', unitCost: null, order: { S: 25 }, round: 1 })
   expect(after.styles).toEqual(before.styles)
 })
 

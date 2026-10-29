@@ -3,6 +3,7 @@ import type { ProductionLedgerWorkspace, ProductionRun } from './production-ledg
 import { savePoInWorkspace } from './operations-domain'
 import { assertActive } from './permissions'
 import { quantityTotal, type Profile, type Quantities, type Workspace } from './types'
+import { captureRunPoContextInWorkspace } from './production-po-links'
 
 export type SupplierOrderStatus = 'awaiting_po' | 'awaiting_acceptance' | 'accepted' | 'in_progress' | 'closed' | 'assignment_changed'
 export interface SupplierAcceptance {
@@ -71,6 +72,7 @@ export function acceptSupplierOrderInWorkspace(workspace: SupplierOrderWorkspace
   const actor = liveActor(workspace, supplied), order = orderFor(workspace, runId, runVersion)
   const style = workspace.styles.find(style => style.id === order.styleId && !style.deletedAt)
   if (actor.role !== 'factory' || !actor.factoryId || actor.factoryId !== order.factoryId || style?.factoryId !== actor.factoryId) throw new Error('배정된 업체 계정으로만 생산 동의를 제출할 수 있습니다.')
+  if (workspace.productionConditionsAvailable === true) throw new Error('HQ_APPROVAL_REQUIRED: 생산 조건 협의·승인에서 납기와 제안 단가를 제출하고 본사의 최종 승인을 기다려 주세요.')
   if (agreed !== true) throw new Error('PO 내용을 확인하고 생산 동의 항목에 체크해 주세요.')
   if (!validDate(expectedDeliveryDate)) throw new Error('예상 납기일을 입력해 주세요.')
   if (order.acceptance || order.status === 'closed') throw new Error('기록된 생산 동의는 변경할 수 없습니다. 조건 변경 시 새 차수로 발주해 주세요.')
@@ -87,6 +89,7 @@ export function acceptSupplierOrderInWorkspace(workspace: SupplierOrderWorkspace
 export function startSupplierOrderInWorkspace(workspace: SupplierOrderWorkspace, supplied: Profile, runId: string, runVersion: number): SupplierOrderWorkspace {
   const actor = liveActor(workspace, supplied), order = orderFor(workspace, runId, runVersion)
   if (actor.role === 'factory') throw new Error('생산 시작은 본사 담당자만 처리할 수 있습니다.')
+  if (workspace.productionConditionsAvailable === true) throw new Error('HQ_APPROVAL_REQUIRED: 생산 조건을 본사에서 최종 승인하면 생산이 시작됩니다. 기존 생산 시작 기록은 그대로 보존합니다.')
   if (order.status !== 'accepted' || !order.acceptance || order.acceptance.poVersion !== order.poVersion) throw new Error('업체의 PO 확인·예상 납기·생산 동의가 먼저 필요합니다.')
   const next = structuredClone(workspace), now = new Date().toISOString()
   order.status = 'in_progress'; order.startedAt = now; order.startedBy = actor.id; order.startedByName = actor.name
@@ -101,7 +104,17 @@ export function hasProductionRunStartProof(order: SupplierOrder | undefined): bo
     && acceptance.poSnapshot?.id === order.poId && acceptance.poSnapshot?.version === order.poVersion && acceptance.poSnapshot?.factoryId === order.factoryId
 }
 export function assertProductionRunStarted(workspace: SupplierOrderWorkspace, runId: string) {
-  if (workspace.supplierOrdersAvailable !== true) return
+  if (workspace.productionConditionsAvailable === true) {
+    const condition = workspace.productionConditions?.find(item => item.runId === runId)
+    const run = workspace.productionRuns?.find(item => item.id === runId)
+    const approved = !!condition?.approval && ['approved', 'closed', 'assignment_changed'].includes(condition.status)
+    if (!condition || !condition.legacy && !approved) throw new Error('HQ_APPROVAL_REQUIRED: 업체 생산 조건에 대한 본사 최종 승인 후 실입고와 마감을 기록할 수 있습니다.')
+    if (!condition.legacy && (!run || condition.approval!.unitCost !== run.unitCost)) throw new Error('HQ_APPROVAL_REQUIRED: 생산 차수 단가가 본사 최종 승인 단가와 다릅니다. 승인 기록을 확인해 주세요.')
+  }
+  if (workspace.supplierOrdersAvailable !== true) {
+    if (workspace.productionConditionsAvailable === true) throw new Error('HQ_APPROVAL_REQUIRED: 생산 승인과 PO 시작 기록을 불러온 뒤 다시 시도해 주세요.')
+    return
+  }
   const order = getDemoSupplierProductionOrders(workspace).find(order => order.runId === runId)
   const po = workspace.operations?.poDispatches.find(item => item.id === order?.poId)
   if (!hasProductionRunStartProof(order) || !po || po.voided || po.factoryIdSnapshot !== order!.factoryId) throw new Error('PO 발송 후 업체의 예상 납기 입력과 생산 동의가 필요합니다.')
@@ -109,6 +122,8 @@ export function assertProductionRunStarted(workspace: SupplierOrderWorkspace, ru
 /** Mirror the database trigger in demo mode without importing the ledger domain. */
 export function assertAcceptedProductionTermsUnchanged(workspace: SupplierOrderWorkspace, before: ProductionRun | undefined, after: ProductionRun) {
   if (!before) return
+  const condition = workspace.productionConditionsAvailable === true ? workspace.productionConditions?.find(item => item.runId === before.id) : undefined
+  if (condition?.approval && ['unitCost', 'itemType', 'correctsRunId'].some(field => JSON.stringify(before[field as keyof ProductionRun]) !== JSON.stringify(after[field as keyof ProductionRun]))) throw new Error('HQ_APPROVAL_REQUIRED: 본사 최종 승인된 단가와 생산 조건은 직접 수정할 수 없습니다. 조건 변경 요청과 재승인 절차를 사용해 주세요.')
   const po = workspace.operations?.poDispatches.find(po => po.id === before.poId)
   if (!workspace.supplierProductionOrders?.some(order => order.runId === before.id && order.acceptance) && !(po && (po.attempts > 0 || po.status !== 'draft'))) return
   for (const field of ['projectId', 'projectCode', 'poId', 'order', 'expectedDue', 'styleId', 'lineId', 'round', 'factoryIdSnapshot', 'styleCodeSnapshot'] as const) {
@@ -120,6 +135,7 @@ export function assertAcceptedProductionTermsUnchanged(workspace: SupplierOrderW
 export function createProductionOrderPoInWorkspace(workspace: SupplierOrderWorkspace, supplied: Profile, runId: string, runVersion: number, poId: string, data: PoDispatchInput, reason: string): SupplierOrderWorkspace {
   const actor = liveActor(workspace, supplied), order = orderFor(workspace, runId, runVersion)
   if (actor.role === 'factory') throw new Error('PO 작성은 본사 담당자만 가능합니다.')
+  if (workspace.productionConditionsAvailable === true && !workspace.productionConditions?.find(condition => condition.runId === runId)?.productionMode) throw new Error('완사입 또는 임가공 생산 방식을 먼저 설정한 뒤 이 차수의 PO를 작성해 주세요.')
   if (order.poId || order.acceptance || order.status === 'closed') throw new Error('이미 PO가 연결되었거나 마감된 생산 차수입니다.')
   if (order.status === 'assignment_changed') throw new Error('공장 배정이 변경되었습니다. 새 차수로 발주해 주세요.')
   if (workspace.operations?.poDispatches.some(po => po.id === poId)) throw new Error('새 PO 식별자가 필요합니다.')
@@ -129,5 +145,5 @@ export function createProductionOrderPoInWorkspace(workspace: SupplierOrderWorks
   next.productionRuns = next.productionRuns?.map(run => run.id === runId ? { ...run, poId, expectedDue: data.dueDate, version: run.version + 1, updatedAt: now, updatedBy: actor.id } : run)
   next.supplierProductionOrders = getDemoSupplierProductionOrders(next)
   next.audits.unshift({ id: crypto.randomUUID(), styleId: order.styleId, actorId: actor.id, actorName: actor.name, action: '생산 차수 PO 연결', reason, before: null, after: { runId, poId }, createdAt: now })
-  return next
+  return captureRunPoContextInWorkspace(next, runId, workspace.productionConditions?.find(condition => condition.runId === runId)?.productionMode || null)
 }

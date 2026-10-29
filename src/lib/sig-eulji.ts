@@ -89,7 +89,8 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
   return { rows, errors }
 }
 
-/** Service work has its own quantities and never inherits a garment's price or receipts. */
+/** Service work uses each selected garment color's actual movement quantities,
+ * with a separately saved service price for the individual work item. */
 function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], suppliedProfile: Profile, kind: Exclude<SigEuljiKind, 'product'>): SigEuljiPreview {
   const rows: SigEuljiRow[] = [], errors: string[] = []
   const actor = workspace.profiles.find(item => item.id === suppliedProfile.id)
@@ -122,25 +123,44 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
     if (!selectedLines.length || selectedLines.length !== selected.production.length) continue
     const owners = selectedLines.map(line => ownerName(workspace, line.ownerId ?? style.ownerId))
     if (owners.some(owner => owner === null)) { errors.push(`${style.code}: 본사 담당자를 확인해 주세요.`); continue }
+    const savedPrice = (lineId: string, itemKey: string): number | null => workspace.processingUnitPrices?.find(price => price.styleId === style.id && price.lineId === lineId && price.kind === kind && price.itemKey === itemKey)?.unitCost ?? null
+    const actualQuantity = (line: typeof style.production[number]) => quantityTotal(kind === 'label' ? line.shipped : line.received)
+    // Keep malformed or excessive source amounts inside the normal row error
+    // path below instead of throwing while the export preview is rendering.
+    const amount = (unitCost: number | null, quantity: number) => {
+      if (unitCost === null) return null
+      try { return sigEuljiNetAmount(unitCost, quantity) } catch { return null }
+    }
     if (kind === 'quality') {
       for (const line of selectedLines) {
         const owner = ownerName(workspace, line.ownerId ?? style.ownerId)!
         const quality = workspace.productionDetails?.find(item => item.styleId === style.id && item.lineId === line.id)?.quality
         if (!quality?.category) continue
-        const complete = ['done', 'approved'].includes(quality.status) && validDate(quality.completedAt)
-        rows.push({ kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(quality.completedAt) ? quality.completedAt : '', factory: '', colorStyleCode: fullStyleSku(style.code, line.color), unitCost: null, orderQuantity: quality.quantity, receivedQuantity: complete ? quality.quantity : null, unit: 'EA', netAmount: null, owner, itemName: `품질검사 · ${quality.category}`, note: `${STATUS_LABEL[quality.status]}${quality.note ? ` / ${quality.note}` : ''}` })
+        const unitCost = savedPrice(line.id, quality.category), receivedQuantity = actualQuantity(line)
+        rows.push({ kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: '', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: `품질검사 · ${quality.category}`, note: [`검사 요청 수량 ${quality.quantity}개`, STATUS_LABEL[quality.status], quality.note].filter(Boolean).join(' / ') })
       }
     } else {
-      // Label/embroidery records cover the whole style, so do not duplicate
-      // quantities per color or pick one of several different color owners.
-      const owner = new Set(owners).size === 1 ? owners[0]! : ''
       const records = workspace.operations?.styleOperations.filter(item => item.styleId === style.id && item.kind === kind && !item.voided) || []
+      const seenWork = new Set<string>()
       for (const record of records) for (const item of record.rows) {
-        rows.push({ kind, projectCode: resolveProject(style, style.production.map(line => line.id)), receivedAtISO: validDate(item.completedAt) ? item.completedAt : '', factory: kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수', colorStyleCode: style.code, unitCost: null, orderQuantity: item.quantity, receivedQuantity: kind === 'label' ? null : item.completedQuantity, unit: 'EA', netAmount: null, owner, itemName: item.name, note: [item.specification, `로스 수량 ${item.lossQuantity}개`, STATUS_LABEL[item.status], kind === 'label' ? '입고 수량 직접 입력' : '', item.note, record.note].filter(Boolean).join(' / ') })
+        for (const line of selectedLines) {
+          const key = `${line.id}:${item.id}`
+          if (seenWork.has(key)) { errors.push(`${fullStyleSku(style.code, line.color)}: 같은 작업이 중복되었습니다. 저장된 가공 내역을 확인해 주세요.`); continue }
+          seenWork.add(key)
+          const owner = ownerName(workspace, line.ownerId ?? style.ownerId)!
+          const unitCost = savedPrice(line.id, item.id), receivedQuantity = actualQuantity(line)
+          rows.push({ kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: item.name, note: [item.specification, `스타일 공통 작업 요청 수량 ${item.quantity}개`, `로스 수량 ${item.lossQuantity}개`, `가공 완료 수량 ${item.completedQuantity}개`, STATUS_LABEL[item.status], item.note, record.note].filter(Boolean).join(' / ') })
+        }
       }
     }
   }
-  for (const row of rows) try { validateRow(row) } catch (error) { errors.push(`${row.colorStyleCode} ${row.itemName}: ${error instanceof Error ? error.message : String(error)}`) }
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index]
+    try { validateRow(row) } catch (error) {
+      errors.unshift(`${row.colorStyleCode} ${row.itemName}: ${error instanceof Error ? error.message : String(error)}`)
+      rows.splice(index, 1)
+    }
+  }
   if (!rows.length && !errors.length) errors.push(`선택한 범위에 등록된 ${kindLabel} 내역이 없습니다.`)
   if (rows.length > MAX_SIG_EULJI_ROWS) errors.push('한 번에 최대 10,000개 작업까지 다운로드할 수 있습니다.')
   return { rows, errors }
@@ -214,7 +234,6 @@ export async function fillSigEuljiTemplate(source: Uint8Array, rows: SigEuljiRow
       formulas.T = [`IF(OR(N${n}="",R${n}=""),"",N${n}*R${n})`, row.netAmount ?? '']
       formulas.U = [`IF(T${n}="","",T${n}*0.1)`, amountCents === null ? '' : Number(amountCents) / 1000]
       formulas.V = [`IF(T${n}="","",T${n}+U${n})`, amountCents === null ? '' : Number(amountCents * 11n) / 1000]
-      if (row.kind !== 'quality') delete formulas.M
     }
     const cells = Array.from({ length: 24 }, (_, i) => String.fromCharCode(65 + i)).map(column => {
       const cellStyle = styleFor(column)

@@ -13,3 +13,4 @@
 .production-round-board .production-order-awaiting_acceptance { color:#a07536; background:#fff7e8; }
 .production-round-board .production-order-assignment_changed { color:#bf4b54; background:#fff0f1; }
 @media(max-width:640px) { .production-round-board-heading { padding:16px 14px 0; } .production-round-board-filters { padding:12px 14px; } .production-round-board-filters > div { flex:1; min-width:140px; } }
+.production-order-awaiting_supplier{color:#497195;background:#edf5fc}.production-order-awaiting_approval{color:#916318;background:#fff6de}.production-order-revision_requested{color:#916b35;background:#fbf0e2}.production-order-approved{color:#287b57;background:#eaf6ef}.production-order-rejected{color:#a33f48;background:#fff0f1}
