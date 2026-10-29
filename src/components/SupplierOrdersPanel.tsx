@@ -8,6 +8,7 @@ import { createProductionOrderPo } from '../lib/supplier-orders-repository'
 import { getProductionCondition } from '../lib/production-conditions'
 import { fullStyleSku } from '../lib/style-identity'
 import ProductionConditionsReviewPanel from './ProductionConditionsReviewPanel'
+import PartialDeliveryPanel from './PartialDeliveryPanel'
 import { message } from '../lib/utils'
 import './supplier-orders.css'
 
@@ -25,7 +26,7 @@ const time = (value: string | null) => value ? new Date(value).toLocaleString('k
 interface PoDraft { runId: string; runVersion: number; poId: string; data: PoDispatchInput; reason: string }
 
 export default function SupplierOrdersPanel({ workspace, style, profile, onChanged, onDirtyChange, onOpenPO, onOpenProductionRuns }: SupplierOrdersPanelProps) {
-  const [selectedId, setSelectedId] = useState(''), [conditionsDirty, setConditionsDirty] = useState(false)
+  const [selectedId, setSelectedId] = useState(''), [conditionsDirty, setConditionsDirty] = useState(false), [deliveryDirty, setDeliveryDirty] = useState(false)
   const [poDraft, setPoDraft] = useState<PoDraft | null>(null)
   const [error, setError] = useState(''), [success, setSuccess] = useState(''), [busy, setBusy] = useState(false)
   const [refreshRequired, setRefreshRequired] = useState(false)
@@ -34,7 +35,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   const orders = (workspace.supplierProductionOrders || []).filter(order => order.styleId === style.id && (hq || !!actor?.factoryId && order.factoryId === actor.factoryId && style.factoryId === actor.factoryId))
     .sort((a, b) => a.projectCode.localeCompare(b.projectCode) || b.round - a.round || a.runId.localeCompare(b.runId))
   const selected = orders.find(order => order.runId === selectedId) || orders[0]
-  const dirty = conditionsDirty || !!poDraft || refreshRequired
+  const dirty = conditionsDirty || deliveryDirty || !!poDraft || refreshRequired
   const currentCondition = selected ? getProductionCondition(workspace, selected.runId) : null
   const poStale = !!poDraft && (!selected || poDraft.runId !== selected.runId || poDraft.runVersion !== selected.runVersion || selected.poId !== null || selected.status !== 'awaiting_po')
   useEffect(() => { onDirtyChange?.(dirty || busy); return () => onDirtyChange?.(false) }, [dirty, busy, onDirtyChange])
@@ -54,7 +55,9 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
     const recipients = [...new Set(workspace.profiles.filter(person => person.role === 'factory' && person.approved && person.active && person.factoryId === selected.factoryId && person.email.trim()).map(person => person.email.trim()))]
     const dueDate = selected.expectedDue || style.dueDate
     const project = selected.projectCode || selected.projectName
-    const body = `안녕하세요. 아래 생산 발주 내용을 확인해 주세요.\n\n프로젝트: ${project}\n품번: ${fullCode}\n생산 차수: ${selected.round}차 / ${selected.name}\n담당 업체: ${selected.factoryName}\n생산 방식: ${currentCondition.productionMode === 'cmt' ? '임가공 (CMT)' : '완사입'}\n본사 요청 납기: ${dueDate}\n\n${SIZES.map(size => `${size}: ${selected.order[size].toLocaleString('ko-KR')} pcs`).join(' / ')}\n총 오더 수량: ${quantityTotal(selected.order).toLocaleString('ko-KR')} pcs\n\n${window.location.origin}/ 에 업체 계정으로 로그인한 뒤, 해당 프로젝트와 생산 차수를 선택해 예상 납기일과 제안 단가·생산 가능 여부를 입력하고 생산 조건을 회신해 주세요.\n업체 회신 후 본사가 최종 납기·단가·수량을 승인해야 생산이 시작됩니다. PO와 협의·승인 이력은 차수별로 보관됩니다.`
+    const installments = workspace.partialDeliveryPlans?.find(item => item.runId === selected.runId)?.items || []
+    const partialDates = installments.length ? `\n분할 납기 계획:\n${installments.map((item, index) => `${index + 1}차: ${item.dueDate} / ${item.quantity} pcs${item.note ? ` · ${item.note}` : ''}`).join('\n')}\n` : ''
+    const body = `안녕하세요. 아래 생산 발주 내용을 확인해 주세요.\n\n프로젝트: ${project}\n품번: ${fullCode}\n생산 차수: ${selected.round}차 / ${selected.name}\n담당 업체: ${selected.factoryName}\n생산 방식: ${currentCondition.productionMode === 'cmt' ? '임가공 (CMT)' : '완사입'}\n본사 요청 납기: ${dueDate}\n${partialDates}\n${SIZES.map(size => `${size}: ${selected.order[size].toLocaleString('ko-KR')} pcs`).join(' / ')}\n총 오더 수량: ${quantityTotal(selected.order).toLocaleString('ko-KR')} pcs\n\n${window.location.origin}/ 에 업체 계정으로 로그인한 뒤, 해당 프로젝트와 생산 차수를 선택해 예상 납기일과 제안 단가·생산 가능 여부를 입력하고 생산 조건을 회신해 주세요.\n업체 회신 후 본사가 최종 납기·단가·수량을 승인해야 생산이 시작됩니다. PO와 협의·승인 이력은 차수별로 보관됩니다.`
     setPoDraft({ runId: selected.runId, runVersion: selected.runVersion, poId: crypto.randomUUID(), reason: '프로젝트 생산 차수 PO 작성', data: { recipient: recipients.length === 1 ? recipients[0] : '', dueDate, subject: `[PO] ${project} / ${fullCode} / ${selected.round}차`, body, evidenceAttachmentId: null, voided: false } })
     setError(''); setSuccess('')
   }
@@ -99,6 +102,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
         <header><div><strong>{selected.projectCode || '프로젝트 코드 미입력'} · {selected.round}차</strong><h3>{fullStyleSku(selected.styleCode, style.production.find(line => line.id === selected.lineId)?.color)} / {selected.name}</h3></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
         <dl className="supplier-order-facts"><div><dt>본사 요청 납기</dt><dd>{selected.requestedDue || selected.expectedDue || '미입력'}</dd></div><div><dt>PO 발송 접수</dt><dd>{time(selected.sentAt)}</dd></div><div><dt>오더 수량</dt><dd>{quantityTotal(selected.order).toLocaleString('ko-KR')} pcs</dd></div></dl>
         <div className="supplier-order-table"><table aria-label="생산 발주 사이즈별 수량"><thead><tr>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr>{SIZES.map(size => <td key={size}>{selected.order[size].toLocaleString('ko-KR')}</td>)}<td>{quantityTotal(selected.order).toLocaleString('ko-KR')}</td></tr></tbody></table></div>
+        <PartialDeliveryPanel key={selected.runId} workspace={workspace} profile={actor} order={selected} onChanged={onChanged} onDirtyChange={setDeliveryDirty} poDraftOpen={!!poDraft}/>
         {selected.poId && <details className="supplier-po-content"><summary><FileText size={14} />{selected.subject || '연결된 PO 내용 확인'}</summary><p className="muted">아래 PO 내용과 본사 요청 납기를 확인해 주세요.</p><pre>{selected.body}</pre></details>}
         {selected.status === 'awaiting_po' && <p className="supplier-order-note">{hq ? selected.poId ? '이 생산 차수에 PO가 연결되어 있습니다. PO 탭에서 수신인과 내용을 확인한 뒤 메일을 발송해 주세요.' : '이 차수 PO 작성으로 수신인과 본사 요청 납기를 입력해 주세요. 초안을 연결한 뒤 PO 탭에서 내용을 확인하고 메일을 발송합니다.' : '본사에서 PO를 발송하면 생산 조건을 회신할 수 있습니다.'}</p>}
         {hq && selected.status === 'awaiting_po' && selected.poId === null && !poDraft && <div className="supplier-order-actions"><button className="button" type="button" disabled={busy || dirty} onClick={beginPo}><FileText size={14} />이 차수 PO 작성</button></div>}

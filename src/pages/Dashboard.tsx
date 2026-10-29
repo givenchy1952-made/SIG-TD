@@ -194,7 +194,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   }
   return <div className="dashboard-page">
     {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} onRegisterStyle={onRegisterStyle} /></Suspense>}
-    {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={exportStyles} productionScope={{ projectIds: project, factoryIds: factory, ownerIds: owner, seasons: season }} onClose={() => setTemplateOpen(false)} /></Suspense>}
+    {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={visibleStyles} onClose={() => setTemplateOpen(false)} /></Suspense>}
     {imagePreview && <Modal title={imagePreview.alt} wide onClose={() => setImagePreview(null)}><div className="modal-body"><div className="style-image-zoom cutout-background"><PrivateImage attachment={imagePreview.attachment} scope={imageScope} alt={imagePreview.alt}/></div><div className="modal-footer"><button className="button" onClick={() => { onOpenStyle(imagePreview.styleId); setImagePreview(null) }}>{profile.role === 'factory' ? '스타일 상세' : '이미지 관리'}</button><button className="button button-primary" onClick={() => setImagePreview(null)}>닫기</button></div></div></Modal>}
 
     <div className="dashboard-page-heading">

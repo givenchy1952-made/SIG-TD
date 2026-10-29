@@ -2,6 +2,7 @@ import { useMemo, useState, type ChangeEvent } from 'react'
 import { Download, FileSpreadsheet, Upload } from 'lucide-react'
 import type { Profile, Style, Workspace } from '../lib/types'
 import { message } from '../lib/utils'
+import { fullStyleSku } from '../lib/style-identity'
 import { MAX_SETTLEMENT_TEMPLATE_BYTES, SETTLEMENT_FIELDS, autoMapSettlementColumns, buildSettlementRows, fillSettlementTemplate, inspectSettlementSheet, loadSettlementTemplate, preflightSettlementTemplate, type SettlementFieldKey, type SettlementTemplate, type SettlementTemplateOptions } from '../lib/settlement-template'
 import { buildSigEuljiRows, fillSigEuljiTemplate, loadBundledSigEuljiTemplate, type SigEuljiRow, type SigEuljiKind } from '../lib/sig-eulji'
 import { buildFrozenProductionEuljiRows, type ProductionExportScope } from '../lib/production-ledger-export'
@@ -9,13 +10,28 @@ import { Modal } from './ui'
 import './settlement-template.css'
 
 export default function SettlementTemplateExport({ workspace, profile, styles, productionScope, onClose }: { workspace: Workspace; profile: Profile; styles: Style[]; productionScope?: ProductionExportScope; onClose: () => void }) {
-  const productionProjectIds = productionScope?.projectIds ?? null
-  const rows = useMemo(() => buildSettlementRows(workspace, styles, profile), [workspace, styles, profile])
+  // Checkboxes define the exact export scope, independently of dashboard search/pagination.
+  const projectOptions = useMemo(() => workspace.projects.filter(project =>
+    styles.some(style => style.projectId === project.id || workspace.productionRuns?.some(run => run.styleId === style.id && run.projectId === project.id))), [workspace, styles])
+  const skuOptions = useMemo(() => styles.flatMap(style => style.production.map(line => ({
+    key: `${style.id}:${line.id}`, label: fullStyleSku(style.code, line.color), styleId: style.id, lineId: line.id,
+  }))), [styles])
+  const [checkedProjectIds, setCheckedProjectIds] = useState<string[]>(() => projectOptions.map(item => item.id))
+  const [checkedSkuKeys, setCheckedSkuKeys] = useState<string[]>(() => skuOptions.map(item => item.key))
+  const [skuSearch, setSkuSearch] = useState('')
+  const chosenStyles = useMemo(() => styles.map(style => ({
+    ...style, production: style.production.filter(line => checkedSkuKeys.includes(`${style.id}:${line.id}`)),
+  })).filter(style => style.production.length), [styles, checkedSkuKeys])
+  const chosenScope: ProductionExportScope = useMemo(() => ({
+    ...productionScope, projectIds: checkedProjectIds,
+  }), [productionScope, checkedProjectIds])
+  const productionProjectIds = checkedProjectIds
+  const rows = useMemo(() => buildSettlementRows(workspace, chosenStyles.filter(style => checkedProjectIds.includes(style.projectId)), profile), [workspace, chosenStyles, checkedProjectIds, profile])
   const [sigKind, setSigKind] = useState<SigEuljiKind>('product')
   const sigKinds: { value: SigEuljiKind; label: string }[] = [{ value: 'product', label: '메인 제품' }, { value: 'label', label: '중화라벨' }, { value: 'embroidery', label: '비와이 자수' }, { value: 'quality', label: '품질검사' }]
   const sigKindLabel = sigKinds.find(item => item.value === sigKind)!.label
-  const managed = styles.some(style => style.production.some(line => workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)))
-  const sig = useMemo(() => sigKind === 'product' ? buildFrozenProductionEuljiRows(workspace, styles, profile, productionScope) : buildSigEuljiRows(workspace, styles, profile, sigKind), [workspace, styles, profile, sigKind, productionScope])
+  const managed = chosenStyles.some(style => style.production.some(line => workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)))
+  const sig = useMemo(() => sigKind === 'product' ? buildFrozenProductionEuljiRows(workspace, chosenStyles, profile, chosenScope) : buildSigEuljiRows(workspace, chosenStyles.filter(style => checkedProjectIds.includes(style.projectId)), profile, sigKind), [workspace, chosenStyles, profile, sigKind, chosenScope, checkedProjectIds])
   const sigReady = profile.role !== 'factory' && (sigKind === 'product' ? workspace.settlementTermsAvailable === true || managed && workspace.productionLedgerAvailable === true : sigKind === 'quality' ? workspace.refinementsAvailable === true : workspace.operationsAvailable === true)
   const [mode, setMode] = useState<'sig' | 'generic'>(profile.role === 'factory' ? 'generic' : 'sig')
   const [template, setTemplate] = useState<SettlementTemplate>()
@@ -66,7 +82,7 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
   }
 
   async function downloadSig() {
-    if (busy || !sigReady || sig.errors.length || !sig.rows.length) return
+    if (busy || !sigReady || !checkedProjectIds.length || !checkedSkuKeys.length || sig.errors.length || !sig.rows.length) return
     setBusy(true); setError(''); setSuccess('')
     try {
       const bytes = await fillSigEuljiTemplate(await loadBundledSigEuljiTemplate(), sig.rows)
@@ -87,10 +103,30 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
     {error && <div className="error-message" role="alert">{error}</div>}
     {success && <div className="settlement-template-success" role="status">{success}</div>}
     <div hidden={mode !== 'sig'} className="sig-eulji-export" role="tabpanel" aria-label="SIG 을지 자동 작성">
+      <section className="panel" aria-label="을지 다운로드 선택 범위" style={{ padding: 12, marginBottom: 12 }}>
+        <strong>다운로드할 프로젝트 · 스타일코드 선택</strong>
+        <p className="muted">복수 선택한 프로젝트와 품번·컬러가 일치하는 내역을 한 파일로 묶습니다. 완료된 차수의 확정 금액만 사용합니다.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}><strong>프로젝트 ({checkedProjectIds.length}/{projectOptions.length})</strong><button className="button button-ghost" type="button" disabled={busy} onClick={() => setCheckedProjectIds(checkedProjectIds.length === projectOptions.length ? [] : projectOptions.map(p => p.id))}>{checkedProjectIds.length === projectOptions.length ? '전체 해제' : '전체 선택'}</button></div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border, #dce3e9)', borderRadius: 6, padding: 8 }}>
+              {projectOptions.map(project => <label key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}><input type="checkbox" disabled={busy} checked={checkedProjectIds.includes(project.id)} onChange={e => setCheckedProjectIds(current => e.target.checked ? [...current, project.id] : current.filter(id => id !== project.id))}/><span>{project.code ? `${project.code} · ${project.name}` : project.name}</span></label>)}
+            </div>
+          </div>
+          <div style={{ flex: '2 1 280px', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}><strong>스타일코드 ({checkedSkuKeys.length}/{skuOptions.length})</strong><button className="button button-ghost" type="button" disabled={busy} onClick={() => setCheckedSkuKeys(checkedSkuKeys.length === skuOptions.length ? [] : skuOptions.map(p => p.key))}>{checkedSkuKeys.length === skuOptions.length ? '전체 해제' : '전체 선택'}</button></div>
+            <input className="input" type="search" aria-label="을지 스타일코드 검색" value={skuSearch} placeholder="전체 품번·컬러 검색" onChange={e => setSkuSearch(e.target.value)}/>
+            <div style={{ maxHeight: 145, overflowY: 'auto', border: '1px solid var(--border, #dce3e9)', borderRadius: 6, padding: 8 }}>
+              {skuOptions.filter(item => item.label.toLowerCase().includes(skuSearch.trim().toLowerCase())).map(item => <label key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}><input type="checkbox" disabled={busy} checked={checkedSkuKeys.includes(item.key)} onChange={e => setCheckedSkuKeys(current => e.target.checked ? [...current, item.key] : current.filter(key => key !== item.key))}/><span>{item.label}</span></label>)}
+            </div>
+          </div>
+        </div>
+        {(!checkedProjectIds.length || !checkedSkuKeys.length) && <p className="error-message" role="status">다운로드할 프로젝트와 스타일코드를 각각 하나 이상 선택해 주세요.</p>}
+      </section>
       <p className="settlement-template-intro">제공한 <strong>SIG_을지.xlsx · 대금지급(을)</strong> 양식에 지정한 열을 자동으로 채웁니다. 매번 양식을 업로드하거나 열을 연결할 필요가 없습니다.</p>
       <div className="settlement-export-modes" role="tablist" aria-label="을지 작성 항목">{sigKinds.map(item => <button key={item.value} type="button" role="tab" aria-selected={sigKind === item.value} disabled={busy} onClick={() => { setSigKind(item.value); setError(''); setSuccess('') }}>{item.label}</button>)}</div>
       {sigKind === 'product' && managed && <p className="settlement-template-help">차수 프로젝트 범위: {productionProjectIds === null ? '전체 프로젝트' : productionProjectIds.length ? productionProjectIds.map(id => { const project = workspace.projects.find(item => item.id === id); return project ? [project.code, project.name].filter(Boolean).join(' · ') : id }).join(', ') : '선택 없음'}. 아래 미리보기의 프로젝트 코드와 금액을 확인해 주세요.</p>}
-      <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>현재 검색·필터 결과 <strong>{rows.length}개 컬러 행</strong><small>{sigKind === 'product' ? '생산 차수가 있으면 확정한 차수별 금액을, 기존 품번은 컬러별 입고 수량을 사용합니다.' : `${sigKindLabel}에 저장된 작업 내역 ${sig.rows.length}행을 작성합니다.`}</small></span></div>
+      <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>선택한 프로젝트·스타일 결과 <strong>{rows.length}개 컬러 행</strong><small>{sigKind === 'product' ? '생산 차수가 있으면 확정한 차수별 금액을, 기존 품번은 컬러별 입고 수량을 사용합니다.' : `${sigKindLabel}에 저장된 작업 내역 ${sig.rows.length}행을 작성합니다.`}</small></span></div>
       {sigKind === 'product' ? <div className="sig-eulji-rule"><strong>T = N(장당 원가) × R(실제 입고 수량)</strong><span>부가세 제외 금액입니다. O는 1, Q는 P와 같으며, S는 원단 YDS · 제품/라벨 EA로 작성합니다. U 부가세와 V 합계는 원본 수식을 유지합니다.</span></div> : <div className="sig-eulji-rule"><strong>{sigKind === 'label' ? '업체명: 주식회사 중화라벨' : sigKind === 'embroidery' ? '업체명: BY컴퓨터자수' : '품질검사 업체명은 빈칸으로 다운로드합니다.'}</strong><span>컬러별 입고일·전체 품번·저장한 단가를 채웁니다. R열은 {sigKind === 'label' ? '메인 생산의 실 출고 수량' : '메인 생산의 실 입고 수량'}이며, 단가와 곱해 금액·부가세·합계를 계산합니다. {sigKind === 'quality' ? '업체명은 담당자가 직접 작성해 주세요.' : '작업별로 선택한 컬러의 수량을 사용하고 공통 작업 요청 수량·로스는 비고에 보존합니다.'}</span></div>}
       {sigKind === 'product' && !sigReady && <div className="error-message" role="alert">추가 단가 데이터베이스 설정이 필요합니다. 관리자가 004_settlement_terms.sql을 적용한 뒤 다시 열어 주세요.</div>}
       {!!sig.errors.length && <div className="settlement-template-problems" role="alert"><strong>다운로드 전에 아래 정보를 확인해 주세요.</strong><p>{sigKind === 'product' ? '생산 차수가 있으면 스타일 상세 → 생산 차수·마감에서 단가·실제 입고를 저장하고 마감을 확정하세요. 기존 품번은 을지·단가와 메인 생산 입력값을 사용합니다.' : '스타일 상세 → 가공·품질 관리에서 해당 작업을 등록·저장한 뒤 다시 내려받아 주세요.'}</p><ul>{sig.errors.slice(0, 30).map((problem, index) => <li key={index}>{problem}</li>)}</ul>{sig.errors.length > 30 && <p>외 {sig.errors.length - 30}건 · 필터로 대상 범위를 좁혀 확인할 수 있습니다.</p>}</div>}
@@ -100,7 +136,7 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
     </div>
     <div hidden={mode !== 'generic'} role="tabpanel" aria-label="다른 마감 양식 연결">{managed && <div className="error-message" role="alert">생산 차수가 있는 품번은 SIG 을지 자동 작성에서 확정 금액으로 다운로드해 주세요.</div>}
     <p className="settlement-template-intro">다른 <strong>.xlsx 마감 원본 양식</strong>을 사용할 때 각 열에 넣을 항목을 직접 연결하세요. 기본 SIG 을지는 위 자동 작성에서 다운로드할 수 있습니다.</p>
-    <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>현재 검색·필터 결과 <strong>{rows.length}개 컬러 행</strong><small>오더·출고·입고 수량과 정산 금액을 스타일+컬러 단위로 입력합니다.</small></span></div>
+    <div className="settlement-template-summary"><FileSpreadsheet size={18}/><span>선택한 프로젝트·스타일 결과 <strong>{rows.length}개 컬러 행</strong><small>오더·출고·입고 수량과 정산 금액을 스타일+컬러 단위로 입력합니다.</small></span></div>
     <label className="settlement-template-upload"><Upload size={17}/><span>{busy ? '파일 처리 중…' : '마감 양식 파일 선택'}<small>.xlsx · 최대 10MB · 이 브라우저에서 처리</small></span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="마감 양식 파일" onChange={readFile} disabled={busy}/></label>
     {template && <>
       <p className="settlement-template-filename">선택한 양식: <strong>{template.filename}</strong></p>
