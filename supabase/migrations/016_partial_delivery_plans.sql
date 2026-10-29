@@ -107,7 +107,7 @@ begin
     or char_length(item->>'note')>500
   then raise exception 'INVALID_DELIVERY_ITEM';end if;
   perform public.validate_sig_date(item->>'dueDate');
-  if previous_date<>'' and item->>'dueDate' < previous_date then raise exception 'INVALID_DELIVERY_ORDER';end if;
+  if previous_date<>'' and (item->>'dueDate') < previous_date then raise exception 'INVALID_DELIVERY_ORDER';end if;
   previous_date:=item->>'dueDate';
   seen_ids:=array_append(seen_ids,item->>'id');
   qty:=qty+(item->>'quantity')::bigint;
