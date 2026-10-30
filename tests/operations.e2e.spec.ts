@@ -34,7 +34,12 @@ async function openStyle(page: Page, code = CODE) {
   return detail
 }
 async function operationTab(detail: Locator, name: string) {
-  if (name === 'PO 발송 이력') { await detail.getByRole('tab', { name: /^PO/ }).click(); return }
+  if (name === 'PO 발송 이력') {
+    await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click()
+    const history = detail.locator('details:not([open]) > summary').filter({ hasText: /^전체 PO 이력/ })
+    if (await history.count()) await history.click()
+    return
+  }
   if (name === '부분 출고') { await detail.getByRole('tab', { name: /메인 생산/ }).click(); return }
   await detail.getByRole('tab', { name: /가공·품질 관리/ }).click()
   await detail.getByRole('tablist', { name: '스타일 추가 업무', exact: true }).getByRole('tab', { name: new RegExp(`^${name}`) }).click()

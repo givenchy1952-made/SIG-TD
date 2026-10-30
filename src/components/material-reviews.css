@@ -1,0 +1,44 @@
+.material-reviews { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 18px; min-width: 0; }
+.material-reviews > .section-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+.material-review-note,.material-review-empty { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 10px 0 14px; }
+.material-review-empty { padding: 18px; background: var(--surface-soft, #f5f7fa); border-radius: 7px; }
+.material-review-items { display: grid; gap: 12px; }
+.material-review-item { border: 1px solid var(--border); border-radius: 8px; padding: 14px; min-width: 0; }
+.material-review-item > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.material-review-item h4 { font-size: 14px; margin: 4px 0; overflow-wrap: anywhere; }
+.material-review-item header p { margin: 4px 0; color: var(--muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.material-review-kind { font-size: 10px; color: var(--muted); font-weight: 600; }
+.material-review-status { flex-shrink: 0; border-radius: 20px; padding: 5px 9px; background: #f0f2f5; font-size: 11px; }
+.material-review-approved { background: #eaf6ef; color: #2d7654; }
+.material-review-rejected { background: #fbeeee; color: #ad4545; }
+.material-review-pending { background: #edf3fc; color: #416798; }
+.material-review-actions,.material-review-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.material-review-history { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.material-review-history summary { display: flex; gap: 6px; align-items: center; cursor: pointer; font-size: 12px; color: var(--muted); }
+.material-review-history ol { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.material-review-history li { padding: 12px; background: #f8fafc; border-radius: 6px; min-width: 0; }
+.material-review-history-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.material-review-history-heading time,.material-review-by,.material-review-history-identity { color: var(--muted); font-size: 11px; margin: 6px 0; overflow-wrap: anywhere; }
+.material-review-comment { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; font-size: 12px; margin: 8px 0; }
+.material-review-decision { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 12px; }
+.material-review-decision > strong { font-size: 12px; }
+.material-review-decision > small { display: block; color: var(--muted); margin-top: 5px; }
+.material-review-images { display: flex; flex-wrap: wrap; gap: 10px; }
+.material-review-images figure { margin: 8px 0 0; width: 140px; max-width: 100%; }
+.material-review-images .private-image { display: flex; height: 100px; width: 140px; max-width: 100%; border: 1px solid var(--border); border-radius: 5px; background: #fff; align-items: center; justify-content: center; }
+.material-review-images img { width: 100%; height: 100%; object-fit: contain; }
+.material-review-images figcaption { font-size: 10px; overflow-wrap: anywhere; padding: 5px 0; }
+.material-review-images button { padding: 5px 6px; font-size: 10px; }
+.material-review-editor { background: #f6f8fb; border: 1px solid var(--border); border-radius: 8px; margin-top: 16px; padding: 15px; display: grid; gap: 14px; min-width: 0; }
+.material-review-editor h4 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.material-review-wide { grid-column: 1 / -1; }
+.material-review-image-picker { min-width: 0; }
+.material-review-image-picker .section-heading { flex-wrap: wrap; gap: 8px; }
+.material-review-image-picker .button { position: relative; overflow: hidden; }
+.material-review-image-picker input[type=file] { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.material-review-image-options { display: grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap: 8px; max-height: 230px; overflow: auto; }
+.material-review-image-options > label { display: grid; grid-template-columns: auto 50px minmax(0,1fr); align-items: center; gap: 7px; padding: 8px; background: #fff; border: 1px solid var(--border); border-radius: 5px; min-width: 0; }
+.material-review-image-options .private-image { width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; }
+.material-review-image-options img { max-width: 50px; max-height: 50px; object-fit: contain; }
+.material-review-image-options > label > span:last-child { font-size: 11px; overflow-wrap: anywhere; }
+@media(max-width:600px) { .material-review-item { padding: 11px; } .material-review-item > header { flex-wrap: wrap; } .material-review-editor { padding: 11px; } .material-review-editor-actions > .button { flex: 1 1 140px; } .material-review-image-options { grid-template-columns: 1fr; } }

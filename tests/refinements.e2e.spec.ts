@@ -42,7 +42,8 @@ async function navigate(page: Page, name: string) {
 test('가공·품질 관리에 고정 검사 품목을 기록하고 상·하의 치수표와 기존 기록·패킹 데이터를 함께 보존한다', async ({ page }) => {
   await fixture(page)
   const before = await snapshot(page), detail = await openStyle(page)
-  await expect(detail.getByRole('tab', { name: /^PO/ })).toBeVisible()
+  await expect(detail.getByRole('tab', { name: /생산 조건 협의·승인/ })).toBeVisible()
+  await expect(detail.getByRole('tab', { name: /^PO/ })).toHaveCount(0)
   await expect(detail.getByRole('tab', { name: /발주·출고·가공/ })).toHaveCount(0)
   const qc = await quality(detail)
   await qc.getByRole('button', { name: '품질 검사 수정', exact: true }).click()
@@ -125,7 +126,7 @@ test('개인 오전·오후 반차와 2시간 반반차를 저장하고 캘린�
   await page.screenshot({ path: 'docs/screenshots/refinements-calendar.png' })
 })
 
-test('스타일에서 을지를 바로 열고 미입력 원가는 안내하며 PO를 별도 탭에서 관리한다', async ({ page }) => {
+test('스타일에서 을지를 바로 열고 미입력 원가는 안내하며 PO를 협의 화면에서 함께 관리한다', async ({ page }) => {
   await fixture(page)
   const detail = await openStyle(page)
   await detail.getByRole('tab', { name: /을지·단가/ }).click()
@@ -146,7 +147,7 @@ test('스타일에서 을지를 바로 열고 미입력 원가는 안내하며 P
   await modal.getByLabel('닫기', { exact: true }).click()
   await expect(modal).toHaveCount(0)
   await expect(detail).toBeVisible()
-  await detail.getByRole('tab', { name: /^PO/ }).click()
+  await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click(); await detail.locator('summary').filter({ hasText: /^전체 PO 이력/ }).click()
   await expect(detail.getByRole('heading', { name: 'PO 메일 및 발송 이력', exact: true })).toBeVisible()
   await expect(detail.getByRole('tab', { name: /부분 출고/ })).toHaveCount(0)
 })

@@ -29,7 +29,7 @@ async function fixture(page: Page, incompatibleSource = false) {
 async function openPO(page: Page) {
   await page.getByRole('button', { name: `${CODE}BK`, exact: true }).click()
   const detail = page.getByRole('dialog')
-  await detail.getByRole('tab', { name: /^PO/ }).click()
+  await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click(); await detail.locator('summary').filter({ hasText: /^전체 PO 이력/ }).click()
   return { detail, panel: detail.getByRole('region', { name: '생산 차수 PO 연결', exact: true }) }
 }
 
