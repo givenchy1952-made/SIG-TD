@@ -3,6 +3,7 @@ import { createSeed, DEMO_IDS } from '../src/lib/seed'
 import { planRegistrationFromRow } from '../src/lib/order-registration'
 import { buildOrderImportPreview, sigOrderColumnMapping, type ImportCell, type ImportSheet } from '../src/lib/order-import'
 import { quantityTotal } from '../src/lib/types'
+import { EMPTY_OPERATIONS, ORDER_SOURCE_COLUMNS, type OrderSourceColumn } from '../src/lib/operations-types'
 
 function fixture() {
   const workspace = createSeed()
@@ -133,6 +134,53 @@ describe('F열 전용 미등록 스타일·프로젝트 등록 계획', () => {
     const result = plan()
     expect(result.errors.join(' ')).toContain('명칭·시즌')
     expect(result.style).toBeNull()
+    expect(workspace).toEqual(before)
+  })
+
+  it('A열 코드가 기존 프로젝트 명칭에 들어 있으면 새 ID로 중복 생성하지 않는다', () => {
+    const { workspace, plan } = fixture()
+    const project = workspace.projects[0]
+    Object.assign(project, { code: '', name: 'QA-PROJECT-2026', season: '2026FY' })
+    const before = structuredClone(workspace), result = plan()
+    expect(result.errors.join(' ')).toContain('기존 프로젝트 ID를 유지')
+    expect(result.project).toBeNull(); expect(result.style).toBeNull()
+    expect(workspace).toEqual(before)
+    Object.assign(project, { code: 'QA-PROJECT-2026', name: 'QA 프로젝트 명칭' })
+    expect(plan().project!.id).toBe(project.id)
+    expect(plan().isNewProject).toBe(false)
+  })
+
+  it('코드가 명칭에 들어간 기존 프로젝트가 여럿이면 임의로 하나를 고르지 않는다', () => {
+    const { workspace, plan } = fixture()
+    Object.assign(workspace.projects[0], { code: '', name: 'QA-PROJECT-2026' })
+    workspace.projects.push({ ...workspace.projects[0], id: crypto.randomUUID() })
+    const result = plan()
+    expect(result.errors.join(' ')).toContain('기존 프로젝트가 여러 개')
+    expect(result.project).toBeNull()
+  })
+
+  it('기존 스타일에 연결된 프로젝트 메타데이터가 비어 있어도 새 프로젝트로 바꾸지 않는다', () => {
+    const { workspace, row, plan } = fixture()
+    const style = workspace.styles[0], project = workspace.projects.find(item => item.id === style.projectId)!
+    row[5] = `${style.code}${style.production[0].color}`
+    Object.assign(project, { code: '', name: '', season: '' })
+    const before = structuredClone(workspace), result = plan()
+    expect(result.errors.join(' ')).toContain('기존 ID')
+    expect(result.project).toBeNull(); expect(result.style).toBeNull()
+    expect(workspace).toEqual(before)
+  })
+
+  it('기존 스타일의 저장된 A열 코드가 같으면 다른 공식 명칭을 덮어쓰거나 중복 프로젝트를 만들지 않는다', () => {
+    const { workspace, row, plan } = fixture()
+    const style = workspace.styles[0], line = style.production[0], project = workspace.projects.find(item => item.id === style.projectId)!
+    row[5] = `${style.code}${line.color}`
+    Object.assign(project, { code: '', name: '등록된 공식 명칭', season: '2026FY' })
+    const columns = Object.fromEntries(ORDER_SOURCE_COLUMNS.map(column => [column, null])) as Record<OrderSourceColumn, string | null>
+    Object.assign(columns, { A: row[0], M: project.name, L: project.season, F: row[5] })
+    workspace.operations = { ...structuredClone(EMPTY_OPERATIONS), orderSourceRecords: [{ styleId: style.id, lineId: line.id, fileName: '기존.xlsx', sheetName: 'ORDER', headers: { ...columns }, rows: [{ rowNumber: 2, columns }], version: 1, createdAt: '', updatedAt: '', updatedBy: workspace.profiles[0].id }] }
+    const before = structuredClone(workspace), result = plan()
+    expect(result.errors.join(' ')).toContain('기존 ID')
+    expect(result.project).toBeNull(); expect(result.style).toBeNull()
     expect(workspace).toEqual(before)
   })
 

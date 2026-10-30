@@ -134,11 +134,11 @@ test('프로젝트 B로 필터한 을지에는 같은 품번의 미확정 A 차�
     runB.snapshot.projectId = projectB.id; runB.snapshot.projectCode = projectB.code; runB.snapshot.round = 1
     style.projectId = projectB.id
     localStorage.setItem(key, JSON.stringify(workspace))
-    return `${projectB.code} · ${projectB.name}`
+    return `${projectB.name} · ${projectB.code}`
   }, STORAGE)
   await page.reload()
-  await page.getByRole('button', { name: '프로젝트 필터', exact: true }).click()
-  const filter = page.getByRole('dialog', { name: '프로젝트 필터 선택', exact: true })
+  await page.getByRole('button', { name: '프로젝트 명칭', exact: true }).click()
+  const filter = page.getByRole('dialog', { name: '프로젝트 명칭 선택', exact: true })
   await filter.getByRole('button', { name: '선택해제', exact: true }).click()
   await filter.getByRole('checkbox', { name: selectedProject, exact: true }).check()
   await page.keyboard.press('Escape')

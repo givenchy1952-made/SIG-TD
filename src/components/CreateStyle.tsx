@@ -4,6 +4,7 @@ import { blankProduction, type Profile, type Style, type Workspace } from '../li
 import { addDays } from '../lib/utils'
 import { message } from '../lib/utils'
 import { Modal } from './ui'
+import { projectFilterOptions } from '../lib/project-identity'
 export default function CreateStyle({ workspace, profile, initialKind = 'samples', onClose, onSave }: { workspace: Workspace; profile: Profile; initialKind?: 'samples' | 'production'; onClose: () => void; onSave: (style: Style, reason: string) => Promise<void> }) {
   const [kind, setKind] = useState(initialKind)
   const [form, setForm] = useState({ code: '', name: '', category: 'OUTERWEAR', season: workspace.projects[0]?.season || '2026FW', projectId: workspace.projects[0]?.id || '', factoryId: workspace.factories[0]?.id || '', ownerId: profile.id, dueDate: addDays(14), colors: 'BK, OW', notes: '' })
@@ -16,7 +17,7 @@ export default function CreateStyle({ workspace, profile, initialKind = 'samples
     <label className="field"><span>제품명 <b>*</b></span><input className="input" required value={form.name} onChange={e => field('name', e.target.value)} placeholder="SIGNATURE ZIP-UP HOODIE" maxLength={150}/></label>
     <label className="field"><span>시즌 / 년도</span><input className="input" required value={form.season} onChange={e => field('season', e.target.value)} placeholder="2026FW" maxLength={30}/></label>
     <label className="field"><span>카테고리</span><select className="select" value={form.category} onChange={e => field('category', e.target.value)}>{['OUTERWEAR', 'SWEATSHIRT', 'SHIRTS', 'JERSEY', 'KNITWEAR', 'BOTTOMS', 'ACCESSORIES'].map(c => <option key={c}>{c}</option>)}</select></label>
-    <label className="field"><span>프로젝트 <b>*</b></span><select className="select" required value={form.projectId} onChange={e => { field('projectId', e.target.value); field('season', workspace.projects.find(p => p.id === e.target.value)?.season || form.season) }}><option value="">프로젝트 선택</option>{workspace.projects.map(p => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>)}</select></label>
+    <label className="field"><span>프로젝트 명칭 <b>*</b></span><select className="select" required value={form.projectId} onChange={e => { field('projectId', e.target.value); field('season', workspace.projects.find(p => p.id === e.target.value)?.season || form.season) }}><option value="">프로젝트 선택</option>{projectFilterOptions(workspace).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
     <label className="field"><span>담당 공장 <b>*</b></span><select className="select" required value={form.factoryId} onChange={e => field('factoryId', e.target.value)}><option value="">공장 선택</option>{workspace.factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
     <label className="field"><span>본사 담당자</span><select className="select" value={form.ownerId} onChange={e => field('ownerId', e.target.value)}>{workspace.profiles.filter(p => p.active && p.approved && p.role !== 'factory').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
     <label className="field"><span>기준 납기일 <b>*</b></span><input type="date" className="input" required value={form.dueDate} onChange={e => field('dueDate', e.target.value)}/></label>

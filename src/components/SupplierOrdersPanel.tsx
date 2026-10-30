@@ -10,6 +10,7 @@ import { fullStyleSku } from '../lib/style-identity'
 import ProductionConditionsReviewPanel from './ProductionConditionsReviewPanel'
 import PartialDeliveryPanel from './PartialDeliveryPanel'
 import { message } from '../lib/utils'
+import { getHistoricalProjectIdentity } from '../lib/project-identity'
 import './supplier-orders.css'
 
 export interface SupplierOrdersPanelProps {
@@ -35,6 +36,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   const orders = (workspace.supplierProductionOrders || []).filter(order => order.styleId === style.id && (hq || !!actor?.factoryId && order.factoryId === actor.factoryId && style.factoryId === actor.factoryId))
     .sort((a, b) => a.projectCode.localeCompare(b.projectCode) || b.round - a.round || a.runId.localeCompare(b.runId))
   const selected = orders.find(order => order.runId === selectedId) || orders[0]
+  const projectIdentity = (order: typeof orders[number]) => getHistoricalProjectIdentity(workspace, order.projectId, { name: order.projectName, code: order.projectCode })
   const dirty = conditionsDirty || deliveryDirty || !!poDraft || refreshRequired
   const currentCondition = selected ? getProductionCondition(workspace, selected.runId) : null
   const poStale = !!poDraft && (!selected || poDraft.runId !== selected.runId || poDraft.runVersion !== selected.runVersion || selected.poId !== null || selected.status !== 'awaiting_po')
@@ -94,12 +96,12 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   return <section className="supplier-orders" aria-label="생산 조건 협의·승인">
     <div className="section-heading"><div><h2><ClipboardCheck size={18} />생산 조건 협의·승인</h2><p className="muted">업체가 회신한 납기·단가·수량을 검토하고 본사 최종 승인 후 생산을 시작합니다.</p></div>{hq && onOpenPO && <button className="button" type="button" onClick={onOpenPO} disabled={busy || dirty}><FileText size={14} />PO 작성·발송으로 이동</button>}</div>
     {workspace.supplierOrdersAvailable !== true ? <div className="error-message" role="status">생산 발주 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : !orders.length ? <div className="empty-state"><ClipboardCheck size={30} /><h3>등록된 생산 발주가 없습니다.</h3><p>{hq ? '오더를 업로드하거나 생산 차수를 등록한 뒤 PO를 연결하고 발송해 주세요.' : '본사에서 담당 공장의 생산 발주와 PO를 등록하면 이곳에서 확인할 수 있습니다.'}</p>{hq && onOpenProductionRuns && <button className="button button-primary" type="button" onClick={onOpenProductionRuns}>생산 차수 등록으로 이동</button>}</div> : selected && <>
-      <label className="field supplier-order-picker"><span className="field-label">프로젝트 · 생산 차수</span><select className="select" aria-label="생산 조건 협의 차수" value={selected.runId} disabled={dirty || busy} onChange={event => choose(event.target.value)}>{orders.map(order => <option key={order.runId} value={order.runId}>{order.projectCode || workspace.projects.find(project => project.id === order.projectId)?.name || '프로젝트'} / {fullStyleSku(order.styleCode, style.production.find(line => line.id === order.lineId)?.color)} / {order.round}차 · {order.name} · {STATUS_LABEL[getProductionCondition(workspace, order.runId).status]}</option>)}</select></label>
+      <label className="field supplier-order-picker"><span className="field-label">프로젝트 · 생산 차수</span><select className="select" aria-label="생산 조건 협의 차수" value={selected.runId} disabled={dirty || busy} onChange={event => choose(event.target.value)}>{orders.map(order => <option key={order.runId} value={order.runId}>{projectIdentity(order).label} / {fullStyleSku(order.styleCode, style.production.find(line => line.id === order.lineId)?.color)} / {order.round}차 · {order.name} · {STATUS_LABEL[getProductionCondition(workspace, order.runId).status]}</option>)}</select></label>
       {error && <div className="error-message" role="alert">{error}</div>}{success && <div className="success-message" role="status">{success}</div>}
       {refreshRequired && <button className="button" type="button" disabled={busy} onClick={() => void refresh()}>최신 발주 다시 불러오기</button>}
       {poStale && <div className="error-message" role="status">생산 차수 또는 PO 연결이 변경되었습니다. 작성한 초안은 유지됩니다. 초안을 취소하고 최신 발주를 다시 확인해 주세요.</div>}
       <article className="panel supplier-order-card">
-        <header><div><strong>{selected.projectCode || '프로젝트 코드 미입력'} · {selected.round}차</strong><h3>{fullStyleSku(selected.styleCode, style.production.find(line => line.id === selected.lineId)?.color)} / {selected.name}</h3></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
+        <header><div><strong>{projectIdentity(selected).name} · {selected.round}차</strong><p className="muted">{selected.projectCode || projectIdentity(selected).code || '프로젝트 코드 미입력'}</p><h3>{fullStyleSku(selected.styleCode, style.production.find(line => line.id === selected.lineId)?.color)} / {selected.name}</h3></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
         <dl className="supplier-order-facts"><div><dt>본사 요청 납기</dt><dd>{selected.requestedDue || selected.expectedDue || '미입력'}</dd></div><div><dt>PO 발송 접수</dt><dd>{time(selected.sentAt)}</dd></div><div><dt>오더 수량</dt><dd>{quantityTotal(selected.order).toLocaleString('ko-KR')} pcs</dd></div></dl>
         <div className="supplier-order-table"><table aria-label="생산 발주 사이즈별 수량"><thead><tr>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr>{SIZES.map(size => <td key={size}>{selected.order[size].toLocaleString('ko-KR')}</td>)}<td>{quantityTotal(selected.order).toLocaleString('ko-KR')}</td></tr></tbody></table></div>
         <PartialDeliveryPanel key={selected.runId} workspace={workspace} profile={actor} order={selected} onChanged={onChanged} onDirtyChange={setDeliveryDirty} poDraftOpen={!!poDraft}/>

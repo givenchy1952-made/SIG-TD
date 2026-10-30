@@ -1,10 +1,12 @@
 import { CHECKS, SIZES, STAGE_LABEL, STATUS_LABEL, quantityTotal } from './types'
 import type { Style, Workspace } from './types'
 import { fullStyleSku } from './style-identity'
+import { filterStylesByProjects, getProjectIdentity } from './project-identity'
 
 export type ExportView = 'overview' | 'samples' | 'production' | 'settlement'
 type Cell = string | number | boolean | null | undefined
 export interface ExportSheet { name: string; headers: string[]; rows: Cell[][] }
+export interface WorkspaceExportScope { projectIds?: readonly string[] | null }
 
 /** CSV cells are quoted and dangerous spreadsheet formulas are made literal. */
 export function safeCSVCell(value: Cell): string {
@@ -20,11 +22,12 @@ function snapshot(value: unknown): string {
 }
 
 /** Receives only the caller's currently accessible, filtered records. */
-export function buildExportSheets(workspace: Workspace, styles: Style[]): ExportSheet[] {
+export function buildExportSheets(workspace: Workspace, selectedStyles: Style[], scope: WorkspaceExportScope = {}): ExportSheet[] {
+  const styles = filterStylesByProjects(selectedStyles, scope.projectIds ?? null)
   const ids = new Set(styles.map(style => style.id))
   const factoryName = (id: string) => workspace.factories.find(factory => factory.id === id)?.name ?? id
   const ownerName = (id: string) => workspace.profiles.find(profile => profile.id === id)?.name ?? id
-  const projectName = (id: string) => workspace.projects.find(project => project.id === id)?.name ?? id
+  const projectName = (id: string) => getProjectIdentity(workspace, id).name
   const styleCode = (id: string) => styles.find(style => style.id === id)?.code ?? id
   const sum = (style: Style, key: 'order' | 'packing' | 'shipped' | 'received') => style.production.reduce((total, line) => total + quantityTotal(line[key]), 0)
   const styleSheet: ExportSheet = {
@@ -60,6 +63,21 @@ export function buildExportSheets(workspace: Workspace, styles: Style[]): Export
     headers: ['스타일 코드', '샘플 ID', '파일명', '종류', '크기(bytes)', '업로드 담당자', '업로드일'],
     rows: workspace.attachments.filter(attachment => ids.has(attachment.styleId)).map(attachment => [styleCode(attachment.styleId), attachment.sampleId ?? '', attachment.name, attachment.mime, attachment.size, ownerName(attachment.uploadedBy), attachment.createdAt]),
   }
+  // Append project keys so existing quantity/status/owner column positions stay
+  // compatible with consumers of these non-fixed-layout reports.
+  for (const sheet of [styleSheet, sampleSheet, productionSheet]) {
+    sheet.headers[sheet.headers.indexOf('프로젝트')] = '프로젝트 명칭'
+    sheet.headers.push('프로젝트 코드', '프로젝트 ID')
+  }
+  const appendProjectKeys = (sheet: ExportSheet, rowStyles: Style[]) => sheet.rows.forEach((row, index) => { const style = rowStyles[index]; row.push(getProjectIdentity(workspace, style.projectId).code, style.projectId) })
+  appendProjectKeys(styleSheet, styles)
+  appendProjectKeys(sampleSheet, styles.flatMap(style => style.samples.map(() => style)))
+  appendProjectKeys(productionSheet, styles.flatMap(style => style.production.map(() => style)))
+  const styleProjects = new Map(styles.map(style => [style.code, getProjectIdentity(workspace, style.projectId)]))
+  for (const sheet of [auditSheet, commentsSheet, attachmentSheet]) {
+    sheet.headers.push('프로젝트 명칭', '프로젝트 코드', '프로젝트 ID')
+    sheet.rows.forEach(row => { const project = styleProjects.get(String(row[0])); row.push(project?.name || '', project?.code || '', project?.id || '') })
+  }
   return [styleSheet, sampleSheet, productionSheet, auditSheet, commentsSheet, attachmentSheet]
 }
 
@@ -74,8 +92,8 @@ function download(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export async function exportWorkspace(workspace: Workspace, styles: Style[], format: 'csv' | 'xlsx', view: ExportView = 'overview'): Promise<void> {
-  const sheets = buildExportSheets(workspace, styles)
+export async function exportWorkspace(workspace: Workspace, styles: Style[], format: 'csv' | 'xlsx', view: ExportView = 'overview', scope: WorkspaceExportScope = {}): Promise<void> {
+  const sheets = buildExportSheets(workspace, styles, scope)
   const date = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }).replaceAll('-', '')
   const name = { overview: '스타일', samples: '샘플현황', production: '메인생산', settlement: '업체정산' }[view]
   const filename = `SIG_${name}_${date}.${format}`

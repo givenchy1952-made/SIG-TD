@@ -1,6 +1,7 @@
 import { quantityTotal, type Profile, type Style } from './types'
 import type { ProductionLedgerWorkspace } from './production-ledger'
 import { buildSigEuljiRows, sigEuljiNetAmount, type SigEuljiPreview } from './sig-eulji'
+import { getProjectIdentity } from './project-identity'
 
 /** Global product export: managed colors use closed rounds only, other colors keep the legacy writer. */
 export interface ProductionExportScope { projectIds?: readonly string[] | null; factoryIds?: readonly string[] | null; ownerIds?: readonly string[] | null; seasons?: readonly string[] | null }
@@ -23,7 +24,10 @@ export function buildFrozenProductionEuljiRows(workspace: ProductionLedgerWorksp
       seenLines.add(line.id)
       const runs = (workspace.productionRuns || []).filter(run => run.styleId === style.id && run.lineId === line.id)
       if (!runs.length) { if (inScope(style.projectId, style.factoryId, line.ownerId ?? style.ownerId, style.season)) legacyLines.push(line) }
-      else for (const run of runs.filter(item => inScope(item.projectId, item.factoryIdSnapshot, item.ownerIdSnapshot, workspace.projects.find(project => project.id === item.projectId)?.season || style.season))) {
+      else for (const run of runs.filter(item => {
+        const identity = item.closedAt && item.snapshot ? item.snapshot : item
+        return inScope(identity.projectId, identity.factoryIdSnapshot, identity.ownerIdSnapshot, workspace.projects.find(project => project.id === identity.projectId)?.season || style.season)
+      })) {
         if (run.closedAt && run.snapshot) runIds.push(run.id)
         else errors.push(`${style.code} ${line.color} · ${run.projectCode} ${run.round}차: 마감 확정 후 다운로드해 주세요. 확정 차수 한 건은 스타일 상세에서 별도로 내려받을 수 있습니다.`)
       }
@@ -49,7 +53,9 @@ export function buildProductionRunEuljiRows(workspace: ProductionLedgerWorkspace
     try {
       const received = snapshot.receipts.reduce((total, receipt) => total + quantityTotal(receipt.quantities), 0)
       if (received !== snapshot.receivedQuantity || snapshot.netAmount !== sigEuljiNetAmount(snapshot.unitCost, snapshot.receivedQuantity)) throw new Error('확정된 입고 수량과 마감 금액을 확인해 주세요.')
-      rows.push({ projectCode: snapshot.projectCode, receivedAtISO: snapshot.lastReceivedAt, factory: snapshot.factory, colorStyleCode: snapshot.styleCode, unitCost: snapshot.unitCost, orderQuantity: snapshot.orderQuantity, receivedQuantity: snapshot.receivedQuantity, unit: snapshot.itemType === 'fabric' ? 'YDS' : 'EA', netAmount: snapshot.netAmount, owner: snapshot.owner })
+      const project = getProjectIdentity(workspace, snapshot.projectId)
+      const hasProjectLabel = workspace.projects.some(item => item.id === snapshot.projectId && (item.name?.trim() || item.code?.trim()))
+      rows.push({ projectId: snapshot.projectId, projectName: hasProjectLabel ? project.name : snapshot.projectCode, season: project.season, projectCode: snapshot.projectCode, receivedAtISO: snapshot.lastReceivedAt, factory: snapshot.factory, colorStyleCode: snapshot.styleCode, unitCost: snapshot.unitCost, orderQuantity: snapshot.orderQuantity, receivedQuantity: snapshot.receivedQuantity, unit: snapshot.itemType === 'fabric' ? 'YDS' : 'EA', netAmount: snapshot.netAmount, owner: snapshot.owner })
     } catch (error) { errors.push(`${run.name} · ${run.round}차: ${error instanceof Error ? error.message : String(error)}`) }
   }
   return { rows, errors }

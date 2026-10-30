@@ -212,6 +212,7 @@ test('승인 조건 변경은 새 차수의 집계 범위를 확인해 연결하
   expect((await snapshot(page)).productionConditions!.find(condition => condition.runId === RUN)!.changeRequests[0].correctingRunId).toBeNull()
   await panel.getByLabel('새 차수 오더 수량 및 집계 범위 확인', { exact: true }).check()
   await panel.getByRole('button', { name: '변경 요청과 새 차수 연결', exact: true }).click()
+  await expect(panel.getByRole('region', { name: '승인 조건 변경 요청 기록', exact: true })).toContainText('재승인 차수: QA 별도 재승인 생산')
   const after = await snapshot(page)
   const originalCondition = after.productionConditions!.find(condition => condition.runId === RUN)!
   expect(originalCondition.approval).toEqual(priorApproval)

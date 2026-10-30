@@ -49,11 +49,11 @@ test('동일 수량 리오더와 다른 프로젝트 발주를 별도 차수로 
   await board.getByRole('button', { name: '생산 차수 프로젝트', exact: true }).click()
   let filter = page.getByRole('dialog', { name: '생산 차수 프로젝트 선택', exact: true })
   await filter.getByRole('button', { name: '선택해제', exact: true }).click()
-  await filter.getByRole('checkbox', { name: 'QA-PROJECT-A · QA 프로젝트 A', exact: true }).check(); await page.keyboard.press('Escape')
+  await filter.getByRole('checkbox', { name: 'QA 프로젝트 A · QA-PROJECT-A', exact: true }).check(); await page.keyboard.press('Escape')
   await expect(board.locator('tbody tr')).toHaveCount(2)
   await board.getByRole('button', { name: '생산 차수 프로젝트', exact: true }).click()
   filter = page.getByRole('dialog', { name: '생산 차수 프로젝트 선택', exact: true })
-  await filter.getByRole('checkbox', { name: 'QA-PROJECT-B · QA 프로젝트 B', exact: true }).check(); await page.keyboard.press('Escape')
+  await filter.getByRole('checkbox', { name: 'QA 프로젝트 B · QA-PROJECT-B', exact: true }).check(); await page.keyboard.press('Escape')
   await expect(board.locator('tbody tr')).toHaveCount(3)
   // A registered SKU can immediately reorder under a previously unknown
   // A-column project through the same apply action, without a separate form.
