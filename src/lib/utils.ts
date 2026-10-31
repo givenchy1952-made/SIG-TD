@@ -7,6 +7,7 @@ import { scopeSupplierOrders } from './supplier-orders'
 import { scopeProcessingPricesWorkspace } from './processing-prices'
 import { scopeProductionConditionsWorkspace } from './production-conditions'
 import { scopeProductionPoLinks } from './production-po-links'
+import { scopeMaterialReviewsWorkspace } from './material-reviews'
 export function localDate(date = new Date()): string { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
 export function addDays(days: number, from = new Date()): string { const d = new Date(from); d.setDate(d.getDate() + days); return localDate(d) }
 export function isOverdue(style: Style): boolean { return !!style.dueDate && style.dueDate < localDate() && style.stage !== 'approved' && !(style.stage === 'production' && style.production.length > 0 && style.production.every(p => quantityTotal(p.order) > 0 && quantityTotal(p.received) >= quantityTotal(p.order))) }
@@ -21,7 +22,7 @@ export function isMainProductionStyle(style: Style): boolean {
 }
 export function scopeWorkspace(workspace: Workspace, profile: import('./types').Profile): Workspace {
   const operations = scopeOperations(workspace, profile)
-  const settlement = { ...scopeSettlementTermsWorkspace(workspace, profile), ...scopeProductionLedgerWorkspace(workspace, profile), ...scopeSupplierOrders(workspace, profile), ...scopeProcessingPricesWorkspace(workspace, profile), ...scopeProductionConditionsWorkspace(workspace, profile), ...scopeProductionPoLinks(workspace, profile), productionDetails: scopeProductionDetails(workspace, profile), refinementsAvailable: workspace.refinementsAvailable }
+  const settlement = { ...scopeMaterialReviewsWorkspace(workspace, profile), ...scopeSettlementTermsWorkspace(workspace, profile), ...scopeProductionLedgerWorkspace(workspace, profile), ...scopeSupplierOrders(workspace, profile), ...scopeProcessingPricesWorkspace(workspace, profile), ...scopeProductionConditionsWorkspace(workspace, profile), ...scopeProductionPoLinks(workspace, profile), productionDetails: scopeProductionDetails(workspace, profile), refinementsAvailable: workspace.refinementsAvailable }
   if (!profile.approved || !profile.active) return { ...settlement, styles: [], profiles: [profile], factories: [], projects: [], comments: [], attachments: [], audits: [], styleImages: [], styleImagesAvailable: workspace.styleImagesAvailable, operations, operationsAvailable: workspace.operationsAvailable }
   if (profile.role !== 'factory') { const styles = workspace.styles.filter(s => !s.deletedAt); const ids = new Set(styles.map(s => s.id)); return { ...workspace, ...settlement, styles, styleImages: (workspace.styleImages || []).filter(image => ids.has(image.styleId)), operations } }
   const styles = workspace.styles.filter(s => s.factoryId === profile.factoryId && !s.deletedAt)
@@ -33,7 +34,7 @@ export function scopeWorkspace(workspace: Workspace, profile: import('./types').
 export function message(error: unknown): string { const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : String(error); if (/conflict|version|409/i.test(text)) return '다른 사용자가 먼저 수정했습니다. 입력 내용을 보관한 뒤 최신 정보를 다시 열어 확인해 주세요.'; if (/REASON_REQUIRED/.test(text)) return '변경 사유를 두 글자 이상 입력해 주세요.';
   if (/HQ_(?:FINAL_)?APPROVAL_REQUIRED/.test(text)) return '본사가 생산 조건을 최종 승인해야 생산 시작·실입고·마감을 진행할 수 있습니다.';
   if (/PRODUCTION_MODE_REQUIRED/.test(text)) return '생산 조건 협의·승인에서 완사입 또는 임가공 생산 방식을 먼저 설정해 주세요.';
-  if (/PO_LINK_CONFIRMATION_REQUIRED/.test(text)) return '생산 차수를 저장한 뒤 PO 탭에서 발송 문서와 수량을 확인하고 연결해 주세요.';
+  if (/PO_LINK_CONFIRMATION_REQUIRED/.test(text)) return '생산 차수를 저장한 뒤 생산 조건 협의·승인에서 발송 문서와 수량을 확인하고 연결해 주세요.';
   if (/SUPPLIER_CONDITIONS_UNCONFIRMED/.test(text)) return '업체의 생산 가능 여부·사이즈별 수량 확인·생산 조건 동의를 확인한 뒤 승인해 주세요.';
   if (/PRODUCTION_CONDITIONS_NOT_REVIEWABLE/.test(text)) return '본사 검토 대기 중인 업체 회신을 선택해 주세요. 최신 상태를 다시 확인해 주세요.';
   if (/PROPOSAL_TERMS_CHANGED|PRODUCTION_TERMS_CHANGED|PRODUCTION_CONDITIONS_CHANGED|QUANTITY_CONFIRMATION_MISMATCH/.test(text)) return '회신 당시 발주 조건과 현재 정보가 다릅니다. 수정 요청을 통해 업체의 조건을 다시 확인해 주세요.';

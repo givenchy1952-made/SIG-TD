@@ -14,6 +14,7 @@ import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Styl
 import { exportWorkspace } from '../lib/export'
 import { isSampleStyle, isMainProductionStyle } from '../lib/utils'
 import { fullStyleSku, styleColorRows } from '../lib/style-identity'
+import { getProjectIdentity, projectFilterOptions, matchesProjectSelection, compareProjectIds } from '../lib/project-identity'
 import type { OrderImportChange } from '../lib/operations-types'
 import type { RegistrationProject } from '../lib/order-registration'
 import './dashboard.css'
@@ -25,7 +26,7 @@ const selected = (values: Selection, value: string) => values === null || values
 const optionsFor = (values: string[]) => values.map(value => ({ value, label: value }))
 type View = 'overview' | 'samples' | 'production' | 'settlement'
 type QuickFilter = 'all' | 'delayed' | 'upcoming' | 'approved' | 'samples' | 'unpaid'
-type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code'
+type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code' | 'project'
 type DateField = 'dueDate' | 'samplePlanned' | 'sampleReceived' | 'sampleShipped' | 'productionShipped' | 'productionReceived' | 'confirmDue' | 'paymentDue'
 interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<Workspace>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string, color?: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
 const formatter = new Intl.NumberFormat('ko-KR')
@@ -90,7 +91,8 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const weekEnd = localDate(weekEndDate)
   const visibleStyles = workspace.styles.filter(style => !style.deletedAt)
   const factoryName = (id: string) => workspace.factories.find(f => f.id === id)?.name || '미배정'
-  const projectName = (id: string) => { const item = workspace.projects.find(p => p.id === id); return item ? [item.code, item.name].filter(Boolean).join(' · ') : '미배정' }
+  const projectName = (id: string) => getProjectIdentity(workspace, id).label
+  const projectOptions = projectFilterOptions(workspace)
   const ownerName = (id: string) => workspace.profiles.find(p => p.id === id)?.name || '미지정'
   const ownerOptions = [{ value: '', label: '미지정' }, ...workspace.profiles.filter(item => item.role !== 'factory').map(item => ({ value: item.id, label: item.name }))]
   const upcoming = (style: Style) => !complete(style) && ([style.dueDate, ...style.samples.filter(s => s.status !== 'done' && s.status !== 'approved').map(s => s.plannedAt), ...style.production.map(p => p.confirmDue)]).some(date => !!date && date >= today && date <= weekEnd)
@@ -121,7 +123,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     return true
   }
   const filteredStyles = visibleStyles.filter(style => {
-    if (!selected(season, style.season) || !selected(project, style.projectId) || !selected(factory, style.factoryId) || !selected(stage, style.stage) || !selected(category, style.category) || !selected(products, style.id)) return false
+    if (!selected(season, style.season) || !matchesProjectSelection(style.projectId, project) || !selected(factory, style.factoryId) || !selected(stage, style.stage) || !selected(category, style.category) || !selected(products, style.id)) return false
     if (!selected(pp, style.ppApproved ? 'yes' : 'no')) return false
     if ((color !== null || activeStatuses.length) && !style.production.some(line => lineMatches(line, style))) return false
     if ((sampleStatus !== null || round !== null) && !style.samples.some(sample => {
@@ -138,7 +140,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       if (!query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word))) return false
     }
     return true
-  }).sort((a, b) => sort === 'dueAsc' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : sort === 'dueDesc' ? (b.dueDate || '').localeCompare(a.dueDate || '') : sort === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : a.code.localeCompare(b.code))
+  }).sort((a, b) => sort === 'dueAsc' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : sort === 'dueDesc' ? (b.dueDate || '').localeCompare(a.dueDate || '') : sort === 'updated' ? b.updatedAt.localeCompare(a.updatedAt) : sort === 'project' ? compareProjectIds(workspace, a.projectId, b.projectId) || a.code.localeCompare(b.code) : a.code.localeCompare(b.code))
   const rows = filteredStyles.flatMap(style => styleColorRows(style).filter(({ line, color: rowColor }) => {
     if (!selected(owner, line?.ownerId ?? style.ownerId) || !selected(color, rowColor) || productionMode && !line || line && !lineMatches(line, style)) return false
     const scopedStyle = line ? { ...style, production: [line] } : style
@@ -163,7 +165,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const [eyebrow, title, subtitle] = viewTitles[view]
   const filterChips: { label: string; values: Selection; options: { value: string; label: string }[]; clear: () => void }[] = [
     { label: '시즌', values: season, options: optionsFor(seasons), clear: () => changeFilter(setSeason, null) },
-    { label: '프로젝트', values: project, options: workspace.projects.map(item => ({ value: item.id, label: item.code ? `${item.code} · ${item.name}` : item.name })), clear: () => changeFilter(setProject, null) },
+    { label: '프로젝트 명칭', values: project, options: projectOptions, clear: () => changeFilter(setProject, null) },
     { label: '공장', values: factory, options: workspace.factories.map(item => ({ value: item.id, label: item.name })), clear: () => changeFilter(setFactory, null) },
     { label: '제품', values: products, options: visibleStyles.map(item => ({ value: item.id, label: item.code })), clear: () => changeFilter(setProducts, null) },
     { label: '담당자', values: owner, options: ownerOptions, clear: () => changeFilter(setOwner, null) },
@@ -180,7 +182,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const clearFilters = () => { setSeason(null); setProject(null); setFactory(null); setOwner(null); setStage(null); setColor(null); setCategory(null); setSampleStatus(null); setRound(null); setPp(null); setStatuses({}); setProducts(null); setDateFrom(''); setDateTo(''); setQuick('all'); onQueryChange(''); resetPage() }
   const doExport = async (format: 'csv' | 'xlsx') => {
     setExportBusy(true); setExportOpen(false); setExportError('')
-    try { await exportWorkspace(workspace, exportStyles, format, view === 'settlement' ? 'settlement' : tableMode === 'samples' ? 'samples' : tableMode === 'production' ? 'production' : 'overview') } catch (error) { setExportError(error instanceof Error ? error.message : '파일을 다운로드하지 못했습니다.') } finally { setExportBusy(false) }
+    try { await exportWorkspace(workspace, exportStyles, format, view === 'settlement' ? 'settlement' : tableMode === 'samples' ? 'samples' : tableMode === 'production' ? 'production' : 'overview', { projectIds: project }) } catch (error) { setExportError(error instanceof Error ? error.message : '파일을 다운로드하지 못했습니다.') } finally { setExportBusy(false) }
   }
   const quickClick = (value: QuickFilter) => { setQuick(quick === value ? 'all' : value); resetPage() }
   const filteredOrders = rows.reduce((sum, { line }) => sum + (line ? quantityTotal(line.order) : 0), 0)
@@ -194,7 +196,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   }
   return <div className="dashboard-page">
     {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} onRegisterStyle={onRegisterStyle} /></Suspense>}
-    {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={visibleStyles} onClose={() => setTemplateOpen(false)} /></Suspense>}
+    {templateOpen && <Suspense fallback={<p className="muted" role="status">마감 양식을 준비하고 있습니다.</p>}><SettlementTemplateExport workspace={workspace} profile={profile} styles={visibleStyles} initialProjectIds={project} initialSkuKeys={exportStyles.flatMap(style => style.production.map(line => `${style.id}:${line.id}`))} onClose={() => setTemplateOpen(false)} /></Suspense>}
     {imagePreview && <Modal title={imagePreview.alt} wide onClose={() => setImagePreview(null)}><div className="modal-body"><div className="style-image-zoom cutout-background"><PrivateImage attachment={imagePreview.attachment} scope={imageScope} alt={imagePreview.alt}/></div><div className="modal-footer"><button className="button" onClick={() => { onOpenStyle(imagePreview.styleId); setImagePreview(null) }}>{profile.role === 'factory' ? '스타일 상세' : '이미지 관리'}</button><button className="button button-primary" onClick={() => setImagePreview(null)}>닫기</button></div></div></Modal>}
 
     <div className="dashboard-page-heading">
@@ -235,7 +237,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
     {view === 'overview' && projectSummary.length > 0 && <div className="project-overview">
       <div className="section-caption"><span>PROJECT AT A GLANCE</span><span>프로젝트별 입고 현황</span></div>
       <div className="project-cards">{projectSummary.slice(0, 4).map(p => <button className={`project-card ${project?.length === 1 && project[0] === p.id ? 'selected' : ''}`} key={p.id} onClick={() => changeFilter(setProject, project?.length === 1 && project[0] === p.id ? null : [p.id])}>
-        <div className="project-card-top"><span>{p.code ? `${p.code} · ${p.season}` : p.season}</span><ArrowUpRight size={15}/></div><h3>{p.name}</h3><div className="project-card-numbers"><span>{p.count} 스타일</span><strong>{number(p.received)}<small> / {number(p.order)} pcs</small></strong></div><div className="project-progress"><i style={{ width: `${p.order ? Math.min(100, p.received / p.order * 100) : 0}%` }}/></div>
+        <div className="project-card-top"><span>{p.season}</span><ArrowUpRight size={15}/></div><h3 title={projectName(p.id)}>{getProjectIdentity(workspace, p.id).name}</h3>{p.code && <p className="project-card-code" title={p.code}>{p.code}</p>}<div className="project-card-numbers"><span>{p.count} 스타일</span><strong>{number(p.received)}<small> / {number(p.order)} pcs</small></strong></div><div className="project-progress"><i style={{ width: `${p.order ? Math.min(100, p.received / p.order * 100) : 0}%` }}/></div>
       </button>)}</div>
     </div>}
 
@@ -243,13 +245,13 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       <div className="dashboard-table-header">
         <div className="table-heading"><h2>{view === 'settlement' ? '결제 마감 현황' : '스타일 현황'}</h2><span className="count-pill">{number(filteredStyleCount)}</span><span className="table-heading-sub">{number(rows.length)}개 컬러 · {ROLE_LABEL[profile.role]} 조회 범위</span></div>
         <div className="table-actions">{view !== 'settlement' && <div className="view-switch" role="group" aria-label="테이블 보기">{([['styles', '전체'], ['samples', '샘플'], ['production', '메인 생산']] as const).map(([key, label]) => <button key={key} className={tableMode === key ? 'active' : ''} onClick={() => { setTableMode(key); resetPage() }}>{label}</button>)}</div>}
-          <div className="export-menu"><button className="button button-ghost button-small" disabled={exportBusy || !filteredStyles.length} onClick={() => setExportOpen(!exportOpen)} aria-expanded={exportOpen}><ArrowDownToLine size={14}/>{exportBusy ? '파일 생성 중' : '다운로드'}<ChevronDown size={12}/></button>{exportOpen && <div className="dropdown-menu"><button onClick={() => doExport('xlsx')}>Excel 통합 문서 (.xlsx)</button><button onClick={() => doExport('csv')}>CSV 파일 (.csv)</button><p>필터 결과 전체를 내려받습니다.</p></div>}</div>
+          <div className="export-menu"><button className="button button-ghost button-small" disabled={exportBusy || !rows.length} onClick={() => setExportOpen(!exportOpen)} aria-expanded={exportOpen}><ArrowDownToLine size={14}/>{exportBusy ? '파일 생성 중' : '다운로드'}<ChevronDown size={12}/></button>{exportOpen && <div className="dropdown-menu"><button onClick={() => doExport('xlsx')}>Excel 통합 문서 (.xlsx)</button><button onClick={() => doExport('csv')}>CSV 파일 (.csv)</button><p>필터 결과 전체를 내려받습니다.</p></div>}</div>
         </div>
       </div>
       <div className="dashboard-filter-bar">
-        <label className="dashboard-search"><Search size={16}/><input aria-label="스타일 검색" placeholder="스타일, 제품명, 요청사항 검색" value={query} onChange={e => { onQueryChange(e.target.value); resetPage() }}/>{query && <button onClick={() => { onQueryChange(''); resetPage() }} aria-label="검색 초기화"><X size={13}/></button>}</label>
+        <label className="dashboard-search"><Search size={16}/><input aria-label="스타일 검색" placeholder="스타일, 프로젝트 명칭, 제품명 검색" value={query} onChange={e => { onQueryChange(e.target.value); resetPage() }}/>{query && <button onClick={() => { onQueryChange(''); resetPage() }} aria-label="검색 초기화"><X size={13}/></button>}</label>
         <MultiSelectFilter label="시즌 필터" allLabel="전체 시즌" value={season} onChange={value => changeFilter(setSeason, value)} options={optionsFor(seasons)} />
-        <MultiSelectFilter label="프로젝트 필터" allLabel="전체 프로젝트" className="project-select" value={project} onChange={value => changeFilter(setProject, value)} options={workspace.projects.map(item => ({ value: item.id, label: item.code ? `${item.code} · ${item.name}` : item.name }))} />
+        <MultiSelectFilter label="프로젝트 명칭" allLabel="전체 프로젝트 명칭" className="project-select" value={project} onChange={value => changeFilter(setProject, value)} options={projectOptions} />
         <MultiSelectFilter label="공장 필터" allLabel="전체 공장" value={factory} onChange={value => changeFilter(setFactory, value)} options={workspace.factories.map(item => ({ value: item.id, label: item.name }))} />
         <MultiSelectFilter label="제품 필터" allLabel="전체 제품" value={products} onChange={value => changeFilter(setProducts, value)} options={visibleStyles.map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))} />
         <button className={`button button-ghost button-small filter-toggle ${expanded ? 'active' : ''}`} onClick={() => setExpanded(!expanded)} aria-expanded={expanded}><SlidersHorizontal size={14}/>상세 필터{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
@@ -271,18 +273,19 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       {(quick !== 'all' || activeFilterCount > 0 || query) && <div className="active-filter-row"><span><Check size={12}/>{quick === 'delayed' ? '납기 지연' : quick === 'upcoming' ? '7일 이내 예정' : quick === 'approved' ? '컨펌 완료' : quick === 'samples' ? '샘플 진행 중' : quick === 'unpaid' ? '결제 미완료' : '필터 적용 중'}</span><span>{number(filteredStyleCount)}개 스타일 · {number(rows.length)}개 컬러 · 오더 {number(filteredOrders)} pcs</span><button onClick={clearFilters}><X size={12}/>초기화</button></div>}
       {filterChips.some(item => item.values !== null) && <div className="dashboard-filter-chips" aria-label="선택한 필터">{filterChips.filter(item => item.values !== null).map(item => <button key={item.label} type="button" className="dashboard-filter-chip" aria-label={`${item.label} 필터 해제`} title={`${item.label}: ${chipSummary(item)}`} onClick={item.clear}><span>{item.label}: {chipSummary(item)}</span><X size={12}/></button>)}</div>}
       {exportError && <div className="error-message" role="alert">{exportError}</div>}
-      <div className="table-sort-bar"><div className="status-legend"><span><i className="green"/>완료</span><span><i className="blue"/>진행 중</span><span><i className="purple"/>미완료</span><span><i className="red"/>지연</span><span><i className="gray"/>미기재</span><span><i className="dark"/>최종 컨펌</span></div><label className="sort-control"><ArrowDown size={12}/><select aria-label="정렬 기준" value={sort} onChange={e => { setSort(e.target.value as Sort); resetPage() }}><option value="dueAsc">납기 빠른순</option><option value="dueDesc">납기 늦은순</option><option value="updated">최근 수정순</option><option value="code">스타일 품번순</option></select></label></div>
-      <div className="table-wrap"><table className={`data-table styles-table ${productionMode ? 'production-table' : ''}`}><thead><tr><th className="number-cell">NO.</th><th className="style-cell">스타일 / 제품명</th><th>프로젝트 / 시즌</th><th>담당 공장</th><th>컬러</th>{productionMode ? view === 'settlement' ? <><th>세금계산서</th><th className="numeric">청구 금액 (원)</th><th>결제 예정일</th><th>결제 상태</th><th className="numeric">출고 / 입고</th></> : <><th className="numeric">오더 수량</th><th>원·부자재</th><th>GB 테스트</th><th>라벨 발주</th><th>패킹 부자재</th><th>메인 수납</th><th>에이블 검사</th><th className="numeric">실 출고</th><th className="numeric">실 입고</th><th>세금계산서</th></> : <><th>진행 단계</th><th>{tableMode === 'samples' ? '샘플 차수 / 상태' : '샘플 진행'}</th><th>PP 승인</th>{tableMode === 'samples' ? <><th>제작 예정일</th><th>본사 입고일</th></> : <><th className="numeric">오더 수량</th><th className="numeric">입고 수량</th></>}</>}<th>기준 납기일</th><th>담당자</th><th className="arrow-cell"/></tr></thead>
+      <div className="table-sort-bar"><div className="status-legend"><span><i className="green"/>완료</span><span><i className="blue"/>진행 중</span><span><i className="purple"/>미완료</span><span><i className="red"/>지연</span><span><i className="gray"/>미기재</span><span><i className="dark"/>최종 컨펌</span></div><label className="sort-control"><ArrowDown size={12}/><select aria-label="정렬 기준" value={sort} onChange={e => { setSort(e.target.value as Sort); resetPage() }}><option value="dueAsc">납기 빠른순</option><option value="dueDesc">납기 늦은순</option><option value="updated">최근 수정순</option><option value="code">스타일 품번순</option><option value="project">프로젝트 명칭순</option></select></label></div>
+      <div className="table-wrap"><table className={`data-table styles-table ${productionMode ? 'production-table' : ''}`}><thead><tr><th className="number-cell">NO.</th><th className="style-cell">스타일 / 제품명</th><th>프로젝트 명칭 / 코드 / 시즌</th><th>담당 공장</th><th>컬러</th>{productionMode ? view === 'settlement' ? <><th>세금계산서</th><th className="numeric">청구 금액 (원)</th><th>결제 예정일</th><th>결제 상태</th><th className="numeric">출고 / 입고</th></> : <><th className="numeric">오더 수량</th><th>원·부자재</th><th>GB 테스트</th><th>라벨 발주</th><th>패킹 부자재</th><th>메인 수납</th><th>에이블 검사</th><th className="numeric">실 출고</th><th className="numeric">실 입고</th><th>세금계산서</th></> : <><th>진행 단계</th><th>{tableMode === 'samples' ? '샘플 차수 / 상태' : '샘플 진행'}</th><th>PP 승인</th>{tableMode === 'samples' ? <><th>제작 예정일</th><th>본사 입고일</th></> : <><th className="numeric">오더 수량</th><th className="numeric">입고 수량</th></>}</>}<th>기준 납기일</th><th>담당자</th><th className="arrow-cell"/></tr></thead>
       <tbody>{pagedRows.map(({ style, line, color: rowColor }, index) => {
         const latest = style.samples.at(-1)
         const isLate = overdue(line ? { ...style, production: [line] } : style, today)
         const order = line ? quantityTotal(line.order) : scopedLines(style).reduce((sum, p) => sum + quantityTotal(p.order), 0)
         const received = line ? quantityTotal(line.received) : scopedLines(style).reduce((sum, p) => sum + quantityTotal(p.received), 0)
         const shipment = line ? quantityTotal(line.shipped) : 0
+        const projectInfo = getProjectIdentity(workspace, style.projectId)
         return <tr key={`${style.id}:${line?.id || rowColor}`} onClick={() => onOpenStyle(style.id, rowColor)} className={isLate ? 'row-overdue' : ''}>
           <td className="number-cell">{String((currentPage - 1) * pageSize + index + 1).padStart(2, '0')}</td>
           <td className="style-cell"><div className="style-identity">{thumbnail(style, line)}<div><button className="style-code" onClick={e => { e.stopPropagation(); onOpenStyle(style.id, rowColor) }}>{fullStyleSku(style.code, rowColor)}</button><span className="style-name">{style.name}</span></div></div></td>
-          <td><span className="cell-main project-cell" title={projectName(style.projectId)}>{projectName(style.projectId)}</span><span className="cell-sub">{style.season}</span></td>
+          <td className="project-identity-cell"><span className="cell-main project-cell" title={projectInfo.name}>{projectInfo.name}</span><span className="cell-sub project-code" title={projectInfo.code}>{projectInfo.code || '코드 미등록'}</span><span className="cell-sub project-season">{style.season || projectInfo.season}</span></td>
           <td><span className="cell-main">{factoryName(style.factoryId)}</span><span className="cell-sub">{workspace.factories.find(f => f.id === style.factoryId)?.country || '미배정'}</span></td>
           <td><span className="color-tag"><i style={{ background: colorHex(rowColor) }}/>{rowColor || '—'}</span></td>
           {productionMode && line ? view === 'settlement' ? <><td><Badge status={line.invoice}/></td><td className="numeric amount">{number(line.invoiceAmount)}</td><td className={line.paymentDue && line.paymentDue < today && line.paymentStatus !== 'done' ? 'text-danger' : ''}>{shortDate(line.paymentDue)}</td><td><Badge status={line.paymentStatus}/></td><td className="numeric">{number(shipment)}<span className="muted"> / {number(received)}</span></td></> : <><td className="numeric amount">{number(order)}<span className="quantity-unit">pcs</span></td>{(['materials', 'gb', 'labels', 'packing', 'main', 'quality'] as CheckKey[]).map(key => <td key={key}><Badge status={line.checks[key]}/></td>)}<td className="numeric">{number(shipment)}</td><td className="numeric">{number(received)}</td><td><Badge status={line.invoice}/></td></> : <>

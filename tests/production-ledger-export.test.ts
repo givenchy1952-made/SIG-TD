@@ -26,7 +26,8 @@ describe('차수 마감 확정 을지', () => {
     workspace.productionReceipts = []
     const result = buildProductionRunEuljiRows(workspace, [run.id, run.id], actor)
     expect(result.errors).toEqual([])
-    expect(result.rows).toEqual([{ projectCode: 'SIGNIFICANT-2026FY-RPQ-12345', receivedAtISO: '2026-10-25', factory: '확정 당시 공장', colorStyleCode: 'BP06FYDW0101BK', unitCost: 10.25, orderQuantity: 10, receivedQuantity: 4, unit: 'EA', netAmount: 41, owner: '확정 당시 담당자' }])
+    const project = workspace.projects.find(item => item.id === run.snapshot!.projectId)!
+    expect(result.rows).toEqual([{ projectId: project.id, projectName: project.name, season: project.season, projectCode: 'SIGNIFICANT-2026FY-RPQ-12345', receivedAtISO: '2026-10-25', factory: '확정 당시 공장', colorStyleCode: 'BP06FYDW0101BK', unitCost: 10.25, orderQuantity: 10, receivedQuantity: 4, unit: 'EA', netAmount: 41, owner: '확정 당시 담당자' }])
   })
   it('제공된 을지 양식의 단가·금액과 프로젝트·차수 입고를 실제 XLSX에 기록한다', async () => {
     const { workspace, actor, run } = fixture(), result = buildProductionRunEuljiRows(workspace, [run.id], actor)

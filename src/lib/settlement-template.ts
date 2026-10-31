@@ -1,17 +1,20 @@
 import type { Workbook, Worksheet } from 'exceljs'
 import { CHECKS, SIZES, STATUS_LABEL, quantityTotal, type Profile, type Style, type Workspace } from './types'
+import { getProjectIdentity } from './project-identity'
 
 export const MAX_SETTLEMENT_TEMPLATE_BYTES = 10 * 1024 * 1024
 export const MAX_SETTLEMENT_DATA_ROWS = 10000
 type QuantityGroup = 'order' | 'packing' | 'shipped' | 'received'
-type BasicField = 'rowNumber' | 'season' | 'project' | 'factory' | 'owner' | 'styleCode' | 'styleName' | 'colorCode' | 'color' | 'dueDate' | 'confirmDue' | 'shippedAt' | 'receivedAt' | 'invoice' | 'invoiceAmount' | 'paymentDue' | 'paymentStatus' | 'factoryComment' | 'notes'
+type BasicField = 'rowNumber' | 'season' | 'project' | 'projectCode' | 'projectId' | 'factory' | 'owner' | 'styleCode' | 'styleName' | 'colorCode' | 'color' | 'dueDate' | 'confirmDue' | 'shippedAt' | 'receivedAt' | 'invoice' | 'invoiceAmount' | 'paymentDue' | 'paymentStatus' | 'factoryComment' | 'notes'
 export type SettlementFieldKey = BasicField | `${QuantityGroup}.${typeof SIZES[number] | 'total'}` | `check.${typeof CHECKS[number][0]}`
 export type SettlementRow = Record<SettlementFieldKey, string | number>
 interface SettlementField { key: SettlementFieldKey; label: string; aliases: string[] }
 const baseFields: SettlementField[] = [
   { key: 'rowNumber', label: '순번', aliases: ['NO', 'NO.', '번호'] },
   { key: 'season', label: '시즌', aliases: ['시즌년도', '연도', '년도'] },
-  { key: 'project', label: '프로젝트', aliases: ['프로젝트명'] },
+  { key: 'project', label: '프로젝트 명칭', aliases: ['프로젝트', '프로젝트명'] },
+  { key: 'projectCode', label: '프로젝트 코드', aliases: ['프로젝트코드', 'PROJECT CODE'] },
+  { key: 'projectId', label: '프로젝트 ID', aliases: ['프로젝트ID', 'PROJECT ID'] },
   { key: 'factory', label: '공장', aliases: ['공장명', '업체', '업체명', '거래처', '거래처명'] },
   { key: 'owner', label: '담당자', aliases: ['본사담당자'] },
   { key: 'styleCode', label: '스타일 코드 (컬러 제외)', aliases: ['스타일코드', '스타일품번', '모품번'] },
@@ -48,7 +51,7 @@ export function buildSettlementRows(workspace: Workspace, styles: Style[], profi
   if (!profile.approved || !profile.active) return []
   return styles.filter(style => !style.deletedAt && (profile.role !== 'factory' || !!profile.factoryId && style.factoryId === profile.factoryId)).flatMap(style => style.production.map(line => {
     const row = {
-      season: style.season, project: workspace.projects.find(project => project.id === style.projectId)?.name || style.projectId,
+      season: style.season, project: getProjectIdentity(workspace, style.projectId).name, projectCode: getProjectIdentity(workspace, style.projectId).code, projectId: style.projectId,
       factory: workspace.factories.find(factory => factory.id === style.factoryId)?.name || style.factoryId,
       owner: workspace.profiles.find(owner => owner.id === style.ownerId)?.name || style.ownerId,
       styleCode: style.code, styleName: style.name, colorCode: `${style.code}${line.color}`, color: line.color,
@@ -179,6 +182,18 @@ export async function fillSettlementTemplate(template: SettlementTemplate, optio
     const value = rows[row - options.startRow]?.[field]
     // Assign primitive strings, never {formula: ...}; spreadsheet-looking names stay literal.
     sheet.getCell(row, Number(column)).value = value === undefined || value === '' ? null : value
+  }
+  // Keep user-provided columns and their formulas untouched. The independent
+  // guide retains both project identifiers even if the fixed form has one slot.
+  if (rows.some(row => row.projectId || row.projectCode || row.project)) {
+    let name = '프로젝트 안내', suffix = 2
+    while (workbook.getWorksheet(name)) name = `프로젝트 안내 ${suffix++}`
+    const guide = workbook.addWorksheet(name)
+    guide.addRow(['양식 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'])
+    rows.forEach((row, index) => guide.addRow([options.startRow + index, row.project || row.projectCode || '', row.projectCode || '', row.season || '', row.colorCode || row.styleCode || '', row.projectId || '']))
+    guide.columns.forEach((column, index) => { column.width = index === 0 ? 12 : index === 3 ? 18 : 36 })
+    guide.views = [{ state: 'frozen', ySplit: 1 }]
+    guide.autoFilter = `A1:F${rows.length + 1}`
   }
   workbook.calcProperties.fullCalcOnLoad = true
   // ExcelJS otherwise turns its parsed default firstPageNumber=1 into an enabled

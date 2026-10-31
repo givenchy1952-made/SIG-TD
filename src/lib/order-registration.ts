@@ -51,11 +51,26 @@ export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet
     let project: Project | undefined = codeMatches[0]
     if (project && (project.name.trim() !== projectName || project.season.trim() !== season)) throw new Error('A열 프로젝트 코드에 등록된 명칭·시즌이 M·L열과 다릅니다. 기존 프로젝트를 먼저 확인해 주세요.')
     if (!project) {
+      const legacyCodeMatches = workspace.projects.filter(item => !item.code?.trim() && key(item.name) === key(projectCode))
+      if (legacyCodeMatches.length > 1) throw new Error('A열 코드가 명칭으로 들어간 기존 프로젝트가 여러 개입니다. 프로젝트 관리에서 ID와 원본 매핑을 먼저 확인해 주세요.')
+      const legacy = legacyCodeMatches[0]
+      if (legacy && (legacy.name.trim() !== projectName || legacy.season.trim() !== season)) throw new Error('A열 코드가 명칭에 저장된 기존 프로젝트가 있습니다. 프로젝트 관리에서 오더 원본 A·M·L 매핑을 먼저 확인·저장해 주세요. 기존 프로젝트 ID를 유지하며 중복 생성하지 않습니다.')
+      if (legacy) project = legacy
+    }
+    if (!project) {
       // Separate MPQ/RPQ project codes may share a descriptive M name.
       // Only a uniquely matching legacy project with no code can be adopted.
       const matches = workspace.projects.filter(item => !item.code?.trim() && item.name.trim() === projectName && item.season.trim() === season)
       if (matches.length > 1) throw new Error('코드가 없는 동일 명칭·시즌 프로젝트가 여러 개입니다. 프로젝트 관리에서 먼저 구분해 주세요.')
       project = matches[0]
+    }
+    if (!project) {
+      const existingStyles = workspace.styles.filter(style => !style.deletedAt && key(style.code) === key(code))
+      const existing = existingStyles.length === 1 ? existingStyles[0] : undefined
+      const linked = workspace.projects.find(item => item.id === existing?.projectId)
+      const lineIds = new Set(existing?.production.filter(line => line.color === color).map(line => line.id) || [])
+      const linkedSource = existing && workspace.operations?.orderSourceRecords.some(record => record.styleId === existing.id && lineIds.has(record.lineId) && record.rows.some(row => (typeof row.columns.A === 'string' || typeof row.columns.A === 'number') && key(String(row.columns.A)) === key(projectCode)))
+      if (linked && !linked.code?.trim() && (!linked.name.trim() || linkedSource)) throw new Error('기존 스타일의 프로젝트에 코드·명칭 매핑 확인이 필요합니다. 프로젝트 관리에서 기존 ID의 오더 원본 A·M·L 값을 확인·저장한 뒤 다시 등록해 주세요. 프로젝트를 중복 생성하지 않습니다.')
     }
     const plannedProject: RegistrationProject = { id: project?.id || makeId(), code: projectCode, name: projectName, season, expected: project ? { code: project.code || '', name: project.name, season: project.season } : null }
     result.project = plannedProject; result.isNewProject = !project

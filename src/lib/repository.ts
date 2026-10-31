@@ -21,6 +21,7 @@ import { loadProductionConditions } from './production-conditions-repository'
 import { getDemoProductionConditions } from './production-conditions'
 import { loadProductionPoLinks } from './production-po-links-repository'
 import { loadPartialDeliveryPlans } from './partial-deliveries-repository'
+import { loadMaterialReviews } from './material-reviews-repository'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -32,7 +33,7 @@ if (url && key && !configurationError) { try { supabase = createClient(url, key)
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
 function withProductionDefaults(workspace: Workspace): Workspace {
-  const next = { ...workspace, processingUnitPrices: workspace.processingUnitPrices || [], processingPricesAvailable: true, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, partialDeliveryPlans: workspace.partialDeliveryPlans || [], partialDeliveryAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
+  const next = { ...workspace, materialReviewItems: workspace.materialReviewItems || [], materialReviewRounds: workspace.materialReviewRounds || [], materialReviewsAvailable: true, processingUnitPrices: workspace.processingUnitPrices || [], processingPricesAvailable: true, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, partialDeliveryPlans: workspace.partialDeliveryPlans || [], partialDeliveryAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
   const withOrders = { ...next, productionPoContexts: workspace.productionPoContexts || [], productionPoLinksAvailable: true, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
   return { ...withOrders, productionConditions: getDemoProductionConditions(withOrders), productionConditionsAvailable: true }
 }
@@ -67,11 +68,11 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners, processingPrices, productionConditions, productionPoLinks, partialDeliveryPlans] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability'), loadProcessingUnitPrices(supabase), loadProductionConditions(supabase), loadProductionPoLinks(supabase), loadPartialDeliveryPlans(supabase)])
+  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners, processingPrices, productionConditions, productionPoLinks, partialDeliveryPlans, materialReviews] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability'), loadProcessingUnitPrices(supabase), loadProductionConditions(supabase), loadProductionPoLinks(supabase), loadPartialDeliveryPlans(supabase), loadMaterialReviews(supabase)])
   if (approvals.error && !['PGRST202', '42883'].includes(approvals.error.code)) throw approvals.error
   if (importColorOwners.error && !['PGRST202', '42883'].includes(importColorOwners.error.code)) throw importColorOwners.error
   return {
-    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders, ...processingPrices, ...productionConditions, ...productionPoLinks, ...partialDeliveryPlans,
+    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders, ...processingPrices, ...productionConditions, ...productionPoLinks, ...partialDeliveryPlans, ...materialReviews,
     styleImages, styleImagesAvailable, memberWithdrawalAvailable, importColorOwnersAvailable: !importColorOwners.error && importColorOwners.data === true, staffApprovalsAvailable: !approvals.error && approvals.data === true,
     styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),

@@ -140,7 +140,8 @@ test('본사 생산 방식과 내부 검토 기준을 저장하고 컬러·CMT�
   await expect(panel.getByLabel('차수 PO 제목', { exact: true })).toHaveValue(new RegExp(`${CODE}BK`))
   await expect(panel.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/임가공 \(CMT\)/)
   await panel.getByRole('button', { name: '차수 PO 초안 저장 및 연결', exact: true }).click()
-  await expect(detail.getByRole('tab', { name: /^PO/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(detail.getByRole('tab', { name: /생산 조건 협의·승인/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(panel.getByRole('region', { name: '이 차수 PO 발송', exact: true })).toContainText('초안 · 미발송')
   const stored = await snapshot(page)
   expect(stored.productionConditions![0]).toMatchObject({ productionMode: 'cmt', internalUnitCost: 0 })
   expect(stored.productionRuns![0].poId).toBe(stored.operations!.poDispatches[0].id)
@@ -212,6 +213,7 @@ test('승인 조건 변경은 새 차수의 집계 범위를 확인해 연결하
   expect((await snapshot(page)).productionConditions!.find(condition => condition.runId === RUN)!.changeRequests[0].correctingRunId).toBeNull()
   await panel.getByLabel('새 차수 오더 수량 및 집계 범위 확인', { exact: true }).check()
   await panel.getByRole('button', { name: '변경 요청과 새 차수 연결', exact: true }).click()
+  await expect(panel.getByRole('region', { name: '승인 조건 변경 요청 기록', exact: true })).toContainText('재승인 차수: QA 별도 재승인 생산')
   const after = await snapshot(page)
   const originalCondition = after.productionConditions!.find(condition => condition.runId === RUN)!
   expect(originalCondition.approval).toEqual(priorApproval)

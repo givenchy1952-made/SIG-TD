@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { Profile, Style, Workspace } from './types'
 import { quantityTotal, STATUS_LABEL } from './types'
 import { fullStyleSku } from './style-identity'
+import { getProjectIdentity } from './project-identity'
 
 export type SigEuljiKind = 'product' | 'label' | 'embroidery' | 'quality'
 
@@ -10,6 +11,8 @@ export interface SigEuljiRow {
   unitCost: number | null; orderQuantity: number; receivedQuantity: number | null; unit: 'EA' | 'YDS';
   netAmount: number | null; owner: string;
   kind?: Exclude<SigEuljiKind, 'product'>; itemName?: string; note?: string;
+  /** Display metadata goes on a separate sheet; fixed financial cells stay unchanged. */
+  projectId?: string; projectName?: string; season?: string;
 }
 export interface SigEuljiPreview { rows: SigEuljiRow[]; errors: string[] }
 export const MAX_SIG_EULJI_ROWS = 10000
@@ -80,7 +83,8 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
         const orderQuantity = quantityTotal(line.order), receivedQuantity = quantityTotal(line.received)
         if (!Number.isSafeInteger(orderQuantity) || orderQuantity < 0 || orderQuantity > 60_000_000) throw new Error('PO 오더 수량이 올바르지 않습니다.')
         const unitCost = terms!.unitCost!, netAmount = sigEuljiNetAmount(unitCost, receivedQuantity)
-        rows.push({ projectCode: code, receivedAtISO: line.receivedAt, factory: factory!.trim(), colorStyleCode: label, unitCost, orderQuantity, receivedQuantity, unit: terms!.itemType === 'fabric' ? 'YDS' : 'EA', netAmount, owner: owner! })
+        const project = getProjectIdentity(workspace, style.projectId)
+        rows.push({ projectId: project.id, projectName: project.name, season: project.season || style.season, projectCode: code, receivedAtISO: line.receivedAt, factory: factory!.trim(), colorStyleCode: label, unitCost, orderQuantity, receivedQuantity, unit: terms!.itemType === 'fabric' ? 'YDS' : 'EA', netAmount, owner: owner! })
       } catch (error) { errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`) }
     }
   }
@@ -114,6 +118,8 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
     seenStyles.add(selected.id)
     const style = workspace.styles.find(item => item.id === selected.id && !item.deletedAt)
     if (!style) { errors.push('선택한 스타일이 삭제되었거나 현재 조회 범위에 없습니다.'); continue }
+    const project = getProjectIdentity(workspace, style.projectId)
+    const projectMetadata = { projectId: project.id, projectName: project.name, season: project.season || style.season }
     const seenLines = new Set<string>(), selectedLines: typeof style.production = []
     for (const selection of selected.production) {
       const line = style.production.find(item => item.id === selection.id && item.color === selection.color)
@@ -137,7 +143,7 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
         const quality = workspace.productionDetails?.find(item => item.styleId === style.id && item.lineId === line.id)?.quality
         if (!quality?.category) continue
         const unitCost = savedPrice(line.id, quality.category), receivedQuantity = actualQuantity(line)
-        rows.push({ kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: '', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: `품질검사 · ${quality.category}`, note: [`검사 요청 수량 ${quality.quantity}개`, STATUS_LABEL[quality.status], quality.note].filter(Boolean).join(' / ') })
+        rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: '', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: `품질검사 · ${quality.category}`, note: [`검사 요청 수량 ${quality.quantity}개`, STATUS_LABEL[quality.status], quality.note].filter(Boolean).join(' / ') })
       }
     } else {
       const records = workspace.operations?.styleOperations.filter(item => item.styleId === style.id && item.kind === kind && !item.voided) || []
@@ -149,7 +155,7 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
           seenWork.add(key)
           const owner = ownerName(workspace, line.ownerId ?? style.ownerId)!
           const unitCost = savedPrice(line.id, item.id), receivedQuantity = actualQuantity(line)
-          rows.push({ kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: item.name, note: [item.specification, `스타일 공통 작업 요청 수량 ${item.quantity}개`, `로스 수량 ${item.lossQuantity}개`, `가공 완료 수량 ${item.completedQuantity}개`, STATUS_LABEL[item.status], item.note, record.note].filter(Boolean).join(' / ') })
+          rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: item.name, note: [item.specification, `스타일 공통 작업 요청 수량 ${item.quantity}개`, `로스 수량 ${item.lossQuantity}개`, `가공 완료 수량 ${item.completedQuantity}개`, STATUS_LABEL[item.status], item.note, record.note].filter(Boolean).join(' / ') })
         }
       }
     }
@@ -182,6 +188,10 @@ function formulaCell(column: string, row: number, formula: string, cached: strin
 }
 function validateRow(row: SigEuljiRow): void {
   const quantity = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 60_000_000
+  for (const [key, max] of [['projectId', 200], ['projectName', 160], ['season', 30]] as const) {
+    const value = row[key]
+    if (value !== undefined && (typeof value !== 'string' || value.length > max || XML_CONTROL.test(value))) throw new Error('을지 프로젝트 안내의 명칭·코드·시즌을 확인해 주세요.')
+  }
   if (row.kind) {
     if (!['label', 'embroidery', 'quality'].includes(row.kind) || row.projectCode !== '' && !projectCode(row.projectCode) || !optionalOwner(row.owner) || !text(row.colorStyleCode, 62) || row.receivedAtISO !== '' && !validDate(row.receivedAtISO) || row.unit !== 'EA' || !quantity(row.orderQuantity) || row.receivedQuantity !== null && !quantity(row.receivedQuantity) || !text(row.itemName, 4000) || row.note !== undefined && (typeof row.note !== 'string' || row.note.length > 32767 || XML_CONTROL.test(row.note))) throw new Error('가공·품질 을지의 품번·작업명·수량·담당자·날짜를 확인해 주세요.')
     if (row.kind === 'quality' ? row.factory !== '' : row.factory !== (row.kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수')) throw new Error('가공·품질 을지의 업체명을 확인해 주세요.')
@@ -265,6 +275,25 @@ export async function fillSigEuljiTemplate(source: Uint8Array, rows: SigEuljiRow
   let contentTypes = await xml(zip, '[Content_Types].xml')
   contentTypes = contentTypes.replace(/<Override\b[^>]*\bPartName="\/xl\/calcChain\.xml"[^>]*\/>/g, '')
   zip.remove('xl/calcChain.xml')
+  if (rows.some(row => row.projectId || row.projectName || row.season)) {
+    // Add an independent worksheet. The original financial worksheet, table,
+    // printer setup and formulas are exactly the same as a metadata-free export.
+    let sheetId = Math.max(0, ...[...workbook.matchAll(/<sheet\b[^>]*\bsheetId="(\d+)"/g)].map(match => Number(match[1]))) + 1
+    while (zip.file(`xl/worksheets/sheet${sheetId}.xml`)) sheetId++
+    let relation = 'rIdSigProjectGuide', suffix = 1
+    while (relationships.includes(`Id="${relation}"`)) relation = `rIdSigProjectGuide${suffix++}`
+    let guideName = '프로젝트 안내', nameSuffix = 2
+    while (workbook.includes(`name="${guideName}"`)) guideName = `프로젝트 안내 ${nameSuffix++}`
+    const guideRows: (string | number)[][] = [
+      ['을지 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'],
+      ...rows.map((row, index) => [index + 3, row.projectName?.trim() || row.projectCode, row.projectCode, row.season || '', row.colorStyleCode, row.projectId || '']),
+    ]
+    const guideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:F${guideRows.length}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="12" customWidth="1"/><col min="2" max="3" width="38" customWidth="1"/><col min="4" max="5" width="22" customWidth="1"/><col min="6" max="6" width="40" customWidth="1"/></cols><sheetData>${guideRows.map((values, index) => `<row r="${index + 1}">${values.map((value, column) => literalCell(String.fromCharCode(65 + column), index + 1, value)).join('')}</row>`).join('')}</sheetData><autoFilter ref="A1:F${guideRows.length}"/></worksheet>`
+    zip.file(`xl/worksheets/sheet${sheetId}.xml`, guideXml)
+    workbook = workbook.replace('</sheets>', `<sheet name="${guideName}" sheetId="${sheetId}" r:id="${relation}"/></sheets>`)
+    relationships = relationships.replace('</Relationships>', `<Relationship Id="${relation}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${sheetId}.xml"/></Relationships>`)
+    contentTypes = contentTypes.replace('</Types>', `<Override PartName="/xl/worksheets/sheet${sheetId}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`)
+  }
   zip.file('xl/worksheets/sheet1.xml', sheet); zip.file('xl/tables/table1.xml', table); zip.file('xl/workbook.xml', workbook)
   zip.file('xl/_rels/workbook.xml.rels', relationships); zip.file('[Content_Types].xml', contentTypes)
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })

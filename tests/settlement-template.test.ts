@@ -101,6 +101,11 @@ describe('실제 사용자 양식을 위한 설정 가능한 마감 Excel 내보
     expect(sheet.headerFooter).toEqual(original.headerFooter)
     expect(sheet.views).toEqual(original.views)
     expect(workbook.getWorksheet('작성 안내')!.getCell('A1').value).toBe('다른 시트도 보존')
+    const guide = workbook.getWorksheet('프로젝트 안내')!
+    expect(guide.getCell('A2').value).toBe(options.startRow)
+    expect(guide.getCell('B2').value).toBe(rows[0].project)
+    expect(guide.getCell('C2').value).toBe(rows[0].projectCode)
+    expect(guide.getCell('F2').value).toBe(rows[0].projectId)
     // ExcelJS writes calcPr but does not read it back; inspect the actual XLSX XML.
     const archive = await JSZip.loadAsync(output)
     expect(await archive.file('xl/workbook.xml')!.async('string')).toContain('fullCalcOnLoad="1"')
