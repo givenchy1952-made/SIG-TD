@@ -13,7 +13,7 @@ const baseFields: SettlementField[] = [
   { key: 'rowNumber', label: '순번', aliases: ['NO', 'NO.', '번호'] },
   { key: 'season', label: '시즌', aliases: ['시즌년도', '연도', '년도'] },
   { key: 'project', label: '프로젝트 명칭', aliases: ['프로젝트', '프로젝트명'] },
-  { key: 'projectCode', label: '프로젝트 코드', aliases: ['프로젝트코드', 'PROJECT CODE'] },
+  { key: 'projectCode', label: '예산 관리 코드 (A열)', aliases: ['프로젝트 코드', '프로젝트코드', 'PROJECT CODE', '예산 관리 코드'] },
   { key: 'projectId', label: '프로젝트 ID', aliases: ['프로젝트ID', 'PROJECT ID'] },
   { key: 'factory', label: '공장', aliases: ['공장명', '업체', '업체명', '거래처', '거래처명'] },
   { key: 'owner', label: '담당자', aliases: ['본사담당자'] },
@@ -189,8 +189,8 @@ export async function fillSettlementTemplate(template: SettlementTemplate, optio
     let name = '프로젝트 안내', suffix = 2
     while (workbook.getWorksheet(name)) name = `프로젝트 안내 ${suffix++}`
     const guide = workbook.addWorksheet(name)
-    guide.addRow(['양식 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'])
-    rows.forEach((row, index) => guide.addRow([options.startRow + index, row.project || row.projectCode || '', row.projectCode || '', row.season || '', row.colorCode || row.styleCode || '', row.projectId || '']))
+    guide.addRow(['양식 행', '프로젝트 명칭', '예산 관리 코드 (A열)', '시즌', '스타일코드', '프로젝트 ID'])
+    rows.forEach((row, index) => guide.addRow([options.startRow + index, row.project || '프로젝트 명칭 미등록', row.projectCode || '', row.season || '', row.colorCode || row.styleCode || '', row.projectId || '']))
     guide.columns.forEach((column, index) => { column.width = index === 0 ? 12 : index === 3 ? 18 : 36 })
     guide.views = [{ state: 'frozen', ySplit: 1 }]
     guide.autoFilter = `A1:F${rows.length + 1}`

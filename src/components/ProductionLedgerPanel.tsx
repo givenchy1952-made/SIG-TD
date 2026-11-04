@@ -6,7 +6,7 @@ import { allocateProductionReceipt, finalizeProductionRun, saveProductionRun, vo
 import { buildProductionRunEuljiRows } from '../lib/production-ledger-export'
 import { fillSigEuljiTemplate, loadBundledSigEuljiTemplate } from '../lib/sig-eulji'
 import { message } from '../lib/utils'
-import { getHistoricalProjectIdentity, projectFilterOptions } from '../lib/project-identity'
+import { getHistoricalProjectIdentity, getProjectIdentity, projectFilterOptions } from '../lib/project-identity'
 import { hasProductionRunStartProof, type SupplierOrderFields } from '../lib/supplier-orders'
 import { getProductionCondition } from '../lib/production-conditions'
 import MultiSelectFilter from './MultiSelectFilter'
@@ -32,18 +32,16 @@ function SizeInputs({ value, onChange, disabled, label }: { value: Quantities; o
 }
 
 export default function ProductionLedgerPanel({ workspace, style, actor, onChanged, onDirtyChange, onOpenPO }: ProductionLedgerPanelProps) {
-  const [selectedId, setSelectedId] = useState(''), [projectFilter, setProjectFilter] = useState('')
-  const [codeFilter, setCodeFilter] = useState<string[] | null>(null), [priceDirty, setPriceDirty] = useState(false)
+  const [selectedId, setSelectedId] = useState(''), [projectFilter, setProjectFilter] = useState<string[] | null>(null)
+  const [priceDirty, setPriceDirty] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null), [receiptDraft, setReceiptDraft] = useState<ReceiptDraft | null>(null)
   const [reason, setReason] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false), [confirmClose, setConfirmClose] = useState(false), [closingVersion, setClosingVersion] = useState(0)
   const allRuns = (workspace.productionRuns || []).filter(run => run.styleId === style.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.round - left.round)
   const runProjectIdentity = (run: ProductionRun) => getHistoricalProjectIdentity(workspace, run.projectId, { name: workspace.supplierProductionOrders?.find(order => order.runId === run.id)?.projectName, code: run.snapshot?.projectCode || run.projectCode })
   const historicalProjects = [...workspace.projects, ...allRuns.filter(run => !workspace.projects.some(project => project.id === run.projectId)).map(run => { const identity = runProjectIdentity(run); return { id: run.projectId, name: identity.name, code: identity.code, season: identity.season } })]
-  const historicalProjectOptions = projectFilterOptions({ projects: historicalProjects })
-  const runProjectCode = (run: ProductionRun) => run.snapshot?.projectCode ?? run.projectCode
-  const codeOptions = [...new Set(allRuns.map(runProjectCode))].sort((left, right) => left.localeCompare(right)).map(value => ({ value, label: value || '프로젝트 코드 미입력' }))
-  const filtered = allRuns.filter(run => (!projectFilter || run.projectId === projectFilter) && (codeFilter === null || codeFilter.includes(runProjectCode(run))))
+  const historicalProjectOptions = projectFilterOptions({ ...workspace, projects: historicalProjects })
+  const filtered = allRuns.filter(run => projectFilter === null || projectFilter.includes(run.snapshot?.projectId || run.projectId))
   const selected = filtered.find(run => run.id === selectedId) || (!selectedId ? filtered[0] : undefined)
   const line = style.production.find(item => item.id === (draft?.lineId || selected?.lineId))
   const receipts = (workspace.productionReceipts || []).filter(item => item.runId === selected?.id).sort((left, right) => right.receivedAt.localeCompare(left.receivedAt) || right.createdAt.localeCompare(left.createdAt))
@@ -84,6 +82,7 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
   }
   async function save() {
     if (!draft || stale) return
+    if ((!draft.version || draft.data.projectId !== draftRun?.projectId) && !getProjectIdentity(workspace, draft.data.projectId).hasOfficialName) { setError('생산 차수를 등록하려면 M열의 프로젝트 명칭을 먼저 등록·확인해 주세요.'); return }
     const value = draft.cost.trim()
     if (value && (!/^\d+(\.\d{1,2})?$/.test(value) || Number(value) > 1_000_000_000)) { setError('차수 단가는 미입력 또는 0~1,000,000,000의 소수 둘째 자리까지 입력해 주세요.'); return }
     const id = draft.id
@@ -96,7 +95,7 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
     try {
       const bytes = await fillSigEuljiTemplate(await loadBundledSigEuljiTemplate(), preview.rows)
       const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })), anchor = document.createElement('a')
-      anchor.href = url; anchor.download = `SIG_을지_${run.projectCode}_${run.round}차_확정.xlsx`.replace(/[\\/:*?"<>|]/g, '_'); document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+      anchor.href = url; anchor.download = `SIG_을지_${runProjectIdentity(run).name}_${run.round}차_확정.xlsx`.replace(/[\\/:*?"<>|]/g, '_'); document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000)
       setNotice('확정 당시 단가·입고 수량·업체·담당자로 작성한 을지를 다운로드했습니다.')
     } catch (failure) { setError(message(failure)) } finally { setBusy(false) }
   }
@@ -105,18 +104,16 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
     {workspace.productionLedgerAvailable !== true ? <div className="error-message" role="status">관리자가 007_production_ledger.sql을 적용하면 생산 차수별 단가·입고·마감 확정을 사용할 수 있습니다.</div> : <>
       <p className="ledger-help">기존 메인 생산의 누적 수량과 별도로 기록합니다. 실제 입고를 차수에 한 번만 입력해 주세요. 마감 확정 후에는 해당 차수의 단가·입고·마감 금액을 변경할 수 없습니다.</p>{workspace.productionPoLinksAvailable === true && onOpenPO && <button type="button" className="button" disabled={changing} onClick={onOpenPO}>PO 연결 확인으로 이동</button>}
       {error && <div className="error-message" role="alert">{error}</div>}{notice && <div className="success-message" role="status">{notice}</div>}
-      <div className="ledger-layout"><aside className="ledger-runs"><label className="field"><span className="field-label">생산 차수 프로젝트</span><select className="select" aria-label="생산 차수 프로젝트 필터" value={projectFilter} disabled={changing} onChange={event => { setProjectFilter(event.target.value); setSelectedId(''); clearMessages() }}><option value="">전체 프로젝트</option>{historicalProjectOptions.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
-        <div className="field"><span className="field-label">프로젝트 코드</span><MultiSelectFilter label="생산 차수 프로젝트 코드 필터" allLabel="전체 프로젝트 코드" options={codeOptions} value={codeFilter} disabled={changing} onChange={value => { setCodeFilter(value); setSelectedId(''); clearMessages() }}/></div>
-        {codeFilter !== null && <p className="ledger-help" aria-label="선택한 차수 프로젝트 코드">선택 코드: {codeFilter.length ? codeFilter.map(code => code || '프로젝트 코드 미입력').join(', ') : '선택 없음'}</p>}
-        {(projectFilter || codeFilter !== null) && <button type="button" className="button" disabled={changing} onClick={() => { setProjectFilter(''); setCodeFilter(null); setSelectedId(''); clearMessages() }}>차수 필터 초기화</button>}
+      <div className="ledger-layout"><aside className="ledger-runs"><div className="field"><span className="field-label">프로젝트 명칭</span><MultiSelectFilter label="생산 차수 프로젝트 명칭 필터" allLabel="전체 프로젝트 명칭" options={historicalProjectOptions} value={projectFilter} disabled={changing} onChange={value => { setProjectFilter(value); setSelectedId(''); clearMessages() }}/></div>
+        {projectFilter !== null && <p className="ledger-help" aria-label="선택한 차수 프로젝트 명칭">선택 명칭: {projectFilter.length ? projectFilter.map(id => historicalProjectOptions.find(item => item.value === id)?.label || '프로젝트 명칭 미등록').join(', ') : '선택 없음'}</p>}
+        {projectFilter !== null && <button type="button" className="button" disabled={changing} onClick={() => { setProjectFilter(null); setSelectedId(''); clearMessages() }}>차수 필터 초기화</button>}
         {!filtered.length && <p className="ledger-empty">아직 등록된 생산 차수가 없습니다.</p>}
         {filtered.map(run => <button type="button" className={`ledger-run ${selected?.id === run.id && !draft ? 'active' : ''}`} key={run.id} disabled={changing} onClick={() => { setSelectedId(run.id); clearMessages() }}><span>{runProjectIdentity(run).label}</span><strong>{run.round}차 · {run.name}</strong><small>{style.production.find(item => item.id === run.lineId)?.color || ''} / {money(quantityTotal(run.order))} {run.itemType === 'fabric' ? 'YDS' : 'EA'}</small><small>{run.closedAt ? '마감 확정' : '마감 전'} · {run.unitCost === null && referencePrice(run) !== null ? '본사 검토 단가' : '단가'} {referencePrice(run) === null ? '미입력' : `${money(referencePrice(run)!)}원`}</small></button>)}
       </aside><div className="ledger-content">
         {draft ? <section className="ledger-card" aria-label="생산 차수 편집"><h3>{draft.version ? '생산 차수 수정' : '생산 차수 등록'}</h3>{stale && <div className="error-message" role="alert">다른 사용자가 차수를 변경했습니다. 편집을 취소하고 최신 내용을 확인해 주세요.</div>}
           <div className="form-grid"><label className="field"><span className="field-label">차수명</span><input className="input" aria-label="생산 차수명" value={draft.data.name} maxLength={120} disabled={busy} onChange={event => update({ name: event.target.value })}/></label>
           <label className="field"><span className="field-label">생산 컬러</span><select className="select" aria-label="생산 차수 컬러" value={draft.lineId} disabled={busy || draft.version > 0} onChange={event => setDraft(current => current ? { ...current, lineId: event.target.value } : null)}>{style.production.map(item => <option key={item.id} value={item.id}>{item.color}</option>)}</select></label>
-          <label className="field"><span className="field-label">프로젝트</span><select className="select" aria-label="생산 차수 프로젝트" value={draft.data.projectId} disabled={busy} onChange={event => update({ projectId: event.target.value, projectCode: workspace.projects.find(item => item.id === event.target.value)?.code || '' })}><option value="">프로젝트 선택</option>{projectFilterOptions(workspace).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-          <label className="field"><span className="field-label">프로젝트 코드</span><input className="input" aria-label="생산 차수 프로젝트 코드" value={draft.data.projectCode} maxLength={120} disabled={busy} onChange={event => update({ projectCode: event.target.value })}/></label>
+          <label className="field"><span className="field-label">프로젝트 명칭</span><select className="select" aria-label="생산 차수 프로젝트 명칭" value={draft.data.projectId} disabled={busy} onChange={event => update({ projectId: event.target.value, projectCode: workspace.projects.find(item => item.id === event.target.value)?.code || '' })}><option value="">프로젝트 명칭 선택</option>{projectFilterOptions(workspace).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <label className="field"><span className="field-label">본사 요청 납기일</span><input className="input" type="date" aria-label="생산 차수 요청 납기일" value={draft.data.expectedDue} disabled={busy} onChange={event => update({ expectedDue: event.target.value })}/></label>
           <label className="field"><span className="field-label">연결 PO</span><select className="select" aria-label="생산 차수 PO" value={draft.data.poId || ''} disabled={busy || workspace.productionPoLinksAvailable === true} onChange={event => update({ poId: event.target.value || null })}><option value="">미연결 · 생산 조건 협의·승인에서 확인 후 연결</option>{(workspace.operations?.poDispatches || []).filter(po => po.styleId === style.id && !po.voided).map(po => <option key={po.id} value={po.id}>{po.subject} · {po.status === 'sent' ? '발송됨' : '미발송'}</option>)}</select>{workspace.productionPoLinksAvailable === true && <small>차수를 저장한 뒤 생산 조건 협의·승인에서 발송 문서와 수량을 확인해 연결합니다.</small>}</label>
           <label className="field"><span className="field-label">{priceLocked ? '최종 승인 단가 (KRW)' : '차수 단가 (KRW)'}</span><input className="input" type="number" aria-label="생산 차수 단가" min="0" max="1000000000" step="0.01" value={draft.cost} placeholder={priceLocked ? '최종 승인 전 미확정' : '빈칸은 미입력'} disabled={busy || priceDirty || priceLocked} onChange={event => setDraft(current => current ? { ...current, cost: event.target.value } : null)}/>{priceLocked && <small>{draft.version ? '아래 본사 검토 단가 입력에서 저장하면 최종 승인 시 생산 단가가 확정됩니다.' : '차수를 먼저 저장하면 이 화면에서 생산 방식과 본사 검토 단가를 입력할 수 있습니다.'}</small>}</label>
@@ -127,7 +124,7 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
           <label className="field"><span className="field-label">생산 차수 변경 사유</span><input className="input" aria-label="생산 차수 변경 사유" value={reason} maxLength={1000} disabled={busy} onChange={event => setReason(event.target.value)}/></label>
           <div className="ledger-actions"><button type="button" className="button" disabled={busy || priceDirty} onClick={() => { setDraft(null); clearMessages() }}><X size={13}/>차수 편집 취소</button><button type="button" className="button button-primary" disabled={busy || priceDirty || stale || reason.trim().length < 2 || !draft.data.projectId || !draft.lineId || !draft.data.name.trim()} onClick={() => void save()}><Save size={13}/>차수 저장</button></div>
         </section> : selected ? <>
-          <section className="ledger-card"><div className="section-heading"><div><h3>{selected.round}차 · {selected.name}{selected.closedAt && <LockKeyhole size={14}/>}</h3><p className="muted">{selected.projectCode} · {line?.color} · {selected.factoryNameSnapshot} · 담당 {selected.ownerNameSnapshot || '미지정'}</p></div><div className="ledger-actions">{selected.closedAt ? <><button type="button" className="button" disabled={changing} onClick={() => begin(undefined, selected)}><Plus size={13}/>정정 차수 추가</button><button type="button" className="button" disabled={changing} onClick={() => void download(selected)}><Download size={13}/>확정 을지 다운로드</button></> : <button type="button" className="button" disabled={changing} onClick={() => begin(selected)}><Pencil size={13}/>차수 수정</button>}</div></div>
+          <section className="ledger-card"><div className="section-heading"><div><h3>{selected.round}차 · {selected.name}{selected.closedAt && <LockKeyhole size={14}/>}</h3><p className="muted">프로젝트 명칭: {runProjectIdentity(selected).name} · 시즌: {runProjectIdentity(selected).season || '미등록'}</p><p className="muted">{line?.color} · {selected.factoryNameSnapshot} · 담당 {selected.ownerNameSnapshot || '미지정'}</p></div><div className="ledger-actions">{selected.closedAt ? <><button type="button" className="button" disabled={changing} onClick={() => begin(undefined, selected)}><Plus size={13}/>정정 차수 추가</button><button type="button" className="button" disabled={changing} onClick={() => void download(selected)}><Download size={13}/>확정 을지 다운로드</button></> : <button type="button" className="button" disabled={changing} onClick={() => begin(selected)}><Pencil size={13}/>차수 수정</button>}</div></div>
             <div className="ledger-summary"><span>오더 수량<strong>{money(quantityTotal(selected.order))}</strong></span><span>차수 실입고<strong>{money(selected.snapshot?.receivedQuantity ?? received)}</strong></span><span>{selected.unitCost === null && workspace.productionConditionsAvailable === true ? '차수 단가 · 본사 검토' : '차수 단가'}<strong>{referencePrice(selected) === null ? '미입력' : `${money(selected.snapshot?.unitCost ?? referencePrice(selected)!)}원`}</strong></span><span>금액 · 부가세 제외<strong>{selected.snapshot ? `${money(selected.snapshot.netAmount)}원` : selected.unitCost === null ? '미입력' : `${money(Math.round(selected.unitCost * 100) * received / 100)}원`}</strong></span></div>
             <p className="ledger-help">본사 요청 납기 {selected.expectedDue || '미입력'} · {selected.poId ? 'PO 연결됨' : 'PO 미연결'}{selected.closedAt ? ` · ${time(selected.closedAt)} 마감 확정` : ' · 마감 전'}</p>
             {!selected.closedAt && !started && <p className="ledger-help">생산 조건 협의·승인에서 업체의 납기·단가 회신을 검토하고 본사가 최종 승인하면 실입고와 마감을 기록할 수 있습니다.</p>}

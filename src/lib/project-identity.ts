@@ -1,12 +1,14 @@
 import type { Project, Style, Workspace } from './types'
+import type { ProductionProjectNameFields } from './production-project-names-repository'
 
 export type ProjectSelection = readonly string[] | null
-type ProjectWorkspace = Pick<Workspace, 'projects'>
+type ProjectWorkspace = Pick<Workspace, 'projects'> & Partial<Pick<Workspace, 'styles' | 'operations'>> & ProductionProjectNameFields
 
 export interface ProjectIdentity {
   id: string
-  /** The official project name, with its existing code as the legacy fallback. */
+  /** M-column production name. Budget codes never become a production name. */
   name: string
+  hasOfficialName: boolean
   code: string
   season: string
   label: string
@@ -15,15 +17,37 @@ export interface ProjectIdentity {
 
 const clean = (value: string | null | undefined) => (value || '').trim()
 const codeKey = (value: string) => clean(value).toLocaleUpperCase('en-US')
+export const PROJECT_NAME_MISSING = '프로젝트 명칭 미등록'
+const isBudgetName = (name: string, code: string) => !!name && (!!code && codeKey(name) === codeKey(code) || /^SIGNIFICANT-\d{4}[A-Z]*-(?:MPQ|RPQ|MOQ|OPQ)-\d+$/i.test(name))
+const excelError = /^#(?:REF!|NAME\?|VALUE!|DIV\/0!|N\/A|NUM!|NULL!|SPILL!|CALC!|GETTING_DATA)$/i
+const validProductionName = (name: string, code: string) => !!name && name.length <= 160 && !/[\x00-\x1f\x7f]/.test(name) && !excelError.test(name) && !isBudgetName(name, code) && name !== PROJECT_NAME_MISSING
 
-/** Read-only identity lookup. Style names and imported free text never become
- * display names until an administrator explicitly saves project metadata. */
+/** Read-only identity lookup. A is retained for internal budgeting only. A
+ * linked, unanimous A/M/L source may repair a legacy blank/code-as-name display
+ * without changing the stored project ID, metadata or style relationships. */
 export function getProjectIdentity(workspace: ProjectWorkspace, projectId: string): ProjectIdentity {
   const project = workspace.projects.find(item => item.id === projectId)
-  const code = clean(project?.code), officialName = clean(project?.name), season = clean(project?.season)
-  const name = officialName || code || '프로젝트 미지정'
-  const label = code && codeKey(code) !== codeKey(name) ? `${name} · ${code}` : name
-  return { id: projectId, name, code, season, label, searchText: `${officialName} ${code} ${season}`.toLocaleLowerCase() }
+  const code = clean(project?.code)
+  let officialName = clean(project?.name), season = clean(project?.season)
+  const sourceBudgetName = (name: string) => !code && !!name && !!workspace.operations?.orderSourceRecords.some(record => record.rows.some(row => typeof row.columns.A === 'string' && codeKey(row.columns.A) === codeKey(name)))
+  if (!validProductionName(officialName, code) || sourceBudgetName(officialName)) {
+    const projected = workspace.productionProjectNames?.find(item => item.projectId === projectId)
+    const projectedName = clean(projected?.name), projectedSeason = clean(projected?.season)
+    if (project && validProductionName(projectedName, code) && !sourceBudgetName(projectedName)
+      && projectedSeason.length <= 30 && !/[\x00-\x1f\x7f]/.test(projectedSeason)
+      && (!season || !projectedSeason || season === projectedSeason)) {
+      officialName = projectedName; season ||= projectedSeason
+    }
+  }
+  // The scoped RPC projection avoids repeatedly scanning all original orders
+  // in production lists. Older servers still use the existing HQ-only repair.
+  if ((!validProductionName(officialName, code) || sourceBudgetName(officialName)) && workspace.styles && workspace.operations?.orderSourceRecords.length) {
+    const suggestion = buildProjectMappingSuggestions({ projects: workspace.projects, styles: workspace.styles, operations: workspace.operations }).find(item => item.projectId === projectId && ['ready', 'unchanged'].includes(item.status))
+    if (suggestion) { officialName = clean(suggestion.proposed.name); season ||= clean(suggestion.proposed.season) }
+  }
+  const hasOfficialName = validProductionName(officialName, code) && !sourceBudgetName(officialName)
+  const name = hasOfficialName ? officialName : PROJECT_NAME_MISSING
+  return { id: projectId, name, hasOfficialName, code, season, label: name, searchText: hasOfficialName ? officialName.toLocaleLowerCase() : '' }
 }
 
 /** A scoped historical order can already contain its official project name and
@@ -31,7 +55,12 @@ export function getProjectIdentity(workspace: ProjectWorkspace, projectId: strin
  * Reuse only those existing fields; never expand the workspace's project scope. */
 export function getHistoricalProjectIdentity(workspace: ProjectWorkspace, projectId: string, snapshot: { name?: string; code?: string; season?: string }): ProjectIdentity {
   const current = workspace.projects.find(project => project.id === projectId)
-  if (current) return getProjectIdentity({ projects: [{ ...current, code: clean(current.code) || clean(snapshot.code) }] }, projectId)
+  if (current) {
+    const identity = getProjectIdentity(workspace, projectId)
+    if (identity.hasOfficialName) return { ...identity, code: identity.code || clean(snapshot.code) }
+    const historical = getProjectIdentity({ projects: [{ ...current, name: clean(snapshot.name), code: clean(current.code) || clean(snapshot.code), season: identity.season || clean(snapshot.season) }] }, projectId)
+    return historical.hasOfficialName ? historical : { ...identity, code: identity.code || clean(snapshot.code) }
+  }
   return getProjectIdentity({ projects: [{ id: projectId, name: clean(snapshot.name), code: clean(snapshot.code), season: clean(snapshot.season) }] }, projectId)
 }
 
@@ -39,14 +68,16 @@ export function getHistoricalProjectIdentity(workspace: ProjectWorkspace, projec
 export function projectFilterOptions(workspace: ProjectWorkspace, projects: readonly Project[] = workspace.projects): { value: string; label: string }[] {
   const choices = [...new Map(projects.map(project => [project.id, project])).values()]
     .map(project => getProjectIdentity(workspace, project.id))
-  const labelCounts = new Map<string, number>()
-  choices.forEach(item => labelCounts.set(item.label, (labelCounts.get(item.label) || 0) + 1))
+  const nameCounts = new Map<string, number>(), labelCounts = new Map<string, number>()
+  choices.forEach(item => nameCounts.set(item.name, (nameCounts.get(item.name) || 0) + 1))
+  const labels = choices.map(item => (nameCounts.get(item.name) || 0) > 1 && item.season ? `${item.name} · 시즌 ${item.season}` : item.name)
+  labels.forEach(label => labelCounts.set(label, (labelCounts.get(label) || 0) + 1))
   const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
-  return choices.map(item => ({
+  return choices.map((item, index) => ({
     value: item.id,
     // An entire ID is intentionally retained when metadata cannot distinguish
     // projects; a shared UUID suffix would otherwise still be ambiguous.
-    label: (labelCounts.get(item.label) || 0) > 1 ? `${item.label} · ID ${item.id}` : item.label,
+    label: (labelCounts.get(labels[index]) || 0) > 1 ? `${labels[index]} · ID ${item.id}` : labels[index],
   })).sort((left, right) => collator.compare(left.label, right.label) || left.value.localeCompare(right.value))
 }
 
@@ -60,7 +91,7 @@ export function filterStylesByProjects<T extends Pick<Style, 'projectId'>>(style
 
 export function compareProjectIds(workspace: ProjectWorkspace, leftId: string, rightId: string): number {
   const left = getProjectIdentity(workspace, leftId), right = getProjectIdentity(workspace, rightId)
-  return left.name.localeCompare(right.name, 'ko-KR', { numeric: true }) || left.code.localeCompare(right.code, 'ko-KR', { numeric: true }) || left.id.localeCompare(right.id)
+  return left.name.localeCompare(right.name, 'ko-KR', { numeric: true }) || left.season.localeCompare(right.season, 'ko-KR', { numeric: true }) || left.id.localeCompare(right.id)
 }
 
 export interface ProjectMappingSource { styleId: string; lineId: string; rowNumber: number; fileName: string }
@@ -73,7 +104,6 @@ export interface ProjectMappingSuggestion {
   reasons: string[]
 }
 interface SourceMetadata { code: string; name: string; season: string; source: ProjectMappingSource; error?: string }
-const excelError = /^#(?:REF!|NAME\?|VALUE!|DIV\/0!|N\/A|NUM!|NULL!|SPILL!|CALC!|GETTING_DATA)$/i
 
 function sourceText(value: unknown, limit: number): string | null {
   if (value == null) return ''

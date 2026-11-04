@@ -53,7 +53,7 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
   const rows: SigEuljiRow[] = [], errors: string[] = []
   const profile = workspace.profiles.find(item => item.id === suppliedProfile.id)
   if (!profile?.approved || !profile.active || profile.role === 'factory') return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
-  if (workspace.settlementTermsAvailable !== true) errors.push('을지 단가·프로젝트 코드 저장 기능을 먼저 설정해 주세요. 관리자에게 004_settlement_terms.sql 적용을 요청하세요.')
+  if (workspace.settlementTermsAvailable !== true) errors.push('본사 정산용 을지 단가·예산 관리 코드 저장 기능을 먼저 설정해 주세요. 관리자에게 004_settlement_terms.sql 적용을 요청하세요.')
   const selectedIds = new Set<string>()
   for (const selected of styles) {
     if (selectedIds.has(selected.id)) { errors.push('내보낼 스타일이 중복되었습니다.'); continue }
@@ -285,8 +285,8 @@ export async function fillSigEuljiTemplate(source: Uint8Array, rows: SigEuljiRow
     let guideName = '프로젝트 안내', nameSuffix = 2
     while (workbook.includes(`name="${guideName}"`)) guideName = `프로젝트 안내 ${nameSuffix++}`
     const guideRows: (string | number)[][] = [
-      ['을지 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'],
-      ...rows.map((row, index) => [index + 3, row.projectName?.trim() || row.projectCode, row.projectCode, row.season || '', row.colorStyleCode, row.projectId || '']),
+      ['을지 행', '프로젝트 명칭', '예산 관리 코드 (A열)', '시즌', '스타일코드', '프로젝트 ID'],
+      ...rows.map((row, index) => [index + 3, row.projectName?.trim() || '프로젝트 명칭 미등록', row.projectCode, row.season || '', row.colorStyleCode, row.projectId || '']),
     ]
     const guideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:F${guideRows.length}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="12" customWidth="1"/><col min="2" max="3" width="38" customWidth="1"/><col min="4" max="5" width="22" customWidth="1"/><col min="6" max="6" width="40" customWidth="1"/></cols><sheetData>${guideRows.map((values, index) => `<row r="${index + 1}">${values.map((value, column) => literalCell(String.fromCharCode(65 + column), index + 1, value)).join('')}</row>`).join('')}</sheetData><autoFilter ref="A1:F${guideRows.length}"/></worksheet>`
     zip.file(`xl/worksheets/sheet${sheetId}.xml`, guideXml)

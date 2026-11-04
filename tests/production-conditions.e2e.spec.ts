@@ -119,6 +119,7 @@ test('발주 거절은 생산 시작을 차단하고 다른 업체에는 발주�
   await panel.getByRole('button', { name: '발주 거절', exact: true }).click()
   await panel.getByLabel('생산 조건 변경 사유', { exact: true }).fill('QA 납기 협의 불가로 발주 거절')
   await panel.getByRole('button', { name: '발주 거절 확정', exact: true }).click()
+  await expect(panel.getByRole('region', { name: '본사 최종 생산 조건 검토', exact: true })).not.toBeVisible()
   const stored = await snapshot(page)
   expect(stored.productionConditions![0].status).toBe('rejected')
   expect(stored.supplierProductionOrders![0].startedAt).toBeNull()

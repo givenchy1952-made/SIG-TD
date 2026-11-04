@@ -85,7 +85,7 @@ test('본사 단가를 저장하고 필터한 컬러만 실제 을지 양식의 
   await fixture(page)
   const before = await stored(page), detail = await openTerms(page)
   await editTerms(detail, '100.25')
-  await expect(detail.getByLabel('을지 프로젝트 코드', { exact: true })).toHaveValue(PROJECT)
+  await expect(detail.getByLabel('을지 예산 관리 코드', { exact: true })).toHaveValue(PROJECT)
   await saveTerms(detail)
   const snapshot = await stored(page)
   expect(snapshot.settlementTerms?.[0]).toMatchObject({ unitCost: 100.25, projectCode: PROJECT, itemType: 'product', version: 1 })

@@ -56,7 +56,7 @@ describe('을지 프로젝트 명칭·품번 선택 범위', () => {
     expect(settlementSkuOptions(workspace, [style], [c.id])).toEqual([])
     expect(selectSettlementStyles(workspace, [style], [c.id], [choices[0].key])).toEqual([])
   })
-  it('다른 양식의 명칭·코드·ID 열을 구분하고 명칭이 없으면 기존 코드로 표시한다', () => {
+  it('다른 양식의 명칭·코드·ID 열을 구분하고 명칭이 없으면 등록 안내로 표시한다', () => {
     const { workspace, admin, styles, a } = fixture()
     const before = structuredClone(workspace)
     const [row] = buildSettlementRows(workspace, [styles[0]], admin)
@@ -64,7 +64,7 @@ describe('을지 프로젝트 명칭·품번 선택 범위', () => {
     expect(autoMapSettlementColumns([{ column: 1, letter: 'A', header: '프로젝트 명칭' }, { column: 2, letter: 'B', header: '프로젝트 코드' }, { column: 3, letter: 'C', header: '프로젝트 ID' }])).toEqual({ 1: 'project', 2: 'projectCode', 3: 'projectId' })
     expect(workspace).toEqual(before)
     a.name = ''
-    expect(buildSettlementRows(workspace, [styles[0]], admin)[0].project).toBe(a.code)
+    expect(buildSettlementRows(workspace, [styles[0]], admin)[0].project).toBe('프로젝트 명칭 미등록')
   })
   it('프로젝트 명칭·코드 정렬은 원본 순서와 재무 값을 변경하지 않는다', () => {
     const rows = [{ projectId: 'b', projectName: '가 프로젝트', projectCode: 'Z-CODE', colorStyleCode: 'STYLEBK', netAmount: 125 }, { projectId: 'a', projectName: '나 프로젝트', projectCode: 'A-CODE', colorStyleCode: 'STYLEWH', netAmount: 50 }] as SigEuljiRow[]

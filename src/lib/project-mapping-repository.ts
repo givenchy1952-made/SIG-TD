@@ -9,7 +9,7 @@ const conflict = () => new Error('프로젝트 정보가 변경되었습니다. 
 
 function mappingValues(project: Project) {
   const values = { code: (project.code || '').trim(), name: project.name.trim(), season: project.season.trim() }
-  if (!project.id || !values.code || values.code.length > 120 || !values.name || values.name.length > 160 || !values.season || values.season.length > 30 || Object.values(values).some(value => /[\x00-\x1f\x7f]/.test(value))) throw new Error('오더 원본의 프로젝트 코드·명칭·시즌을 확인해 주세요.')
+  if (!project.id || !values.code || values.code.length > 120 || !values.name || values.name.length > 160 || !values.season || values.season.length > 30 || Object.values(values).some(value => /[\x00-\x1f\x7f]/.test(value))) throw new Error('오더 원본의 A열 예산 코드·M열 프로젝트 명칭·L열 시즌을 확인해 주세요.')
   return values
 }
 

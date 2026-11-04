@@ -25,9 +25,9 @@ async function openSupplier(page: Page) {
   await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click()
   return { detail, panel: detail.getByRole('region', { name: '생산 조건 협의·승인', exact: true }) }
 }
-async function selectProject(panel: Locator, code: string) {
-  const project = panel.getByLabel('PO 프로젝트 코드', { exact: true })
-  const id = await project.getByRole('option', { name: new RegExp(code) }).getAttribute('value')
+async function selectProject(panel: Locator, name: string) {
+  const project = panel.getByLabel('PO 프로젝트 명칭', { exact: true })
+  const id = await project.getByRole('option', { name: new RegExp(name) }).getAttribute('value')
   expect(id).toBeTruthy()
   await project.selectOption(id!)
 }
@@ -49,7 +49,7 @@ async function productionFixture(page: Page) {
     w.staffApprovalsAvailable = true; w.productionLedgerAvailable = true; w.supplierOrdersAvailable = true
     w.productionRuns = []; w.productionReceipts = []; w.productionRunAudits = []; w.supplierProductionOrders = []; w.productionConditions = []; w.productionConditionsAvailable = true
     w.profiles.push({ id: secondFactory, name: 'QA B 공장 담당자', email: 'qa-b@example.test', role: 'factory', approved: true, active: true, factoryId: w.factories[2].id })
-    w.projects[0].code = 'QA-PROJECT-A'; w.projects[1].code = 'QA-PROJECT-B'
+    w.projects[0].code = 'QA-PROJECT-A'; w.projects[0].name = 'QA 생산 명칭 A'; w.projects[1].code = 'QA-PROJECT-B'; w.projects[1].name = 'QA 생산 명칭 B'
     const factory = w.factories.find((item: { id: string }) => item.id === style.factoryId)
     const owner = w.profiles.find((item: { id: string }) => item.id === style.ownerId)
     for (const index of [0, 1]) {
@@ -109,11 +109,13 @@ test('업체의 프로젝트별 생산 조건 회신은 본사 승인 대기이�
   await expect(panel).not.toContainText('983746.17')
   await expect(panel.getByLabel('본사 내부 검토 단가', { exact: true })).toHaveCount(0)
   const rounds = panel.getByLabel('생산 조건 협의 차수', { exact: true })
-  await expect(panel.getByLabel('PO 프로젝트 코드', { exact: true }).getByRole('option')).toHaveCount(2)
+  await expect(panel.getByLabel('PO 프로젝트 명칭', { exact: true }).getByRole('option')).toHaveCount(2)
   await expect(rounds.getByRole('option')).toHaveCount(1)
   await expect(panel.locator('.supplier-order-card > header strong')).toContainText('1차')
   await expect(panel.locator('.supplier-order-card > header strong')).toContainText(projectNames[0])
-  await expect(panel.locator('.supplier-order-card > header')).toContainText('QA-PROJECT-A')
+  await expect(panel.locator('.supplier-order-card > header')).toContainText('QA 생산 명칭 A')
+  await expect(panel.locator('.supplier-order-card > header')).not.toContainText('QA-PROJECT-A')
+  await expect(panel.getByLabel('PO 프로젝트 명칭', { exact: true })).not.toContainText('QA-PROJECT-')
   await expect(panel.getByRole('table', { name: '생산 발주 사이즈별 수량', exact: true })).toContainText('21')
   await panel.locator('.supplier-order-card > details > summary').filter({ hasText: 'QA PO QA-PROJECT-A' }).click()
   await expect(panel).toContainText('QA 고정 발주 내용 QA-PROJECT-A')
@@ -133,12 +135,12 @@ test('업체의 프로젝트별 생산 조건 회신은 본사 승인 대기이�
   const proposal = stored.productionConditions.find((condition: { runId: string }) => condition.runId === '82000000-0000-4000-8000-000000000001')
   expect(proposal).toMatchObject({ status: 'awaiting_approval', proposal: { actorId: FACTORY_A, expectedDeliveryDate: '2026-12-14', unitCost: 100, confirmedQuantities: { XXS: 1, XL: 6 } }, approval: null })
   expect(stored.supplierProductionOrders.find((order: { projectCode: string }) => order.projectCode === 'QA-PROJECT-A')).toMatchObject({ acceptance: null, startedAt: null })
-  await selectProject(panel, 'QA-PROJECT-B')
+  await selectProject(panel, 'QA 생산 명칭 B')
   await rounds.selectOption('82000000-0000-4000-8000-000000000002')
   await expect(panel.locator('.supplier-order-card > header strong')).toContainText('1차')
   await expect(panel.locator('.supplier-order-card > header strong')).toContainText(projectNames[1])
-  await expect(panel.locator('.supplier-order-card > header')).toContainText('QA-PROJECT-B')
-  await expect(rounds.getByRole('option', { name: /QA-PROJECT-B/ })).toHaveCount(1)
+  await expect(panel.locator('.supplier-order-card > header')).toContainText('QA 생산 명칭 B')
+  await expect(rounds.getByRole('option', { name: /QA 생산 명칭 B/ })).toHaveCount(1)
   await expect(panel.locator('.supplier-order-card > header')).not.toContainText('프로젝트 미지정')
   await expect(panel.getByRole('table', { name: '생산 발주 사이즈별 수량', exact: true })).toContainText('27')
   await expect(panel.getByRole('region', { name: '업체 생산 조건 회신', exact: true })).toHaveCount(0)
@@ -169,31 +171,44 @@ test('본사는 생산 차수의 수량과 접속 안내가 채워진 PO 초안�
   await page.evaluate(key => {
     const w = JSON.parse(localStorage.getItem(key)!)
     w.productionRuns[0].poId = null
+    w.partialDeliveryPlans = [{ runId: w.productionRuns[0].id, version: 1, updatedAt: '2026-10-31T00:00:00Z', updatedBy: w.profiles[0].id, items: [
+      { id: 'a2000000-0000-4000-8000-000000000001', dueDate: '2026-12-01', quantity: 10, quantities: { XXS: 1, XS: 1, S: 1, M: 2, L: 2, XL: 3 }, note: '1차 예정' },
+      { id: 'a2000000-0000-4000-8000-000000000002', dueDate: '2026-12-10', quantity: 11, quantities: { XXS: 0, XS: 1, S: 2, M: 2, L: 3, XL: 3 }, note: '2차 예정' },
+    ] }]
     localStorage.setItem(key, JSON.stringify(w))
   }, STORAGE)
   await page.reload()
   const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
   const { detail, panel } = await openSupplier(page)
-  await selectProject(panel, 'QA-PROJECT-B')
+  await selectProject(panel, 'QA 생산 명칭 B')
   await expect(panel.getByLabel('생산 조건 협의 차수', { exact: true })).toHaveValue('82000000-0000-4000-8000-000000000002')
   await expect(panel.getByLabel('생산 조건 협의 차수', { exact: true }).getByRole('option')).toHaveCount(1)
   await expect(panel.getByRole('table', { name: '생산 발주 사이즈별 수량', exact: true })).toContainText('27')
-  await selectProject(panel, 'QA-PROJECT-A')
-  await expect(panel.getByLabel('생산 조건 협의 차수', { exact: true }).getByRole('option')).toHaveText(/QA-PROJECT-A.*BO42FYHD0102BK.*21 pcs/)
+  await selectProject(panel, 'QA 생산 명칭 A')
+  await expect(panel.getByLabel('생산 조건 협의 차수', { exact: true }).getByRole('option')).toHaveText(/QA 생산 명칭 A.*BO42FYHD0102BK.*21 pcs/)
   await panel.getByRole('button', { name: '이 차수 PO 작성', exact: true }).click()
   const form = panel.getByRole('region', { name: '생산 차수 PO 초안', exact: true })
   await expect(form.getByLabel('차수 PO 수신 이메일', { exact: true })).toHaveValue('factory@example.test')
   await expect(form.getByLabel('차수 PO 납기일', { exact: true })).toHaveValue('2026-12-10')
-  await expect(form.getByLabel('차수 PO 제목', { exact: true })).toHaveValue(/QA-PROJECT-A.*BO42FYHD0102BK.*1차/)
+  await expect(form.getByLabel('차수 PO 제목', { exact: true })).toHaveValue(/QA 생산 명칭 A.*BO42FYHD0102BK.*1차/)
   await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/XXS: 1 pcs.*XL: 6 pcs/s)
   await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/총 오더 수량: 21 pcs/)
   await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/업체 계정으로 로그인.*생산 조건/s)
   await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/https:\/\/sig-td\.vercel\.app\//)
-  await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/프로젝트 코드: QA-PROJECT-A/)
+  await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/프로젝트 명칭: QA 생산 명칭 A/)
+  await expect(form.getByLabel('차수 PO 제목', { exact: true })).not.toHaveValue(/QA-PROJECT-/)
+  await expect(form.getByLabel('차수 PO 내용', { exact: true })).not.toHaveValue(/QA-PROJECT-/)
+  await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/1차: 2026-12-01 \/ 10 pcs\n  XXS: 1 pcs.*XL: 3 pcs/)
+  await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/2차: 2026-12-10 \/ 11 pcs\n  XXS: 0 pcs.*XL: 3 pcs/)
   await form.getByLabel('차수 PO 수신 이메일', { exact: true }).fill('qa-purchase@example.test')
   await form.getByLabel('차수 PO 납기일', { exact: true }).fill('2026-12-16')
   await expect(form.getByLabel('차수 PO 내용', { exact: true })).toHaveValue(/본사 요청 납기: 2026-12-16/)
   await expect(panel.getByLabel('생산 조건 협의 차수', { exact: true })).toBeDisabled()
+  const productionSubject = await form.getByLabel('차수 PO 제목', { exact: true }).inputValue()
+  await form.getByLabel('차수 PO 제목', { exact: true }).fill(`${productionSubject} / QA-PROJECT-A`)
+  await form.getByRole('button', { name: '차수 PO 초안 저장 및 연결', exact: true }).click()
+  await expect(panel.getByRole('alert')).toContainText('예산 관리 코드는 업체 발송 PO에 포함할 수 없습니다')
+  await form.getByLabel('차수 PO 제목', { exact: true }).fill(productionSubject)
   await form.getByRole('button', { name: '차수 PO 초안 저장 및 연결', exact: true }).click()
   await expect(detail.getByRole('tabpanel', { name: '생산 조건 협의·승인', exact: true })).toBeVisible()
   await expect(panel.getByRole('region', { name: '이 차수 PO 발송', exact: true })).toContainText('초안 · 미발송')
@@ -203,6 +218,10 @@ test('본사는 생산 차수의 수량과 접속 안내가 채워진 PO 초안�
   const po = stored.operations.poDispatches.find((po: { id: string }) => po.id === run.poId)
   expect(po).toMatchObject({ status: 'draft', dueDate: '2026-12-16', recipient: 'qa-purchase@example.test', attempts: 0, sentAt: '', providerMessageId: null })
   expect(po.body).toContain('총 오더 수량: 21 pcs')
+  expect(po.subject).not.toContain('QA-PROJECT-A')
+  expect(po.body).not.toContain('QA-PROJECT-A')
+  expect(po.subject).toContain('QA 생산 명칭 A')
+  expect(stored.partialDeliveryPlans).toEqual(before.partialDeliveryPlans)
   expect(run.version).toBe(2)
   expect(stored.operations.poDispatches).toHaveLength(3)
   expect(stored.operations.poDispatchAttempts).toHaveLength(0)
@@ -213,8 +232,8 @@ test('본사는 생산 차수의 수량과 접속 안내가 채워진 PO 초안�
   await panel.getByRole('region', { name: '이 차수 PO 발송', exact: true }).getByRole('button', { name: 'PO 메일 발송', exact: true }).click()
   const confirmation = panel.getByRole('alertdialog', { name: 'PO 메일 발송 확인', exact: true })
   await expect(confirmation).toContainText('qa-purchase@example.test')
-  await expect(confirmation).toContainText('QA-PROJECT-A')
-  await expect(panel.getByLabel('PO 프로젝트 코드', { exact: true })).toBeDisabled()
+  await expect(confirmation).toContainText('QA 생산 명칭 A')
+  await expect(panel.getByLabel('PO 프로젝트 명칭', { exact: true })).toBeDisabled()
   await confirmation.getByRole('button', { name: '취소', exact: true }).click()
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).operations.poDispatches, STORAGE)).toEqual(stored.operations.poDispatches)
   expect(mailRequests).toEqual([])
@@ -236,7 +255,7 @@ test('메일 미발송 발주는 업체가 동의할 수 없고 납기 초안은
   const { detail, panel } = await openSupplier(page)
   await expect(panel).toContainText('PO 발송 대기')
   await expect(panel.getByLabel('업체 예상 납기일', { exact: true })).toHaveCount(0)
-  await selectProject(panel, 'QA-PROJECT-B')
+  await selectProject(panel, 'QA 생산 명칭 B')
   await panel.getByLabel('생산 조건 협의 차수', { exact: true }).selectOption('82000000-0000-4000-8000-000000000002')
   await panel.getByRole('button', { name: '생산 조건 회신', exact: true }).click()
   await panel.getByLabel('업체 예상 납기일', { exact: true }).fill('2026-12-17')
@@ -273,4 +292,50 @@ test('다른 창에서 업체 조건이 먼저 제출되면 기존 입력을 보
   expect(saved.productionConditions.find((condition: { runId: string }) => condition.runId === '82000000-0000-4000-8000-000000000001').status).toBe('awaiting_approval')
   expect(saved.supplierProductionOrders.find((order: { projectCode: string }) => order.projectCode === 'QA-PROJECT-A').startedAt).toBeNull()
   await second.close()
+})
+
+test('M열 프로젝트 명칭이 없는 생산은 A열 예산 코드를 대신 사용해 새 PO를 만들지 않는다', async ({ page }) => {
+  await productionFixture(page)
+  const projectId = await page.evaluate(key => {
+    const w = JSON.parse(localStorage.getItem(key)!)
+    w.projects[0].name = w.projects[0].code
+    w.operations.orderSourceRecords = []
+    w.productionRuns[0].poId = null
+    localStorage.setItem(key, JSON.stringify(w))
+    return w.projects[0].id
+  }, STORAGE)
+  await page.reload()
+  const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
+  const { panel } = await openSupplier(page)
+  await panel.getByLabel('PO 프로젝트 명칭', { exact: true }).selectOption(projectId)
+  await expect(panel.locator('.supplier-order-card > header')).toContainText('프로젝트 명칭 미등록')
+  await expect(panel.locator('.supplier-order-card > header')).not.toContainText('QA-PROJECT-A')
+  await panel.getByRole('button', { name: '이 차수 PO 작성', exact: true }).click()
+  await expect(panel.getByRole('alert')).toContainText('M열의 프로젝트 명칭을 먼저 등록')
+  await expect(panel.getByRole('region', { name: '생산 차수 PO 초안', exact: true })).toHaveCount(0)
+  const after = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
+  expect(after.operations.poDispatches).toEqual(before.operations.poDispatches)
+  expect(after.productionRuns).toEqual(before.productionRuns)
+  expect(after.productionConditions).toEqual(before.productionConditions)
+})
+
+test('생산 수량과 맞지 않는 과거 부분 납기 계획은 새 PO에 복사하지 않고 재확인을 요청한다', async ({ page }) => {
+  await productionFixture(page)
+  await page.evaluate(key => {
+    const w = JSON.parse(localStorage.getItem(key)!)
+    w.productionRuns[0].poId = null
+    w.partialDeliveryPlans = [{ runId: w.productionRuns[0].id, version: 1, updatedAt: '2026-10-31', updatedBy: w.profiles[0].id, items: [{ id: 'a2000000-0000-4000-8000-000000000003', dueDate: '2026-12-10', quantity: 20, note: '오더 변경 전 기존 계획' }] }]
+    localStorage.setItem(key, JSON.stringify(w))
+  }, STORAGE)
+  await page.reload()
+  const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
+  const { panel } = await openSupplier(page)
+  await selectProject(panel, 'QA 생산 명칭 A')
+  await panel.getByRole('button', { name: '이 차수 PO 작성', exact: true }).click()
+  await expect(panel.getByRole('alert')).toContainText('PO 작성 전에 부분 납기 계획을 확인')
+  await expect(panel.getByRole('region', { name: '생산 차수 PO 초안', exact: true })).toHaveCount(0)
+  const after = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
+  expect(after.partialDeliveryPlans).toEqual(before.partialDeliveryPlans)
+  expect(after.operations.poDispatches).toEqual(before.operations.poDispatches)
+  expect(after.productionRuns).toEqual(before.productionRuns)
 })

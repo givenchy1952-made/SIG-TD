@@ -68,13 +68,15 @@ test('PO 납기는 필수이며 체험 모드의 메일 발송은 실제 발송�
   await ready(page)
   const sendRequests: string[] = []
   await page.route('**/functions/v1/send-po-email', route => { sendRequests.push(route.request().url()); return route.abort() })
+  const baseline = await stored(page), shipping = baseline.styles.find(style => style.code === SHIPPING_CODE)!
+  const projectName = baseline.projects.find(project => project.id === shipping.projectId)!.name
   const detail = await openStyle(page, SHIPPING_CODE)
   await operationTab(detail, 'PO 발송 이력')
   await detail.getByRole('button', { name: 'PO 작성', exact: true }).click()
   await detail.getByLabel('PO 납기일', { exact: true }).fill('')
   await detail.getByLabel('PO 수신 이메일', { exact: true }).fill('qa-supplier@example.test')
-  await detail.getByLabel('PO 메일 제목', { exact: true }).fill('QA PO 직접 발송 검증')
-  await detail.getByLabel('PO 메일 내용', { exact: true }).fill('QA 테스트 초안입니다. 실제 수신자에게 발송하면 안 됩니다.')
+  await detail.getByLabel('PO 메일 제목', { exact: true }).fill(`QA PO 직접 발송 검증 / ${projectName}`)
+  await detail.getByLabel('PO 메일 내용', { exact: true }).fill(`프로젝트 명칭: ${projectName}\nQA 테스트 초안입니다. 실제 수신자에게 발송하면 안 됩니다.`)
   await detail.getByLabel('PO 변경 사유', { exact: true }).fill('QA 납기 필수와 실제 발송 상태 검증')
   await detail.getByRole('button', { name: 'PO 초안 저장', exact: true }).click()
   await expect(detail.getByRole('alert')).toContainText('납기일')

@@ -57,7 +57,7 @@ async function filter(page: Page, label: string) {
 async function chooseProjects(page: Page, codes: string[]) {
   const popup = await filter(page, '프로젝트 명칭')
   await popup.getByRole('button', { name: '선택해제', exact: true }).click()
-  for (const code of codes) await popup.getByRole('checkbox', { name: new RegExp(code) }).check()
+  for (const code of codes) await popup.getByRole('checkbox', { name: new RegExp(PROJECT_IDS[PROJECT_CODES.indexOf(code)]) }).check()
   await page.keyboard.press('Escape')
 }
 async function choose(page: Page, label: string, values: string[]) {
@@ -83,24 +83,24 @@ function dataRows(sheet: ExcelJS.Worksheet) {
   return [...Array(Math.max(0, sheet.rowCount - 1))].map((_, index) => Object.fromEntries(headers.map((header, column) => [header, sheet.getRow(index + 2).getCell(column + 1).value])))
 }
 
-test('공식 프로젝트 명칭·코드·시즌을 모든 목록에서 표시하며 같은 명칭도 ID별로 선택하고 검색·교차 필터·해제한다', async ({ page }) => {
+test('프로젝트 명칭과 시즌만 생산 목록에서 표시하고 예산 코드는 제외하며 같은 명칭도 ID별로 선택하고 검색·교차 필터·해제한다', async ({ page }) => {
   await fixture(page)
   const before = await snapshot(page)
   for (const view of ['오버뷰', '샘플 관리', '메인 생산', '결제 · 마감']) {
     await navigate(page, view)
     const first = page.locator('.styles-table tbody tr').filter({ hasText: CODES[0] })
     await expect(first).toContainText(SHARED_NAME)
-    await expect(first).toContainText(PROJECT_CODES[0])
+    await expect(first).not.toContainText(PROJECT_CODES[0])
     await expect(first).toContainText('2026FY')
     const fallback = page.locator('.styles-table tbody tr').filter({ hasText: CODES[4] })
-    await expect(fallback).toContainText(PROJECT_CODES[3])
+    await expect(fallback).toContainText('프로젝트 명칭 미등록'); await expect(fallback).not.toContainText(PROJECT_CODES[3])
   }
   await navigate(page, '오버뷰')
   const popup = await filter(page, '프로젝트 명칭')
   await popup.getByRole('searchbox', { name: '프로젝트 명칭 검색', exact: true }).fill(SHARED_NAME)
   await expect(popup.locator('.multi-select-filter-options input')).toHaveCount(2)
   await popup.getByRole('button', { name: '선택해제', exact: true }).click()
-  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_CODES[0]) }).check()
+  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_IDS[0]) }).check()
   await page.keyboard.press('Escape')
   await expect(page.locator('.style-code')).toHaveText([`${CODES[0]}BK`])
   await expect(page.getByRole('region', { name: '선택한 필터' }).or(page.locator('.dashboard-filter-chips'))).toContainText(SHARED_NAME)
@@ -131,7 +131,7 @@ test('공식 프로젝트 명칭·코드·시즌을 모든 목록에서 표시�
   expect(await snapshot(page)).toEqual(before)
 })
 
-test('선택한 프로젝트의 스타일·샘플·메인 생산 CSV와 Excel에 공식 명칭·코드를 함께 넣고 다른 프로젝트를 제외한다', async ({ page }) => {
+test('선택한 프로젝트의 스타일·샘플·메인 생산 CSV와 Excel에 공식 명칭을 넣고 예산 코드를 제외하며 다른 프로젝트를 제외한다', async ({ page }) => {
   await fixture(page)
   const before = await snapshot(page)
   for (const [view, sheetName] of [['오버뷰', '스타일'], ['샘플 관리', '샘플 이력'], ['메인 생산', '메인 생산'], ['결제 · 마감', '메인 생산']]) {
@@ -139,14 +139,14 @@ test('선택한 프로젝트의 스타일·샘플·메인 생산 CSV와 Excel에
     await chooseProjects(page, [PROJECT_CODES[1]])
     const csv = parseOrderCSV((await downloadList(page, 'csv')).toString('utf8'))
     const headers = csv[0].map(value => String(value).replace(/^\uFEFF/, '')), nameColumn = headers.indexOf('프로젝트 명칭'), codeColumn = headers.indexOf('프로젝트 코드')
-    expect(nameColumn).toBeGreaterThanOrEqual(0); expect(codeColumn).toBeGreaterThanOrEqual(0)
+    expect(nameColumn).toBeGreaterThanOrEqual(0); expect(codeColumn).toBe(-1)
     expect(csv.slice(1).map(row => row[nameColumn])).toEqual([SHARED_NAME, SHARED_NAME])
-    expect(csv.slice(1).map(row => row[codeColumn])).toEqual([PROJECT_CODES[1], PROJECT_CODES[1]])
+    expect(JSON.stringify(csv)).not.toContain(PROJECT_CODES[1])
     const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(await downloadList(page, 'xlsx'))
     const rows = dataRows(workbook.getWorksheet(sheetName)!)
     expect(rows).toHaveLength(2)
     expect(rows.map(row => row['프로젝트 명칭'])).toEqual([SHARED_NAME, SHARED_NAME])
-    expect(rows.map(row => row['프로젝트 코드'])).toEqual([PROJECT_CODES[1], PROJECT_CODES[1]])
+    expect(rows.every(row => !Object.hasOwn(row, '프로젝트 코드'))).toBe(true)
     for (const sheet of workbook.worksheets) {
       const text = JSON.stringify(sheet.getSheetValues())
       expect(text).not.toContain(CODES[0]); expect(text).not.toContain(CODES[3]); expect(text).not.toContain(CODES[4])
@@ -174,7 +174,7 @@ test('을지는 화면 프로젝트를 기본 선택하고 명칭 검색·품번
   expect(firstSheet.getCell('A6').value).toBeNull()
   const guide = first.getWorksheet('프로젝트 안내')!
   expect(guide).toBeTruthy()
-  expect(guide.getCell('B1').value).toBe('프로젝트 명칭'); expect(guide.getCell('C1').value).toBe('프로젝트 코드')
+  expect(guide.getCell('B1').value).toBe('프로젝트 명칭'); expect(guide.getCell('C1').value).toBe('예산 관리 코드 (A열)')
   expect(guide.getCell('B2').value).toBe(SHARED_NAME); expect(guide.getCell('C2').value).toBe(PROJECT_CODES[0])
   expect(JSON.stringify(guide.getSheetValues())).toContain(SHARED_NAME)
   expect(JSON.stringify(guide.getSheetValues())).toContain(PROJECT_CODES[0])
@@ -201,8 +201,8 @@ test('모바일에서 프로젝트 명칭과 선택 내용을 표시하고 외�
   const popup = await filter(page, '프로젝트 명칭')
   await popup.getByRole('searchbox', { name: '프로젝트 명칭 검색', exact: true }).fill(SHARED_NAME)
   await popup.getByRole('button', { name: '선택해제', exact: true }).click()
-  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_CODES[0]) }).check()
-  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_CODES[1]) }).check()
+  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_IDS[0]) }).check()
+  await popup.getByRole('checkbox', { name: new RegExp(PROJECT_IDS[1]) }).check()
   const box = await popup.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(390)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: '프로젝트 명칭', exact: true })).toContainText(SHARED_NAME)
