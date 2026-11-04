@@ -8,11 +8,13 @@ import type { ProductionConditionsFields } from './production-conditions'
 import type { ProductionPoLinkFields } from './production-po-links'
 import type { MaterialReviewsFields } from './material-reviews'
 import type { PartialDeliveryFields } from './partial-deliveries'
+import type { InspectionAssignmentFields } from './inspection-assignments'
+import type { SupplierWorkRatesFields } from './supplier-work-rates'
 export type Role = 'admin' | 'internal' | 'factory'
 export type Status = 'unset' | 'todo' | 'progress' | 'done' | 'approved' | 'delayed'
 export type Stage = 'registered' | 'pattern' | 'sample1' | 'sampleN' | 'review' | 'revision' | 'approved' | 'production'
 export interface Profile { id: string; name: string; email: string; role: Role; approved: boolean; active: boolean; factoryId: string | null; withdrawnAt?: string | null; withdrawnBy?: string | null }
-export interface Factory { id: string; name: string; country: string }
+export interface Factory { id: string; name: string; country: string; active?: boolean; serviceType?: 'production' | 'label' | 'embroidery' | 'inspection'; inspectionProvider?: 'able' | 'kotiti' | null; serviceSettingsVersion?: number }
 export interface Project { code?: string; id: string; name: string; season: string }
 export const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL'] as const
 export type Size = typeof SIZES[number]
@@ -20,7 +22,7 @@ export type Quantities = Record<Size, number>
 export const CHECKS = [
   ['tp', 'TP 발송'], ['pp', 'PP·견본 전달'], ['gb', 'GB 혼용률 테스트'], ['labels', '라벨 발주'],
   ['care', '케어라벨 검수'], ['materials', '원·부자재 컨펌'], ['packing', '패킹 부자재 출고'],
-  ['main', '메인 제품 수납'], ['quality', '에이블 품질 검사'], ['packingList', '패킹리스트 확인'],
+  ['main', '메인 제품 수납'], ['quality', '품질 검사'], ['packingList', '패킹리스트 확인'],
 ] as const
 export type CheckKey = typeof CHECKS[number][0]
 export interface Sample {
@@ -42,7 +44,7 @@ export interface Comment { id: string; styleId: string; sampleId: string | null;
 export interface Attachment { id: string; styleId: string; sampleId: string | null; name: string; path: string; mime: string; size: number; uploadedBy: string; createdAt: string }
 export interface Audit { id: string; styleId: string | null; actorId: string; actorName: string; action: string; reason: string; before: unknown; after: unknown; createdAt: string }
 export interface StyleImage { styleId: string; color: string; attachmentId: string | null; version: number; updatedAt: string; updatedBy: string }
-export interface Workspace extends SettlementWorkspaceFields, ProductionLedgerFields, SupplierOrderFields, ProcessingPricesWorkspaceFields, ProductionConditionsFields, ProductionPoLinkFields, PartialDeliveryFields, MaterialReviewsFields { productionProjectNames?: { projectId: string; name: string; season: string }[]; importColorOwnersAvailable?: boolean; memberWithdrawalAvailable?: boolean; staffApprovalsAvailable?: boolean; productionDetails?: ProductionDetails[]; refinementsAvailable?: boolean; styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[]; styleImages?: StyleImage[]; styleImagesAvailable?: boolean; operations?: OperationsWorkspace; operationsAvailable?: boolean }
+export interface Workspace extends SettlementWorkspaceFields, ProductionLedgerFields, SupplierOrderFields, ProcessingPricesWorkspaceFields, ProductionConditionsFields, ProductionPoLinkFields, PartialDeliveryFields, MaterialReviewsFields, InspectionAssignmentFields, SupplierWorkRatesFields { productionProjectNames?: { projectId: string; name: string; season: string }[]; importColorOwnersAvailable?: boolean; memberWithdrawalAvailable?: boolean; staffApprovalsAvailable?: boolean; productionDetails?: ProductionDetails[]; refinementsAvailable?: boolean; styles: Style[]; profiles: Profile[]; factories: Factory[]; projects: Project[]; comments: Comment[]; attachments: Attachment[]; audits: Audit[]; styleImages?: StyleImage[]; styleImagesAvailable?: boolean; operations?: OperationsWorkspace; operationsAvailable?: boolean }
 export interface StyleSave { (style: Style, reason: string): Promise<void> }
 export const STATUS_LABEL: Record<Status, string> = { unset: '미기재', todo: '미완료', progress: '진행 중', done: '완료', approved: '최종 컨펌', delayed: '일정 지연' }
 export const STAGE_LABEL: Record<Stage, string> = { registered: '스타일 등록', pattern: '패턴 진행', sample1: '1차 샘플', sampleN: '2차 이상 샘플', review: '샘플 리뷰', revision: '수정 요청', approved: '최종 컨펌', production: '메인 생산' }

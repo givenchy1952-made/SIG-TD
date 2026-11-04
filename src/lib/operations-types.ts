@@ -12,10 +12,10 @@ export interface ShipmentBatch extends OperationStamp { id: string; styleId: str
 export interface ShipmentBatchInput { shippedAt: string; quantities: Quantities; tracking: string; note: string; voided: boolean }
 export type StyleOperationKind = 'label' | 'embroidery'
 /** A checklist line for label/embroidery work. HQ owns these instructions. */
-export interface OperationCatalog extends OperationStamp { id: string; kind: StyleOperationKind; name: string; active: boolean }
+export interface OperationCatalog extends OperationStamp { supplierFactoryId?: string | null; specification?: string; id: string; kind: StyleOperationKind; name: string; active: boolean }
 export interface OperationRow { id: string; catalogId: string; name: string; specification: string; quantity: number; lossQuantity: number; completedQuantity: number; status: 'unset' | 'todo' | 'progress' | 'done' | 'approved' | 'delayed'; orderedAt: string; requestedAt: string; completedAt: string; dueDate: string; note: string }
-export interface StyleOperation extends OperationStamp { id: string; styleId: string; kind: StyleOperationKind; rows: OperationRow[]; note: string; voided: boolean }
-export interface StyleOperationInput { rows: OperationRow[]; note: string; voided: boolean }
+export interface StyleOperation extends OperationStamp { supplierNameSnapshot?: string | null; supplierFactoryId?: string | null; id: string; styleId: string; kind: StyleOperationKind; rows: OperationRow[]; note: string; voided: boolean }
+export interface StyleOperationInput { supplierFactoryId?: string | null; catalogVersions?: Record<string, number>; rows: OperationRow[]; note: string; voided: boolean }
 export type CalendarEventKind = 'personal_leave' | 'launch' | 'factory_holiday'
 export interface CalendarEvent extends OperationStamp { leaveType?: LeaveType; startTime?: string; endTime?: string; id: string; kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deletedAt: string | null }
 export interface CalendarEventInput { leaveType?: LeaveType; startTime?: string; endTime?: string; kind: CalendarEventKind; visibility: 'private' | 'hq' | 'all'; title: string; startDate: string; endDate: string; ownerId: string; factoryId: string | null; note: string; deleted: boolean }

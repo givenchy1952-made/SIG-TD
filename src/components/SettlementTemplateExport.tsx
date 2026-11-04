@@ -34,7 +34,7 @@ export default function SettlementTemplateExport({ workspace, profile, styles, p
   }), [productionScope, checkedProjectIds])
   const productionProjectIds = checkedProjectIds
   const rows = useMemo(() => buildSettlementRows(workspace, currentStyles, profile), [workspace, currentStyles, profile])
-  const sigKinds: { value: SigEuljiKind; label: string }[] = [{ value: 'product', label: '메인 제품' }, { value: 'label', label: '중화라벨' }, { value: 'embroidery', label: '비와이 자수' }, { value: 'quality', label: '품질검사' }]
+  const sigKinds: { value: SigEuljiKind; label: string }[] = [{ value: 'product', label: '메인 제품' }, { value: 'label', label: '라벨' }, { value: 'embroidery', label: '자수' }, { value: 'quality', label: '품질검사' }]
   const sigKindLabel = sigKinds.find(item => item.value === sigKind)!.label
   const managed = chosenStyles.some(style => style.production.some(line => workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)))
   const sig = useMemo(() => {

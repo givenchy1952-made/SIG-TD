@@ -83,17 +83,20 @@ function dataRows(sheet: ExcelJS.Worksheet) {
   return [...Array(Math.max(0, sheet.rowCount - 1))].map((_, index) => Object.fromEntries(headers.map((header, column) => [header, sheet.getRow(index + 2).getCell(column + 1).value])))
 }
 
-test('프로젝트 명칭과 시즌만 생산 목록에서 표시하고 예산 코드는 제외하며 같은 명칭도 ID별로 선택하고 검색·교차 필터·해제한다', async ({ page }) => {
+test('본사 목록에서 프로젝트 명칭·예산 관리 코드·시즌을 각각 다른 열에 표시하며 같은 명칭도 ID별로 선택하고 검색·교차 필터·해제한다', async ({ page }) => {
   await fixture(page)
   const before = await snapshot(page)
   for (const view of ['오버뷰', '샘플 관리', '메인 생산', '결제 · 마감']) {
     await navigate(page, view)
     const first = page.locator('.styles-table tbody tr').filter({ hasText: CODES[0] })
     await expect(first).toContainText(SHARED_NAME)
-    await expect(first).not.toContainText(PROJECT_CODES[0])
+    await expect(first.locator('.project-name-cell')).toHaveText(SHARED_NAME)
+    await expect(first.locator('.project-name-cell')).not.toContainText(PROJECT_CODES[0])
+    await expect(first.locator('.budget-code-cell')).toHaveText(PROJECT_CODES[0])
+    await expect(first.locator('.project-season-cell')).toHaveText('2026FY')
     await expect(first).toContainText('2026FY')
     const fallback = page.locator('.styles-table tbody tr').filter({ hasText: CODES[4] })
-    await expect(fallback).toContainText('프로젝트 명칭 미등록'); await expect(fallback).not.toContainText(PROJECT_CODES[3])
+    await expect(fallback.locator('.project-name-cell')).toHaveText('프로젝트 명칭 미등록'); await expect(fallback.locator('.budget-code-cell')).toHaveText(PROJECT_CODES[3])
   }
   await navigate(page, '오버뷰')
   const popup = await filter(page, '프로젝트 명칭')

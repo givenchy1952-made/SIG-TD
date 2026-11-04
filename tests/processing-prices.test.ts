@@ -158,4 +158,30 @@ describe('가공·품질 단가의 권한과 대상 검사', () => {
     expect(JSON.stringify(added)).not.toContain('98765.43')
     expect(JSON.stringify(added)).not.toContain('unitCost')
   })
+  it('업체 배정 작업의 수동 단가는 본사가 저장하며 업체·카탈로그 스냅샷과 결제 마감을 보존한다', () => {
+    const { workspace, admin, factory, style, line } = fixture()
+    const operation = workspace.operations!.styleOperations[0]
+    operation.supplierFactoryId = factory.factoryId; operation.supplierNameSnapshot = '등록 당시 업체명'
+    line.paymentStatus = 'todo'
+    expect(() => save(workspace, factory, style.id, line.id)).toThrow('본사')
+    const first = save(workspace, admin, style.id, line.id, 'label', LABEL, 0)
+    expect(findProcessingUnitPrice(first, style.id, line.id, 'label', LABEL)).toMatchObject({ supplierFactoryId: factory.factoryId, supplierNameSnapshot: '등록 당시 업체명', supplierCatalogId: LABEL, masterRateVersion: null, unitCost: 0 })
+    first.operations!.styleOperations[0].supplierNameSnapshot = '바뀐 업체명'
+    const changed = save(first, admin, style.id, line.id, 'label', LABEL, 500, 1)
+    expect(findProcessingUnitPrice(changed, style.id, line.id, 'label', LABEL)).toMatchObject({ supplierNameSnapshot: '등록 당시 업체명', unitCost: 500 })
+    changed.styles.find(item => item.id === style.id)!.production.find(item => item.id === line.id)!.paymentStatus = 'done'
+    expect(() => save(changed, admin, style.id, line.id, 'label', LABEL, 600, 2)).toThrow('HISTORY_PROTECTED')
+  })
+  it('검사 업체 변경 후 수동 가격 수정으로 이전 업체의 단가를 새 업체에 재연결하지 않는다', () => {
+    const { workspace, admin, style, line } = fixture()
+    line.paymentStatus = 'todo'
+    const able = { id: crypto.randomUUID(), name: '에이블', country: '대한민국', serviceType: 'inspection' as const, inspectionProvider: 'able' as const }
+    const kotiti = { ...able, id: crypto.randomUUID(), name: 'KOTITI', inspectionProvider: 'kotiti' as const }
+    workspace.factories.push(able, kotiti)
+    workspace.inspectionAssignments = [{ styleId: style.id, lineId: line.id, provider: 'able', version: 1, updatedAt: '', updatedBy: admin.id }]
+    const first = save(workspace, admin, style.id, line.id, 'quality', '아우터', 100)
+    first.inspectionAssignments![0].provider = 'kotiti'
+    const second = save(first, admin, style.id, line.id, 'quality', '아우터', 200, 1)
+    expect(findProcessingUnitPrice(second, style.id, line.id, 'quality', '아우터')).toMatchObject({ supplierFactoryId: able.id, supplierNameSnapshot: '에이블', unitCost: 200 })
+  })
 })

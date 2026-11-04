@@ -36,16 +36,17 @@ async function navigate(page: Page, name: string) {
   await page.getByRole('navigation', { name: '주 메뉴' }).getByRole('button', { name, exact: true }).click()
 }
 
-for (const mobile of [false, true]) test(`대시보드와 새 스타일 등록은 M 명칭과 L 시즌을 구분하고 A 예산코드를 노출하지 않는다 · ${mobile ? '모바일' : 'PC'}`, async ({ page }) => {
+for (const mobile of [false, true]) test(`본사 목록은 M 명칭·A 예산 코드·L 시즌을 별도 열로 나누고 새 스타일 등록은 M을 선택한다 · ${mobile ? '모바일' : 'PC'}`, async ({ page }) => {
   if (mobile) await page.setViewportSize({ width: 390, height: 844 })
   await fixture(page)
   const before = await snapshot(page)
   const firstRow = page.locator('.styles-table tbody tr').filter({ hasText: 'QAPRODUCTIONM01' })
   await expect(firstRow.locator('.project-identity-cell')).toContainText(M)
-  await expect(firstRow.locator('.project-identity-cell')).toContainText('시즌 · 2026FY')
+  await expect(firstRow.locator('.project-season-cell')).toHaveText('2026FY')
   await expect(firstRow.locator('.project-identity-cell')).not.toContainText('2099WRONG')
-  await expect(page.locator('body')).not.toContainText(A)
-  await expect(page.locator('body')).not.toContainText(OTHER_A)
+  await expect(firstRow.locator('.project-name-cell')).not.toContainText(A)
+  await expect(firstRow.locator('.budget-code-cell')).toHaveText(A)
+  await expect(page.locator('.styles-table').getByRole('columnheader', { name: '예산 관리 코드 (본사)', exact: true })).toHaveCount(1)
   await expect(page.locator('.styles-table')).toContainText('프로젝트 명칭 미등록')
   await page.getByRole('button', { name: '프로젝트 명칭', exact: true }).click()
   const filter = page.getByRole('dialog', { name: '프로젝트 명칭 선택', exact: true })
@@ -81,6 +82,8 @@ test('업체는 배정된 프로젝트 명칭으로 검색·일정을 확인하�
   const before = await snapshot(page)
   await page.getByLabel('체험 역할', { exact: true }).selectOption(FACTORY)
   await expect(page.locator('body')).not.toContainText(A)
+  await expect(page.locator('.budget-code-cell')).toHaveCount(0)
+  await expect(page.locator('.styles-table').getByRole('columnheader', { name: '예산 관리 코드 (본사)', exact: true })).toHaveCount(0)
   await expect(page.locator('body')).not.toContainText(OTHER_M)
   await page.getByLabel('스타일 검색', { exact: true }).fill(A)
   await expect(page.locator('.style-code')).toHaveCount(0)

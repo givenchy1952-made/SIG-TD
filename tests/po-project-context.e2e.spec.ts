@@ -39,7 +39,7 @@ test('스타일이 다른 프로젝트로 이동해도 연결된 차수의 M 명
   const sentRequests: string[] = []
   await page.route('**/functions/v1/send-po-*', route => { sentRequests.push(route.request().url()); return route.abort() })
   const detail = await fixture(page), before = await snapshot(page)
-  await expect(detail.getByLabel('PO 프로젝트 명칭', { exact: true })).toContainText(M_PREVIOUS)
+  await expect(detail.getByRole('table', { name: '생산 오더 목록', exact: true })).toContainText(M_PREVIOUS)
   const card = detail.getByRole('region', { name: '이 차수 PO 발송', exact: true })
   await expect(card).toContainText(M_PREVIOUS)
   await card.getByRole('button', { name: 'PO 메일 발송', exact: true }).click()

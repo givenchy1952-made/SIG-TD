@@ -24,7 +24,12 @@ async function fixture(page: Page, empty = false, priced = false) {
     w.processingPricesAvailable = true; w.processingUnitPrices = []
     if (priced) for (const line of style.production) {
       for (const record of w.operations.styleOperations.filter((item: { voided: boolean }) => !item.voided)) for (const item of record.rows) w.processingUnitPrices.push({ ...stamp, styleId: style.id, lineId: line.id, kind: record.kind, itemKey: item.id, unitCost: record.kind === 'label' ? 2.5 : 10 })
-      w.processingUnitPrices.push({ ...stamp, styleId: style.id, lineId: line.id, kind: 'quality', itemKey: '티셔츠', unitCost: 100 })
+      w.processingUnitPrices.push({ ...stamp, styleId: style.id, lineId: line.id, kind: 'quality', itemKey: '티셔츠', unitCost: 100, supplierFactoryId: '98760000-0000-4000-8000-000000000001', supplierNameSnapshot: 'QA 지정 검사 업체', masterRateVersion: 1 })
+    }
+    if (priced) {
+      w.factories.push({ id: '98760000-0000-4000-8000-000000000001', name: 'QA 지정 검사 업체', country: '대한민국', active: true, serviceType: 'inspection', inspectionProvider: 'able', serviceSettingsVersion: 1 })
+      w.inspectionAssignmentsAvailable = true
+      w.inspectionAssignments = style.production.map((line: { id: string }) => ({ styleId: style.id, lineId: line.id, provider: 'able', version: 1, updatedAt: stamp.updatedAt, updatedBy: style.ownerId }))
     }
     if (empty) { w.operations.styleOperations = []; w.productionDetails = []; w.processingUnitPrices = [] }
     localStorage.setItem(key, JSON.stringify(w))
@@ -40,7 +45,7 @@ async function fixture(page: Page, empty = false, priced = false) {
 test('가공·품질 을지의 입고일·컬러 품번과 종류별 실출고·실입고를 채우며 미등록 단가는 공란으로 보존한다', async ({ page }) => {
   const modal = await fixture(page)
   await expect(modal.getByRole('button', { name: '을지 다운로드', exact: true })).toBeDisabled()
-  const cases = [{ tab: '중화라벨', vendor: '주식회사 중화라벨', count: 2, actual: 300, name: 'QA 포인트 라벨' }, { tab: '비와이 자수', vendor: 'BY컴퓨터자수', count: 1, actual: 277, name: 'QA 자수 작업' }, { tab: '품질검사', vendor: null, count: 1, actual: 277, name: '티셔츠' }]
+  const cases = [{ tab: '라벨', vendor: '주식회사 중화라벨', count: 2, actual: 300, name: 'QA 포인트 라벨' }, { tab: '자수', vendor: 'BY컴퓨터자수', count: 1, actual: 277, name: 'QA 자수 작업' }, { tab: '품질검사', vendor: null, count: 1, actual: 277, name: '티셔츠' }]
   for (const item of cases) {
     await modal.getByRole('tab', { name: item.tab, exact: true }).click()
     await expect(modal.getByRole('button', { name: '을지 다운로드', exact: true })).toBeEnabled()
@@ -66,7 +71,7 @@ test('가공·품질 을지의 입고일·컬러 품번과 종류별 실출고·
     expect(sheet.getCell('T3').formula).toContain('IF(')
     expect(sheet.getCell('U3').formula).toBeTruthy()
     expect(sheet.getCell('V3').formula).toBeTruthy()
-    if (item.tab === '중화라벨') {
+    if (item.tab === '라벨') {
       expect(String(sheet.getCell('X3').value)).toContain('5')
       expect(sheet.getCell('P4').value).toBe(290)
       expect(String(sheet.getCell('X4').value)).toContain('작업 요청 수량 200개')
@@ -82,7 +87,7 @@ test('가공·품질 을지의 입고일·컬러 품번과 종류별 실출고·
 
 test('등록된 작업이 없으면 항목별 다운로드를 막고 메인 제품 원가도 대신 사용하지 않는다', async ({ page }) => {
   const modal = await fixture(page, true)
-  for (const tab of ['중화라벨', '비와이 자수', '품질검사']) {
+  for (const tab of ['라벨', '자수', '품질검사']) {
     await modal.getByRole('tab', { name: tab, exact: true }).click()
     await expect(modal.getByRole('button', { name: '을지 다운로드', exact: true })).toBeDisabled()
     await expect(modal.getByRole('alert')).toContainText('등록된')
@@ -109,8 +114,8 @@ test('저장한 작업·컬러별 단가를 반복 다운로드와 새로고침 
     expect(sheet.getCell('T3').result).toBe(price * quantity)
     expect(sheet.getCell('U3').result).toBe(price * quantity / 10)
   }
-  await download('중화라벨', 2.5, 300)
-  await download('비와이 자수', 10, 277)
+  await download('라벨', 2.5, 300)
+  await download('자수', 10, 277)
   await download('품질검사', 100, 277)
   await modal.getByRole('button', { name: '닫기', exact: true }).first().click()
   await page.reload()
@@ -119,6 +124,6 @@ test('저장한 작업·컬러별 단가를 반복 다운로드와 새로고침 
   await page.getByLabel('스타일 검색', { exact: true }).fill(`${CODE}BK`)
   await page.getByRole('button', { name: '을지 양식 다운로드', exact: true }).click()
   modal = page.getByRole('dialog', { name: '마감 양식에 채워서 다운로드', exact: true })
-  await download('중화라벨', 2.5, 300)
+  await download('라벨', 2.5, 300)
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).processingUnitPrices, STORAGE)).toEqual(pricesBefore)
 })

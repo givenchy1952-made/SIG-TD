@@ -125,6 +125,22 @@ describe('가공·품질 을지의 컬러별 실제 수량·저장 단가', () =
     expect(next.rows[0]).toMatchObject({ unitCost: 25, netAmount: 7500 })
     expect(next.rows.slice(1)).toEqual(first.rows.slice(1))
   })
+  it('배정된 검사 업체와 저장 단가의 업체가 같을 때만 가격을 출력하고 다른 업체의 가격은 공란으로 둔다', () => {
+    const { workspace, profile, style } = pricedFixture(), line = style.production[0], selected = { ...style, production: [line] }
+    const able = { id: crypto.randomUUID(), name: '에이블 현재 업체명', country: '대한민국', serviceType: 'inspection' as const, inspectionProvider: 'able' as const }
+    const kotiti = { ...able, id: crypto.randomUUID(), name: 'KOTITI', inspectionProvider: 'kotiti' as const }
+    workspace.factories.push(able, kotiti); workspace.inspectionAssignmentsAvailable = true
+    workspace.inspectionAssignments = [{ styleId: style.id, lineId: line.id, provider: 'able', version: 1, updatedAt: '', updatedBy: profile.id }]
+    const price = workspace.processingUnitPrices!.find(price => price.lineId === line.id && price.kind === 'quality')!
+    Object.assign(price, { supplierFactoryId: able.id, supplierNameSnapshot: '에이블 합의 당시 업체명', unitCost: 0 })
+    expect(buildSigEuljiRows(workspace, [selected], profile, 'quality')).toMatchObject({ errors: [], rows: [{ factory: '에이블 합의 당시 업체명', unitCost: 0, netAmount: 0 }] })
+    workspace.inspectionAssignments[0].provider = 'kotiti'
+    expect(buildSigEuljiRows(workspace, [selected], profile, 'quality')).toMatchObject({ errors: [], rows: [{ factory: 'KOTITI', unitCost: null, netAmount: null }] })
+    workspace.inspectionAssignments[0].provider = null
+    expect(buildSigEuljiRows(workspace, [selected], profile, 'quality')).toMatchObject({ errors: [], rows: [{ factory: '', unitCost: null, netAmount: null }] })
+    delete price.supplierFactoryId
+    expect(buildSigEuljiRows(workspace, [selected], profile, 'quality').rows[0].unitCost).toBeNull()
+  })
 
   it.each([-1, 1.001, Number.NaN])('잘못된 저장 단가 %s는 화면에서 예외를 던지지 않고 해당 행의 오류로 알린다', unitCost => {
     const { workspace, profile, style } = pricedFixture()
@@ -210,6 +226,20 @@ describe('가공·품질 을지의 컬러별 실제 수량·저장 단가', () =
 })
 
 describe('가공·품질 을지 실제 Excel 출력', () => {
+  it('업체별 작업의 저장 업체명과 단가를 고정 양식에 넣고 업체 기본값 변경은 기존 을지를 바꾸지 않는다', async () => {
+    const { workspace, profile, style } = pricedFixture(), line = style.production[0], selected = { ...style, production: [line] }
+    const operation = workspace.operations!.styleOperations[0]
+    operation.supplierFactoryId = crypto.randomUUID(); operation.supplierNameSnapshot = '별도 계약 라벨 업체'
+    for (const price of workspace.processingUnitPrices!.filter(price => price.kind === 'label')) Object.assign(price, { supplierFactoryId: operation.supplierFactoryId, supplierCatalogId: price.itemKey })
+    workspace.supplierWorkRates = [{ factoryId: operation.supplierFactoryId, kind: 'label', itemKey: 'label-1', unitCost: 999, version: 2, createdAt: '', updatedAt: '', updatedBy: profile.id }]
+    const result = buildSigEuljiRows(workspace, [selected], profile, 'label')
+    expect(result.errors).toEqual([])
+    const { sheet } = await workbook(result.rows)
+    expect(sheet.getCell('D3').value).toBe('별도 계약 라벨 업체')
+    expect(sheet.getCell('N3').value).toBe(12.34)
+    expect(sheet.getCell('T3').formula).toBe('IF(OR(N3="",R3=""),"",N3*R3)')
+    expect(sheet.getCell('U3').result).toBe(370.2)
+  })
   it.each(['label', 'embroidery', 'quality'] as const)('%s C·I·N·P·Q·R·T를 저장 단가와 컬러별 실제 이동으로 채운다', async kind => {
     const { workspace, profile, style } = pricedFixture()
     const rows = buildSigEuljiRows(workspace, [{ ...style, production: [style.production[0]] }], profile, kind).rows
@@ -264,7 +294,7 @@ describe('가공·품질 을지 실제 Excel 출력', () => {
 
   it('제품 내보내기의 필수 검증과 가공 단가·업체 검증을 유지한다', async () => {
     const { workspace, profile, style } = fixture(), service = buildSigEuljiRows(workspace, [style], profile, 'quality').rows[0]
-    await expect(workbook([{ ...service, factory: '임의 품질 업체' }])).rejects.toThrow('업체명')
+    await expect(workbook([{ ...service, factory: '잘못된\u0000업체명' }])).rejects.toThrow('업체명')
     await expect(workbook([{ ...service, kind: undefined, factory: '제품 업체', unitCost: null }])).rejects.toThrow('단가')
     const label = buildSigEuljiRows(workspace, [style], profile, 'label').rows[0]
     await expect(workbook([{ ...label, unitCost: -1 }])).rejects.toThrow('원가')

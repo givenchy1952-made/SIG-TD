@@ -10,7 +10,7 @@ import { fullStyleSku } from '../lib/style-identity'
 import ProductionConditionsReviewPanel from './ProductionConditionsReviewPanel'
 import PartialDeliveryPanel from './PartialDeliveryPanel'
 import { message } from '../lib/utils'
-import { getHistoricalProjectIdentity, projectFilterOptions } from '../lib/project-identity'
+import { getHistoricalProjectIdentity } from '../lib/project-identity'
 import { getPublicAppUrl } from '../lib/public-app-url'
 import { validatePartialDeliveries } from '../lib/partial-deliveries'
 import { PoPanel, type PoPanelProps } from './OperationsPanel'
@@ -35,26 +35,24 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   const [error, setError] = useState(''), [success, setSuccess] = useState(''), [busy, setBusy] = useState(false)
   const [refreshRequired, setRefreshRequired] = useState(false)
   const [poPanelDirty, setPoPanelDirty] = useState(false)
-  const [projectId, setProjectId] = useState('')
   const actor = workspace.profiles.find(person => person.id === profile.id)
   const hq = !!actor && actor.role !== 'factory'
   const orders = (workspace.supplierProductionOrders || []).filter(order => order.styleId === style.id && (hq || !!actor?.factoryId && order.factoryId === actor.factoryId && style.factoryId === actor.factoryId))
     .sort((a, b) => getHistoricalProjectIdentity(workspace, a.projectId, { name: a.projectName, code: a.projectCode }).name.localeCompare(getHistoricalProjectIdentity(workspace, b.projectId, { name: b.projectName, code: b.projectCode }).name, 'ko-KR') || b.round - a.round || a.runId.localeCompare(b.runId))
-  const selectedProjectId = orders.some(order => order.projectId === projectId) ? projectId : orders.find(order => order.runId === selectedId)?.projectId || orders[0]?.projectId || ''
-  const projectOrders = orders.filter(order => order.projectId === selectedProjectId)
-  const selected = projectOrders.find(order => order.runId === selectedId) || projectOrders[0]
+  const selected = orders.find(order => order.runId === selectedId) || orders[0]
   const projectIdentity = (order: typeof orders[number]) => getHistoricalProjectIdentity(workspace, order.projectId, { name: order.projectName, code: order.projectCode })
   const workflowDirty = conditionsDirty || deliveryDirty || !!poDraft || refreshRequired
   const dirty = workflowDirty || poPanelDirty
-  const projectChoices = [...new Map(orders.map(order => [order.projectId, projectIdentity(order)])).values()]
-  const projectOptions = projectFilterOptions({ projects: projectChoices.map(identity => ({ id: identity.id, name: identity.name, code: identity.code, season: identity.season })) })
+  const orderColor = (order: typeof orders[number]) => style.production.find(line => line.id === order.lineId)?.color || ''
+  const orderCode = (order: typeof orders[number]) => { const color = orderColor(order), fullCode = fullStyleSku(order.styleCode, color); return color ? fullCode.slice(0, -color.length) : fullCode }
+  const orderSummary = (order: typeof orders[number]) => `${projectIdentity(order).name} / ${orderCode(order)} / ${orderColor(order) || '미등록'} / ${quantityTotal(order.order).toLocaleString('ko-KR')} pcs`
+  const duplicateSummary = (order: typeof orders[number]) => orders.filter(item => orderSummary(item) === orderSummary(order)).length > 1
   const currentCondition = selected ? getProductionCondition(workspace, selected.runId) : null
   const poStale = !!poDraft && (!selected || poDraft.runId !== selected.runId || poDraft.runVersion !== selected.runVersion || selected.poId !== null || selected.status !== 'awaiting_po')
   useEffect(() => { onDirtyChange?.(dirty || busy); return () => onDirtyChange?.(false) }, [dirty, busy, onDirtyChange])
   if (!actor?.active || !actor.approved) return null
 
   function choose(id: string) { if (dirty || busy || parentDirty) return; setSelectedId(id); setError(''); setSuccess('') }
-  function chooseProject(id: string) { if (dirty || busy || parentDirty) return; setProjectId(id); setSelectedId(''); setError(''); setSuccess('') }
   async function refresh() {
     if (busy) return
     setBusy(true); setError('')
@@ -115,16 +113,26 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
     {error && <div className="error-message" role="alert">{error}</div>}{success && <div className="success-message" role="status">{success}</div>}
     {refreshRequired && <button className="button" type="button" disabled={busy} onClick={() => void refresh()}>최신 발주 다시 불러오기</button>}
     {workspace.supplierOrdersAvailable !== true ? <div className="error-message" role="status">생산 발주 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : !orders.length ? <div className="empty-state"><ClipboardCheck size={30} /><h3>등록된 생산 발주가 없습니다.</h3><p>{hq ? '오더를 업로드하거나 생산 차수를 등록한 뒤 PO를 연결하고 발송해 주세요.' : '본사에서 담당 공장의 생산 발주와 PO를 등록하면 이곳에서 확인할 수 있습니다.'}</p>{hq && onOpenProductionRuns && <button className="button button-primary" type="button" onClick={onOpenProductionRuns}>생산 차수 등록으로 이동</button>}</div> : selected && <>
-      <div className="form-grid"><label className="field supplier-order-picker"><span className="field-label">프로젝트 명칭</span><select className="select" aria-label="PO 프로젝트 명칭" value={selectedProjectId} disabled={dirty || busy || parentDirty} onChange={event => chooseProject(event.target.value)}>{projectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-      <label className="field supplier-order-picker"><span className="field-label">생산 차수 · 품번·컬러·수량</span><select className="select" aria-label="생산 조건 협의 차수" value={selected.runId} disabled={dirty || busy || parentDirty} onChange={event => choose(event.target.value)}>{projectOrders.map(order => <option key={order.runId} value={order.runId}>{projectIdentity(order).label} / {fullStyleSku(order.styleCode, style.production.find(line => line.id === order.lineId)?.color)} / {order.round}차 · {order.name} · {quantityTotal(order.order).toLocaleString('ko-KR')} pcs · {STATUS_LABEL[getProductionCondition(workspace, order.runId).status]}</option>)}</select></label></div>
+      <section className="supplier-order-selection" aria-label="생산 오더 선택">
+        <h3>생산 오더 선택</h3>
+        <div className="supplier-order-choice-wrap"><table className="supplier-order-choice-table" aria-label="생산 오더 목록"><thead><tr><th>프로젝트 명칭</th><th>품번</th><th>컬러</th><th>총수량</th></tr></thead><tbody>{orders.map(order => {
+          const condition = getProductionCondition(workspace, order.runId), duplicate = duplicateSummary(order)
+          const reference = `납기 ${order.requestedDue || order.expectedDue || '미정'} · ${STATUS_LABEL[condition.status] || STATUS_LABEL[order.status]}`
+          return <tr key={order.runId} className={selected.runId === order.runId ? 'selected' : ''} title={`${reference}${duplicate ? ` · 발주 기록 ${order.runId}` : ''}`}>
+            <td><label className="supplier-order-radio"><input type="radio" name={`supplier-order-${style.id}`} aria-label={`생산 오더 ${orderSummary(order)}${duplicate ? ` / 발주 기록 ${order.runId}` : ''}`} aria-describedby={duplicate ? `supplier-order-reference-${order.runId}` : undefined} data-run-id={order.runId} data-project-id={order.projectId} value={order.runId} checked={selected.runId === order.runId} disabled={dirty || busy || parentDirty} onChange={() => choose(order.runId)}/><span>{projectIdentity(order).name}</span></label>{duplicate && <small id={`supplier-order-reference-${order.runId}`} className="supplier-order-reference" title={`발주 기록 ${order.runId}`}>{reference}</small>}</td>
+            <td>{orderCode(order)}</td><td>{orderColor(order) || '미등록'}</td><td>{quantityTotal(order.order).toLocaleString('ko-KR')} pcs</td>
+          </tr>
+        })}</tbody></table></div>
+      </section>
       {poStale && <div className="error-message" role="status">생산 차수 또는 PO 연결이 변경되었습니다. 작성한 초안은 유지됩니다. 초안을 취소하고 최신 발주를 다시 확인해 주세요.</div>}
       <fieldset disabled={parentDirty || poPanelDirty || busy || refreshRequired} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><article className="panel supplier-order-card">
-        <header><div><strong>{projectIdentity(selected).name} · {selected.round}차</strong><p className="muted">시즌: {projectIdentity(selected).season || '미등록'}</p><h3>{fullStyleSku(selected.styleCode, style.production.find(line => line.id === selected.lineId)?.color)} / {selected.name}</h3></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
-        <dl className="supplier-order-facts"><div><dt>본사 요청 납기</dt><dd>{selected.requestedDue || selected.expectedDue || '미입력'}</dd></div><div><dt>PO 발송 접수</dt><dd>{time(selected.sentAt)}</dd></div><div><dt>오더 수량</dt><dd>{quantityTotal(selected.order).toLocaleString('ko-KR')} pcs</dd></div></dl>
+        <header><div><h3>선택한 생산 오더</h3><p className="muted">시즌: {projectIdentity(selected).season || '미등록'}</p></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
+        <dl className="supplier-order-summary" aria-label="선택한 생산 오더 정보"><div><dt>프로젝트 명칭</dt><dd>{projectIdentity(selected).name}</dd></div><div><dt>품번</dt><dd>{orderCode(selected)}</dd></div><div><dt>컬러</dt><dd>{orderColor(selected) || '미등록'}</dd></div><div><dt>총수량</dt><dd>{quantityTotal(selected.order).toLocaleString('ko-KR')} pcs</dd></div></dl>
+        <dl className="supplier-order-facts"><div><dt>본사 요청 납기</dt><dd>{selected.requestedDue || selected.expectedDue || '미입력'}</dd></div><div><dt>PO 발송 접수</dt><dd>{time(selected.sentAt)}</dd></div></dl>
         <div className="supplier-order-table"><table aria-label="생산 발주 사이즈별 수량"><thead><tr>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr>{SIZES.map(size => <td key={size}>{selected.order[size].toLocaleString('ko-KR')}</td>)}<td>{quantityTotal(selected.order).toLocaleString('ko-KR')}</td></tr></tbody></table></div>
-        <PartialDeliveryPanel key={selected.runId} workspace={workspace} profile={actor} order={selected} onChanged={onChanged} onDirtyChange={setDeliveryDirty} poDraftOpen={!!poDraft}/>
+        <PartialDeliveryPanel key={`partial-${selected.runId}`} workspace={workspace} profile={actor} order={selected} onChanged={onChanged} onDirtyChange={setDeliveryDirty} poDraftOpen={!!poDraft}/>
         {selected.poId && <details className="supplier-po-content"><summary><FileText size={14} />{selected.subject || '연결된 PO 내용 확인'}</summary><p className="muted">아래 PO 내용과 본사 요청 납기를 확인해 주세요.</p><pre>{selected.body}</pre></details>}
-        {selected.status === 'awaiting_po' && <p className="supplier-order-note">{hq ? selected.poId ? '이 생산 차수에 PO가 연결되어 있습니다. 아래 PO 발송 영역에서 수신인과 내용을 확인한 뒤 메일을 발송해 주세요.' : '프로젝트 명칭과 생산 차수·수량을 선택한 뒤 이 차수 PO 작성으로 수신인과 본사 요청 납기를 입력해 주세요. 연결된 초안을 이 화면에서 확인하고 메일을 발송합니다.' : '본사에서 PO를 발송하면 생산 조건을 회신할 수 있습니다.'}</p>}
+        {selected.status === 'awaiting_po' && <p className="supplier-order-note">{hq ? selected.poId ? '이 생산 차수에 PO가 연결되어 있습니다. 아래 PO 발송 영역에서 수신인과 내용을 확인한 뒤 메일을 발송해 주세요.' : '프로젝트 명칭·품번·컬러·총수량으로 생산 오더를 선택한 뒤 이 차수 PO 작성으로 수신인과 본사 요청 납기를 입력해 주세요. 연결된 초안을 이 화면에서 확인하고 메일을 발송합니다.' : '본사에서 PO를 발송하면 생산 조건을 회신할 수 있습니다.'}</p>}
         {hq && selected.status === 'awaiting_po' && selected.poId === null && !poDraft && <div className="supplier-order-actions"><button className="button" type="button" disabled={busy || dirty} onClick={beginPo}><FileText size={14} />이 차수 PO 작성</button></div>}
         {hq && poDraft && <section className="supplier-po-draft" aria-label="생산 차수 PO 초안">
           <h4>이 생산 차수의 PO 초안</h4><p className="muted">프로젝트·품번·차수·사이즈별 수량을 미리 채웠습니다. 초안 저장 후 수신인과 내용을 확인하고 메일을 발송합니다.</p>
@@ -136,7 +144,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
           <div className="supplier-order-actions"><button className="button" type="button" disabled={busy} onClick={() => { setPoDraft(null); setError('') }}>차수 PO 초안 취소</button><button className="button button-primary" type="button" disabled={busy || poStale} onClick={() => void savePo()}><FileText size={14} />{busy ? '저장 중…' : '차수 PO 초안 저장 및 연결'}</button></div>
         </section>}
         {selected.status === 'assignment_changed' && <div className="error-message" role="status">이 발주의 공장 배정이 변경되었습니다. 본사에서 발주와 PO를 확인해야 합니다. 이전 동의 이력은 보존됩니다.</div>}
-        <ProductionConditionsReviewPanel key={selected.runId} workspace={workspace} style={style} order={selected} profile={actor} onChanged={onChanged} onDirtyChange={setConditionsDirty} onOpenProductionRuns={onOpenProductionRuns}/>
+        <ProductionConditionsReviewPanel key={`conditions-${selected.runId}`} workspace={workspace} style={style} order={selected} profile={actor} onChanged={onChanged} onDirtyChange={setConditionsDirty} onOpenProductionRuns={onOpenProductionRuns}/>
       </article></fieldset>
     </>}
     {workspace.operationsAvailable === false ? <div className="ops-unavailable" role="status">PO 관리 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : <section aria-label="PO 작성·발송 및 이력"><PoPanel style={style} workspace={workspace} profile={profile} onSavePO={onSavePO} onSendPO={onSendPO} onDownload={onDownload} onDirtyChange={setPoPanelDirty} onRefresh={onChanged} featuredPoId={selected?.poId} collapsibleHistory allowCreate={!orders.length || workspace.supplierOrdersAvailable !== true || workspace.productionConditionsAvailable !== true} parentDirty={parentDirty || workflowDirty || busy}/></section>}

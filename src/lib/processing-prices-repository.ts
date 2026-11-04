@@ -13,7 +13,7 @@ export async function loadProcessingUnitPrices(client: SupabaseClient): Promise<
     const result = await client.from('processing_unit_prices').select('*').order('style_id').order('line_id').order('kind').order('item_key').range(offset, offset + 499)
     if (result.error) throw result.error
     const rows = result.data || []
-    prices.push(...rows.map(row => ({ styleId: row.style_id, lineId: row.line_id, kind: row.kind, itemKey: row.item_key, unitCost: row.unit_cost === null ? null : Number(row.unit_cost), version: row.version, createdAt: row.created_at, updatedAt: row.updated_at, updatedBy: row.updated_by })))
+    prices.push(...rows.map(row => ({ styleId: row.style_id, lineId: row.line_id, kind: row.kind, itemKey: row.item_key, unitCost: row.unit_cost === null ? null : Number(row.unit_cost), version: row.version, createdAt: row.created_at, updatedAt: row.updated_at, updatedBy: row.updated_by, ...('supplier_factory_id' in row ? { supplierFactoryId: row.supplier_factory_id, supplierNameSnapshot: row.supplier_name_snapshot || '', masterRateVersion: row.master_rate_version, supplierCatalogId: row.supplier_catalog_id } : {}) })))
     if (rows.length < 500) return { processingUnitPrices: prices, processingPricesAvailable: true }
   }
 }
