@@ -4,8 +4,8 @@ import type { Profile, Workspace } from '../lib/types'
 import { buildExecutiveProductionReport, executiveToday } from '../lib/executive-production'
 import { getProjectIdentity, projectFilterOptions } from '../lib/project-identity'
 import { safeCSVCell } from '../lib/export'
-import MultiSelectFilter from './MultiSelectFilter'
-import './executive-production.css'
+import MultiSelectFilter from '../components/MultiSelectFilter'
+import '../components/executive-production.css'
 
 interface Props { workspace: Workspace; profile: Profile }
 type Report = ReturnType<typeof buildExecutiveProductionReport>
@@ -42,9 +42,9 @@ function coverageLines(report: Report): string[] {
 
 function reportText(report: Report, scope: string): string {
   return [
-    `SIG 생산·입고 현황 (${report.asOf} 기준)`,
-    `보고 기간: ${monthLabel(report.fromMonth)} ~ ${monthLabel(report.toMonth)}`,
-    `보고 범위: ${scope}`,
+    `SIG 입고현황 (${report.asOf} 기준)`,
+    `조회 기간: ${monthLabel(report.fromMonth)} ~ ${monthLabel(report.toMonth)}`,
+    `조회 조건: ${scope}`,
     '',
     `기간 계획 총수량: ${number(report.totals.planned.total)}장`,
     `기간 입고 예정(잔량): ${number(report.totals.expected.total)}장 (${splitText(report.totals.expected)})`,
@@ -62,7 +62,7 @@ function reportText(report: Report, scope: string): string {
 }
 
 function downloadReport(report: Report, scope: { projects: string; seasons: string; factories: string }) {
-  const headers = ['구분', '월', '생산국', '국내·해외', '계획 총수량', '입고 예정 잔량', '입고 실적', '현재 생산 중', '생산 대기', '상태 확인 필요', '현재 미입고 잔량', '기준일', '보고 기간', '프로젝트 명칭', '시즌', '공장', '집계 참고사항']
+  const headers = ['구분', '월', '생산국', '국내·해외', '계획 총수량', '입고 예정 잔량', '입고 실적', '현재 생산 중', '생산 대기', '상태 확인 필요', '현재 미입고 잔량', '기준일', '조회 기간', '프로젝트 명칭', '시즌', '공장', '집계 참고사항']
   const context = [report.asOf, `${report.fromMonth} ~ ${report.toMonth}`, scope.projects, scope.seasons, scope.factories]
   const rows: (string | number)[][] = []
   rows.push(['전체 요약', '', '', '전체', report.totals.planned.total, report.totals.expected.total, report.totals.received.total, report.current.producing, report.current.awaiting, report.current.statusUnknown, report.current.outstanding, ...context])
@@ -75,11 +75,11 @@ function downloadReport(report: Report, scope: { projects: string; seasons: stri
   const csv = '\uFEFF' + [headers, ...rows.map(row => row.length < headers.length ? [...row, ''] : row)].map(row => row.map(safeCSVCell).join(',')).join('\r\n') + '\r\n'
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
   const link = document.createElement('a')
-  link.href = url; link.download = `SIG_생산입고_보고_${report.fromMonth}_${report.toMonth}_${report.asOf}.csv`
+  link.href = url; link.download = `SIG_입고현황_${report.fromMonth}_${report.toMonth}_${report.asOf}.csv`
   document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export default function ExecutiveProductionDashboard({ workspace, profile }: Props) {
+export default function ReceiptStatus({ workspace, profile }: Props) {
   const asOf = executiveToday(), thisMonth = asOf.slice(0, 7)
   const [fromMonth, setFromMonth] = useState(thisMonth), [toMonth, setToMonth] = useState(followingMonth(thisMonth, 4))
   const [projectIds, setProjectIds] = useState<Selection>(null), [seasons, setSeasons] = useState<Selection>(null), [factoryIds, setFactoryIds] = useState<Selection>(null)
@@ -89,7 +89,7 @@ export default function ExecutiveProductionDashboard({ workspace, profile }: Pro
   const result = useMemo(() => {
     if (!allowed) return { report: null, error: '' }
     try { return { report: buildExecutiveProductionReport(workspace, { profileId: profile.id, fromMonth, toMonth, asOf, projectIds, seasons, factoryIds }), error: '' } }
-    catch (failure) { return { report: null, error: failure instanceof Error ? failure.message : '보고 기간을 확인해 주세요.' } }
+    catch (failure) { return { report: null, error: failure instanceof Error ? failure.message : '조회 기간을 확인해 주세요.' } }
   }, [workspace, profile.id, allowed, fromMonth, toMonth, asOf, projectIds, seasons, factoryIds])
   if (!allowed) return null
   const report = result.report
@@ -104,28 +104,28 @@ export default function ExecutiveProductionDashboard({ workspace, profile }: Pro
   async function copy() {
     if (!report?.authorized) return
     setNotice(''); setError('')
-    try { await navigator.clipboard.writeText(text); setCopyFallback(false); setNotice('보고 내용을 복사했습니다. 메일이나 메신저에 붙여넣으세요.') }
-    catch { setCopyFallback(true); setError('자동 복사를 사용할 수 없습니다. 아래 보고 내용을 전체 선택해 복사해 주세요.') }
+    try { await navigator.clipboard.writeText(text); setCopyFallback(false); setNotice('입고현황을 복사했습니다. 메일이나 메신저에 붙여넣으세요.') }
+    catch { setCopyFallback(true); setError('자동 복사를 사용할 수 없습니다. 아래 입고현황을 전체 선택해 복사해 주세요.') }
   }
   const maximum = report ? Math.max(1, ...report.months.map(month => month.expected.total)) : 1
   const countryMaximum = report ? Math.max(1, ...report.countries.map(country => country.current)) : 1
-  return <section className="executive-production panel" aria-label="생산·입고 경영 보고">
-    <header className="executive-production-heading"><div><p className="eyebrow">PRODUCTION BRIEFING</p><h2><BarChart3 size={20}/>생산·입고 한눈에</h2><p>월별 입고와 생산국별 진행 수량을 대표 보고용으로 확인합니다.</p></div><div className="executive-production-actions"><span className="executive-asof">{asOf.replaceAll('-', '.')} 기준</span><button type="button" className="button" disabled={!report?.authorized} onClick={() => void copy()}><ClipboardCopy size={14}/>보고 내용 복사</button><button type="button" className="button" disabled={!report?.authorized} onClick={() => { if (report?.authorized) downloadReport(report, scope) }}><ArrowDownToLine size={14}/>보고 CSV 다운로드</button></div></header>
-    <div className="executive-report-filters" role="group" aria-label="경영 보고 범위">
-      <strong>보고 범위</strong><label><span>시작 월</span><input className="input" aria-label="경영 보고 시작 월" type="month" value={fromMonth} onChange={event => { setFromMonth(event.target.value); setNotice(''); setCopyFallback(false) }}/></label><span className="executive-month-divider">~</span><label><span>종료 월</span><input className="input" aria-label="경영 보고 종료 월" type="month" value={toMonth} onChange={event => { setToMonth(event.target.value); setNotice(''); setCopyFallback(false) }}/></label>
-      <MultiSelectFilter label="경영 보고 프로젝트 명칭" allLabel="전체 프로젝트 명칭" value={projectIds} onChange={value => { setProjectIds(value); setNotice(''); setCopyFallback(false) }} options={projects}/>
-      <MultiSelectFilter label="경영 보고 시즌" allLabel="전체 시즌" value={seasons} onChange={value => { setSeasons(value); setNotice(''); setCopyFallback(false) }} options={seasonOptions}/>
-      <MultiSelectFilter label="경영 보고 생산 공장" allLabel="전체 생산 공장" value={factoryIds} onChange={value => { setFactoryIds(value); setNotice(''); setCopyFallback(false) }} options={factories}/>
-      {hasFilters && <button className="button button-ghost" type="button" onClick={reset}><RotateCcw size={13}/>보고 범위 초기화</button>}
+  return <section className="executive-production panel" aria-label="입고현황">
+    <header className="executive-production-heading"><div><h1><BarChart3 size={22}/>입고현황</h1><p>월별 입고와 생산국별 진행 수량을 확인합니다.</p></div><div className="executive-production-actions"><span className="executive-asof">{asOf.replaceAll('-', '.')} 기준</span><button type="button" className="button" disabled={!report?.authorized} onClick={() => void copy()}><ClipboardCopy size={14}/>현황 복사</button><button type="button" className="button" disabled={!report?.authorized} onClick={() => { if (report?.authorized) downloadReport(report, scope) }}><ArrowDownToLine size={14}/>CSV 다운로드</button></div></header>
+    <div className="executive-report-filters" role="group" aria-label="입고현황 필터">
+      <label><span>시작 월</span><input className="input" aria-label="입고현황 시작 월" type="month" value={fromMonth} onChange={event => { setFromMonth(event.target.value); setNotice(''); setCopyFallback(false) }}/></label><span className="executive-month-divider">~</span><label><span>종료 월</span><input className="input" aria-label="입고현황 종료 월" type="month" value={toMonth} onChange={event => { setToMonth(event.target.value); setNotice(''); setCopyFallback(false) }}/></label>
+      <MultiSelectFilter label="입고현황 프로젝트 명칭" allLabel="전체 프로젝트 명칭" value={projectIds} onChange={value => { setProjectIds(value); setNotice(''); setCopyFallback(false) }} options={projects}/>
+      <MultiSelectFilter label="입고현황 시즌" allLabel="전체 시즌" value={seasons} onChange={value => { setSeasons(value); setNotice(''); setCopyFallback(false) }} options={seasonOptions}/>
+      <MultiSelectFilter label="입고현황 생산 공장" allLabel="전체 생산 공장" value={factoryIds} onChange={value => { setFactoryIds(value); setNotice(''); setCopyFallback(false) }} options={factories}/>
+      {hasFilters && <button className="button button-ghost" type="button" onClick={reset}><RotateCcw size={13}/>필터 초기화</button>}
     </div>
-    {(projectIds !== null || seasons !== null || factoryIds !== null) && <p className="executive-report-scope" aria-label="선택한 경영 보고 범위">{scopeText}</p>}
-    {result.error && <p className="error-message" role="alert">보고 시작·종료 월을 확인해 주세요. 최대 36개월까지 한 번에 조회할 수 있습니다.</p>}
+    {(projectIds !== null || seasons !== null || factoryIds !== null) && <p className="executive-report-scope" aria-label="선택한 입고현황 조건">{scopeText}</p>}
+    {result.error && <p className="error-message" role="alert">조회 시작·종료 월을 확인해 주세요. 최대 36개월까지 한 번에 조회할 수 있습니다.</p>}
     {error && <p className="error-message" role="alert">{error}</p>}{notice && <p className="success-message" role="status"><Check size={14}/>{notice}</p>}
-    {copyFallback && report && <label className="executive-copy-fallback"><span>보고 내용 · 전체 선택 후 복사</span><textarea className="textarea" aria-label="경영 보고 복사할 내용" readOnly value={text} rows={8} onFocus={event => event.target.select()}/></label>}
+    {copyFallback && report && <label className="executive-copy-fallback"><span>입고현황 · 전체 선택 후 복사</span><textarea className="textarea" aria-label="입고현황 복사할 내용" readOnly value={text} rows={8} onFocus={event => event.target.select()}/></label>}
     {report?.authorized && <>
       <div className="executive-kpis">
-        <article className="executive-kpi executive-kpi-primary" aria-label="보고 기간 입고 예정"><span>기간 입고 예정 <small>미입고 잔량</small></span><strong>{number(report.totals.expected.total)}<small>장</small></strong><p>{splitText(report.totals.expected)}</p></article>
-        <article className="executive-kpi" aria-label="보고 기간 입고 실적"><span>기간 입고 실적</span><strong>{number(report.totals.received.total)}<small>장</small></strong><p>확인된 입고 기록 기준 · 예정 수량과 별도</p></article>
+        <article className="executive-kpi executive-kpi-primary" aria-label="조회 기간 입고 예정"><span>기간 입고 예정 <small>미입고 잔량</small></span><strong>{number(report.totals.expected.total)}<small>장</small></strong><p>{splitText(report.totals.expected)}</p></article>
+        <article className="executive-kpi" aria-label="조회 기간 입고 실적"><span>기간 입고 실적</span><strong>{number(report.totals.received.total)}<small>장</small></strong><p>확인된 입고 기록 기준 · 예정 수량과 별도</p></article>
         <article className="executive-kpi" aria-label="현재 생산 중"><span>현재 생산 중</span><strong>{number(report.current.producing)}<small>장</small></strong><p>생산 승인·시작이 확인된 미입고 잔량</p></article>
         <article className="executive-kpi" aria-label="현재 생산 대기"><span>현재 생산 대기</span><strong>{number(report.current.awaiting)}<small>장</small></strong><p>PO·업체 회신·본사 승인 대기</p></article>
       </div>
@@ -141,7 +141,7 @@ export default function ExecutiveProductionDashboard({ workspace, profile }: Pro
           </div><footer><span>{splitText(month.expected)}</span><span>실적 <strong>{number(month.received.total)}</strong>장</span></footer></article>)}</div>
           <details className="executive-month-detail"><summary>월별 계획·예정·실적 상세</summary><div className="executive-table-scroll"><table aria-label="월별 생산 입고 상세"><thead><tr><th>월</th><th>계획 총수량</th><th>예정 잔량</th><th>국내 예정</th><th>해외 예정</th><th>미지정 예정</th><th>입고 실적</th></tr></thead><tbody>{report.months.map(month => <tr key={month.month}><th>{monthLabel(month.month)}</th><td>{number(month.planned.total)}</td><td>{number(month.expected.total)}</td><td>{number(month.expected.domestic)}</td><td>{number(month.expected.overseas)}</td><td>{number(month.expected.unclassified)}</td><td>{number(month.received.total)}</td></tr>)}</tbody><tfoot><tr><th>합계</th><td>{number(report.totals.planned.total)}</td><td>{number(report.totals.expected.total)}</td><td>{number(report.totals.expected.domestic)}</td><td>{number(report.totals.expected.overseas)}</td><td>{number(report.totals.expected.unclassified)}</td><td>{number(report.totals.received.total)}</td></tr></tfoot></table></div></details>
         </section>
-        <section className="executive-country-chart" aria-label="생산국별 진행 현황"><div className="executive-chart-heading"><div><h3>생산국별 미입고 잔량</h3><p>선택 범위 전체 오더 · 보고 월 기간과 별도</p></div><strong className="executive-country-total">{number(report.current.outstanding)}<small>장</small></strong></div>
+        <section className="executive-country-chart" aria-label="생산국별 진행 현황"><div className="executive-chart-heading"><div><h3>생산국별 미입고 잔량</h3><p>선택 범위 전체 오더 · 조회 월 기간과 별도</p></div><strong className="executive-country-total">{number(report.current.outstanding)}<small>장</small></strong></div>
           {report.countries.some(country => country.current > 0) ? <div className="executive-country-bars">{report.countries.filter(country => country.current > 0).map(country => <article key={country.country} aria-label={`${country.country} 생산 현황`}><header><strong>{country.country}<small>{regionLabel(country.region)}</small></strong><span><b>{number(country.current)}</b>장 <small>{percent(country.current, report.current.outstanding)}</small></span></header><div className="executive-country-track" role="img" aria-label={`${country.country} 미입고 ${number(country.current)}장, 전체의 ${percent(country.current, report.current.outstanding)}`}><i className={`executive-${country.region}`} style={{ width: `${country.current / countryMaximum * 100}%` }}/></div><p>생산 중 {number(country.producing)} · 생산 대기 {number(country.awaiting)}{country.statusUnknown > 0 ? ` · 상태 확인 ${number(country.statusUnknown)}` : ''}</p></article>)}</div> : <p className="executive-empty">현재 선택 범위에 미입고 생산 오더가 없습니다.</p>}
           {report.current.statusUnknown > 0 && <p className="executive-data-note">생산 시작 상태 확인이 필요한 잔량 <strong>{number(report.current.statusUnknown)}장</strong>은 생산 중·대기와 구분했습니다.</p>}
         </section>
