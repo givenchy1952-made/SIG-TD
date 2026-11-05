@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Check, ClipboardCheck, History, Pencil, Plus, Ruler, Save, Trash2 } from 'lucide-react'
 import type { Profile, Status, Style, Workspace } from '../lib/types'
 import { STATUS_LABEL } from '../lib/types'
@@ -6,6 +6,7 @@ import { canViewStyle } from '../lib/permissions'
 import { blankProductionDetails, MEASUREMENT_SIZES, QUALITY_CATEGORIES, validateProductionDetails, type MeasurementRow, type ProductionDetailsInput } from '../lib/workflow-refinements'
 import { message } from '../lib/utils'
 import InspectionAssignmentPanel from './InspectionAssignmentPanel'
+import InlineProcessingPriceEditor from './InlineProcessingPriceEditor'
 import './production-details.css'
 
 export interface ProductionDetailsPanelProps {
@@ -17,6 +18,7 @@ export interface ProductionDetailsPanelProps {
   onSave: (styleId: string, lineId: string, data: ProductionDetailsInput, expectedVersion: number, reason: string) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
   onRefresh?: () => Promise<unknown>
+  pricingBlocked?: boolean
 }
 interface Draft { lineId: string; version: number; data: ProductionDetailsInput }
 type MeasurementPart = 'upper' | 'lower'
@@ -26,11 +28,14 @@ const numeric = (value: string): number | null => value.trim() === '' || !Number
 const show = (value: number | null) => value === null ? '—' : value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
 const payload = (record: { quality: ProductionDetailsInput['quality']; measurements: ProductionDetailsInput['measurements'] } | undefined) => record ? clone({ quality: record.quality, measurements: record.measurements }) : blankProductionDetails()
 
-export default function ProductionDetailsPanel({ style, workspace, profile, lineId, mode, onSave, onDirtyChange, onRefresh }: ProductionDetailsPanelProps) {
+export default function ProductionDetailsPanel({ style, workspace, profile, lineId, mode, onSave, onDirtyChange, onRefresh, pricingBlocked = false }: ProductionDetailsPanelProps) {
   const [selectedLineId, setSelectedLineId] = useState(lineId || style.production[0]?.id || '')
   const [part, setPart] = useState<MeasurementPart>('upper')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [assignmentDirty, setAssignmentDirty] = useState(false)
+  const [inlinePriceDirty, setInlinePriceDirty] = useState<Record<string, boolean>>({})
+  const reportInlinePriceDirty = useCallback((key: string, dirty: boolean) => setInlinePriceDirty(current => current[key] === dirty ? current : { ...current, [key]: dirty }), [])
+  const priceDirty = Object.values(inlinePriceDirty).some(Boolean)
   const [reason, setReason] = useState(''), [error, setError] = useState(''), [success, setSuccess] = useState(''), [busy, setBusy] = useState(false)
   const currentLineId = draft?.lineId || lineId || selectedLineId
   const line = style.production.find(item => item.id === currentLineId)
@@ -41,11 +46,11 @@ export default function ProductionDetailsPanel({ style, workspace, profile, line
   const selectionChanged = !!draft && !!lineId && lineId !== draft.lineId
   const stale = !!draft && ((record?.version || 0) !== draft.version || !line || selectionChanged)
   const ready = workspace.refinementsAvailable === true
-  useEffect(() => { onDirtyChange?.(!!draft || busy || assignmentDirty); return () => onDirtyChange?.(false) }, [!!draft, busy, assignmentDirty, onDirtyChange])
+  useEffect(() => { onDirtyChange?.(!!draft || busy || assignmentDirty || priceDirty); return () => onDirtyChange?.(false) }, [!!draft, busy, assignmentDirty, priceDirty, onDirtyChange])
   if (!canViewStyle(profile, style)) return null
 
   function begin() {
-    if (!line || !ready || !editable || assignmentDirty) return
+    if (!line || !ready || !editable || assignmentDirty || priceDirty || quality && pricingBlocked) return
     setDraft({ lineId: line.id, version: record?.version || 0, data: payload(record) }); setReason(''); setError(''); setSuccess('')
   }
   function updateQuality<K extends keyof ProductionDetailsInput['quality']>(key: K, value: ProductionDetailsInput['quality'][K]) {
@@ -76,8 +81,8 @@ export default function ProductionDetailsPanel({ style, workspace, profile, line
   function cancel() { setDraft(null); setReason(''); setError(''); setSuccess('') }
 
   return <section className={`production-details ${quality ? 'production-quality' : 'production-measurements'}`} aria-label={title}>
-    <div className="section-heading"><div><h3>{quality ? <ClipboardCheck size={17} /> : <Ruler size={17} />}{title}</h3><p className="muted">{quality ? '품목별 검사 수량·진행 상태와 결과를 확인합니다.' : '상의·하의 측정 위치별로 편차와 사이즈 치수를 입력합니다. 단위는 cm입니다.'}</p></div>{!draft && ready && editable && line && <button className="button" type="button" disabled={assignmentDirty} onClick={begin}><Pencil size={13} />{quality ? '품질 검사 수정' : '사이즈 측정 수정'}</button>}</div>
-    {!lineId && <label className="field production-details-color"><span className="field-label">생산 컬러</span><select className="select" aria-label={`${quality ? '품질 검사' : '사이즈 측정'} 컬러`} value={line?.id || ''} disabled={!!draft || busy || assignmentDirty} onChange={event => { setSelectedLineId(event.target.value); setError(''); setSuccess('') }}><option value="">컬러 선택</option>{style.production.map(item => <option key={item.id} value={item.id}>{item.color} · {style.code}{item.color}</option>)}</select></label>}
+    <div className="section-heading"><div><h3>{quality ? <ClipboardCheck size={17} /> : <Ruler size={17} />}{title}</h3><p className="muted">{quality ? '품목별 검사 수량·진행 상태와 결과를 확인합니다.' : '상의·하의 측정 위치별로 편차와 사이즈 치수를 입력합니다. 단위는 cm입니다.'}</p></div>{!draft && ready && editable && line && <button className="button" type="button" disabled={assignmentDirty || priceDirty || quality && pricingBlocked} onClick={begin}><Pencil size={13} />{quality ? '품질 검사 수정' : '사이즈 측정 수정'}</button>}</div>
+    {!lineId && <label className="field production-details-color"><span className="field-label">생산 컬러</span><select className="select" aria-label={`${quality ? '품질 검사' : '사이즈 측정'} 컬러`} value={line?.id || ''} disabled={!!draft || busy || assignmentDirty || priceDirty || quality && pricingBlocked} onChange={event => { setSelectedLineId(event.target.value); setError(''); setSuccess('') }}><option value="">컬러 선택</option>{style.production.map(item => <option key={item.id} value={item.id}>{item.color} · {style.code}{item.color}</option>)}</select></label>}
     {!ready ? <div className="production-details-notice" role="status"><AlertCircle size={16} /><span>{profile.role === 'factory' ? '관리자에게 품질 검사·치수표 기능 설정을 요청해 주세요.' : '품질 검사·치수표 저장은 005 업무 업데이트 SQL을 적용한 뒤 사용할 수 있습니다.'}</span></div> : !line ? <div className="empty-state">생산 컬러를 먼저 저장해 주세요.</div> : <>
       {stale && <div className="production-details-conflict" role="status"><History size={16} /><div><strong>{selectionChanged ? '선택한 컬러가 변경되었습니다.' : '다른 사용자가 먼저 수정했습니다.'}</strong><p>입력 내용은 유지됩니다. 편집을 취소하고 최신 품질 검사·치수표를 확인한 뒤 다시 입력해 주세요.</p></div><button className="button" type="button" disabled={busy} onClick={cancel}>편집 취소 · 최신 내역</button></div>}
       {error && <div className="error-message" role="alert">{error}</div>}{success && <div className="success-message" role="status"><Check size={14} />{success}</div>}
@@ -95,7 +100,8 @@ export default function ProductionDetailsPanel({ style, workspace, profile, line
       </>}
       {draft && <div className="production-details-footer"><label className="field"><span className="field-label">{quality ? '품질 검사' : '사이즈 측정'} 변경 사유</span><input className="input" aria-label={`${quality ? '품질 검사' : '사이즈 측정'} 변경 사유`} value={reason} maxLength={1000} disabled={busy} placeholder="변경 사유를 두 글자 이상 입력하세요" onChange={event => setReason(event.target.value)} /></label><div><button className="button" type="button" disabled={busy} onClick={cancel}>{quality ? '품질 검사' : '사이즈 측정'} 편집 취소</button><button className="button button-primary" type="button" disabled={busy || stale || reason.trim().length < 2} onClick={() => void save()}><Save size={13} />{busy ? '저장 중…' : `${quality ? '품질 검사' : '사이즈 측정'} 저장`}</button></div></div>}
       <div className="production-details-stamp"><History size={12} />{record ? `버전 ${record.version} · ${new Date(record.updatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}` : '아직 저장된 내역이 없습니다.'}<span>검사·치수표는 별도로 저장하며 변경 이력을 보존합니다.</span></div>
-      {quality && onRefresh && profile.role !== 'factory' && <fieldset className="inspection-assignment-boundary" disabled={!!draft || busy}><InspectionAssignmentPanel key={`${style.id}:${line.id}`} workspace={workspace} style={style} profile={profile} lineId={line.id} onChanged={onRefresh} onDirtyChange={setAssignmentDirty}/></fieldset>}
+      {quality && <InlineProcessingPriceEditor workspace={workspace} style={style} profile={profile} kind="quality" itemKey={record?.quality.category || data.quality.category} itemName={record?.quality.category || data.quality.category || "검사 품목 미등록"} lineId={line.id} blocked={!!draft || busy || assignmentDirty || pricingBlocked} onChanged={onRefresh} onDirtyChange={reportInlinePriceDirty}/>}
+      {quality && onRefresh && profile.role !== 'factory' && <fieldset className="inspection-assignment-boundary" disabled={!!draft || busy || priceDirty || pricingBlocked}><InspectionAssignmentPanel key={`${style.id}:${line.id}`} workspace={workspace} style={style} profile={profile} lineId={line.id} onChanged={onRefresh} onDirtyChange={setAssignmentDirty}/></fieldset>}
     </>}
   </section>
 }

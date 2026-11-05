@@ -128,6 +128,7 @@ test('기존 총수량 계획의 사이즈는 미등록으로 보존하고 담�
   await panel.getByRole('button', { name: '2차 사이즈별 수량 입력', exact: true }).click()
   await sizes(panel, 2, TWO)
   await panel.getByRole('button', { name: '부분 납기 저장', exact: true }).click()
+  await expect(panel).toContainText('부분 납기 일정을 저장했습니다.')
   const saved = (await snapshot(page)).partialDeliveryPlans![0]
   expect(saved.version).toBe(3)
   expect(saved.items.map(item => [item.id, item.quantity, item.dueDate, item.note])).toEqual(old.items.map(item => [item.id, item.quantity, item.dueDate, item.note]))
