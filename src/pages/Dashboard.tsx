@@ -8,6 +8,7 @@ import { Badge, Modal } from '../components/ui'
 import PrivateImage from '../components/PrivateImage'
 import MultiSelectFilter from '../components/MultiSelectFilter'
 import ProductionRoundBoard from '../components/ProductionRoundBoard'
+import ExecutiveProductionDashboard from '../components/ExecutiveProductionDashboard'
 import { resolveStyleImage } from '../lib/style-images'
 import { CHECKS, ROLE_LABEL, STAGE_LABEL, STATUS_LABEL, quantityTotal } from '../lib/types'
 import type { Attachment, CheckKey, ProductionLine, Profile, Stage, Status, Style, Workspace } from '../lib/types'
@@ -206,6 +207,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
       <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{profile.role !== 'factory' && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
     </div>
 
+    {view === 'overview' && profile.role !== 'factory' && <ExecutiveProductionDashboard workspace={workspace} profile={profile}/>}
     {view === 'production' && <ProductionRoundBoard workspace={workspace} onOpenStyle={onOpenStyle}/>}
 
     <div className="dashboard-kpis">

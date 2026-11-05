@@ -99,6 +99,7 @@ test('본사의 수정 요청 후 업체가 재제출하며 0원 승인도 미�
   await panel.getByRole('button', { name: '수정 요청', exact: true }).click()
   await panel.getByLabel('생산 조건 변경 사유', { exact: true }).fill('QA 납기 앞당김과 단가 재협의 요청')
   await panel.getByRole('button', { name: '수정 요청 전달', exact: true }).click()
+  await expect(panel.getByRole('button', { name: '수정 요청 전달', exact: true })).not.toBeVisible()
   expect((await snapshot(page)).productionConditions![0].status).toBe('revision_requested')
   expect((await snapshot(page)).supplierProductionOrders![0].startedAt).toBeNull()
   await close(detail); await role(page, FACTORY); ({ detail, panel } = await open(page))
