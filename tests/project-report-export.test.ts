@@ -27,26 +27,26 @@ describe('프로젝트 명칭 기반 공통 보고서 범위', () => {
     }
     expect(workspace).toEqual(before)
   })
-  it('스타일·샘플·생산 보고서에 공식 명칭과 코드를 모두 출력하고 기존 수량 열 위치를 유지한다', () => {
+  it('스타일·샘플·생산 보고서에 생산 명칭만 출력하고 예산 코드는 제외하며 기존 수량 열 위치를 유지한다', () => {
     const { workspace } = fixture()
     const sheets = buildExportSheets(workspace, workspace.styles)
     for (const sheet of sheets) {
       expect(sheet.headers).toContain('프로젝트 명칭')
-      expect(sheet.headers).toContain('프로젝트 코드')
+      expect(sheet.headers).not.toContain('프로젝트 코드')
       for (const row of sheet.rows) expect(row).toHaveLength(sheet.headers.length)
     }
     const styleSheet = sheets[0]
     expect(styleSheet.headers[12]).toBe('오더 수량')
     const row = styleSheet.rows[0]
     expect(row[styleSheet.headers.indexOf('프로젝트 명칭')]).toBe('시그니피컨트 공식 명칭')
-    expect(row[styleSheet.headers.indexOf('프로젝트 코드')]).toBe(workspace.projects[0].code)
+    expect(JSON.stringify(sheets)).not.toContain(workspace.projects[0].code)
   })
-  it('명칭 누락은 코드로 표시하고 선택한 컬러를 다시 확대하지 않는다', () => {
+  it('명칭 누락은 등록 안내로 표시하고 선택한 컬러를 다시 확대하지 않는다', () => {
     const { workspace, first } = fixture()
     first.name = ''
     const style = workspace.styles[0], line = style.production[0]
     const sheets = buildExportSheets(workspace, [{ ...style, production: [line], colors: [line.color] }], { projectIds: [first.id] })
-    expect(sheets[0].rows[0][sheets[0].headers.indexOf('프로젝트 명칭')]).toBe(first.code)
+    expect(sheets[0].rows[0][sheets[0].headers.indexOf('프로젝트 명칭')]).toBe('프로젝트 명칭 미등록')
     expect(sheets[2].rows).toHaveLength(1)
     expect(sheets[2].rows[0][sheets[2].headers.indexOf('컬러')]).toBe(line.color)
   })

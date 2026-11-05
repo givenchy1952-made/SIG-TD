@@ -59,7 +59,7 @@ describe('프로젝트·생산 차수별 오더 업로드', () => {
   it('등록되지 않은 A열 프로젝트는 기존 스타일 프로젝트로 대체하지 않고 전체 실패한다', () => {
     const { workspace, actor, style, line } = fixture(), before = structuredClone(workspace)
     const changes: OrderImportChange[] = [{ styleId: style.id, expectedVersion: style.version, lines: [{ lineId: line.id, color: line.color, quantities: { ...emptyQuantities(), S: 4 }, source: source({ ...workspace.projects[0], code: 'UNKNOWN-PROJECT' }) }] }]
-    expect(() => importProductionOrdersInWorkspace(workspace, actor, crypto.randomUUID(), changes, 'replace', '알 수 없는 프로젝트')).toThrow('A열 프로젝트')
+    expect(() => importProductionOrdersInWorkspace(workspace, actor, crypto.randomUUID(), changes, 'replace', '알 수 없는 프로젝트')).toThrow('A열 예산 관리 코드')
     expect(workspace).toEqual(before)
   })
   it('같은 품번·컬러에 섞인 프로젝트와 등록된 명칭·시즌 불일치를 거부한다', () => {

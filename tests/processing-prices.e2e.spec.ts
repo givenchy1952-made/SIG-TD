@@ -80,7 +80,7 @@ test('컬러·작업별 단가는 새로고침 후에도 유지하고 명시적�
   expect(after.styles).toEqual(before.styles)
   await detail.getByRole('button', { name: '을지 다운로드', exact: true }).click()
   const exporter = page.getByRole('dialog', { name: '마감 양식에 채워서 다운로드', exact: true })
-  await exporter.getByRole('tab', { name: '중화라벨', exact: true }).click()
+  await exporter.getByRole('tab', { name: '라벨', exact: true }).click()
   const pending = page.waitForEvent('download')
   await exporter.getByRole('button', { name: '을지 다운로드', exact: true }).click()
   const download = await pending, workbook = new ExcelJS.Workbook()

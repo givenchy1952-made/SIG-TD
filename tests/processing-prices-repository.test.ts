@@ -57,4 +57,11 @@ describe('가공·품질 단가 저장·클라우드 읽기', () => {
     ])
     expect(fixture.requests.some(request => request.table === 'processing_unit_price_audits')).toBe(false)
   })
+  it('업체 단가의 0원과 미기재를 구분하고 업체명·카탈로그·기준 버전 스냅샷을 읽는다', async () => {
+    const row = { style_id: 'style', line_id: 'color', kind: 'label', item_key: 'item', unit_cost: '0', version: 4, created_at: 'created', updated_at: 'updated', updated_by: 'actor', supplier_factory_id: 'vendor', supplier_name_snapshot: '저장한 업체명', supplier_catalog_id: 'catalog', master_rate_version: 2 }
+    const fixture = client(undefined, [[row, { ...row, item_key: 'blank', unit_cost: null }]])
+    const result = await loadProcessingUnitPrices(fixture.value)
+    expect(result.processingUnitPrices[0]).toMatchObject({ unitCost: 0, supplierFactoryId: 'vendor', supplierNameSnapshot: '저장한 업체명', supplierCatalogId: 'catalog', masterRateVersion: 2 })
+    expect(result.processingUnitPrices[1].unitCost).toBeNull()
+  })
 })

@@ -8,7 +8,7 @@ export type RoundImportWorkspace = ProductionLedgerWorkspace & { productionOrder
 const key = (value: string) => value.trim().toUpperCase()
 const literal = (value: unknown): string => {
   if (value == null) return ''
-  if (typeof value !== 'string' && typeof value !== 'number') throw new Error('A·M·L열 프로젝트 코드·명칭·시즌 값을 확인해 주세요.')
+  if (typeof value !== 'string' && typeof value !== 'number') throw new Error('A열 예산 관리 코드·M열 프로젝트 명칭·L열 시즌 값을 확인해 주세요.')
   return String(value).trim()
 }
 
@@ -21,11 +21,11 @@ export function projectForImportLine(workspace: Workspace, styleId: string, line
   if (codes.size > 1) throw new Error('같은 품번·컬러에 서로 다른 프로젝트가 있습니다. 프로젝트별로 나누어 업로드해 주세요.')
   const code = [...codes][0]
   const matches = code ? workspace.projects.filter(project => !!project.code?.trim() && key(project.code) === code) : workspace.projects.filter(project => project.id === style.projectId)
-  if (matches.length !== 1) throw new Error('A열 프로젝트 코드를 먼저 등록해 주세요. 스타일·프로젝트 등록에서 해당 프로젝트를 확인한 뒤 다시 업로드해 주세요.')
+  if (matches.length !== 1) throw new Error('A열 예산 관리 코드와 M열 프로젝트 명칭을 본사 프로젝트 관리에서 연결한 뒤 다시 업로드해 주세요.')
   const project = matches[0]
   for (const row of line.source?.rows || []) {
     const name = literal(row.columns.M), season = literal(row.columns.L)
-    if (name && name !== project.name.trim() || season && season !== project.season.trim()) throw new Error('A열 프로젝트에 등록된 명칭·시즌이 M·L열과 다릅니다. 프로젝트 기본 정보를 확인해 주세요.')
+    if (name && name !== project.name.trim() || season && season !== project.season.trim()) throw new Error('A열 예산 코드에 연결된 프로젝트 명칭·시즌이 M·L열과 다릅니다. 프로젝트 기본 정보를 확인해 주세요.')
   }
   return project
 }

@@ -108,8 +108,7 @@ test('동일 품번을 새 프로젝트의 별도 생산 차수로 등록하고 
   const { ledger } = await open(page)
   await ledger.getByRole('button', { name: '생산 차수 추가', exact: true }).click()
   await ledger.getByLabel('생산 차수명', { exact: true }).fill('QA 다른 프로젝트 리오더')
-  await ledger.getByLabel('생산 차수 프로젝트', { exact: true }).selectOption(project.id)
-  await ledger.getByLabel('생산 차수 프로젝트 코드', { exact: true }).fill('QA-SECOND-PROJECT-2026')
+  await ledger.getByLabel('생산 차수 프로젝트 명칭', { exact: true }).selectOption(project.id)
   await expect(ledger.getByLabel('생산 차수 단가', { exact: true })).toBeDisabled()
   await ledger.getByLabel('차수 오더 S', { exact: true }).fill('25')
   await ledger.getByLabel('생산 차수 변경 사유', { exact: true }).fill('QA 다른 프로젝트 독립 리오더')
@@ -118,7 +117,7 @@ test('동일 품번을 새 프로젝트의 별도 생산 차수로 등록하고 
   const after = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), STORAGE)
   expect(after.productionRuns).toHaveLength(2)
   expect(after.productionRuns.find((item: { id: string }) => item.id === before.productionRuns[0].id)).toEqual(before.productionRuns[0])
-  expect(after.productionRuns.find((item: { projectId: string }) => item.projectId === project.id)).toMatchObject({ projectCode: 'QA-SECOND-PROJECT-2026', unitCost: null, order: { S: 25 }, round: 1 })
+  expect(after.productionRuns.find((item: { projectId: string }) => item.projectId === project.id)).toMatchObject({ projectCode: project.code || '', unitCost: null, order: { S: 25 }, round: 1 })
   expect(after.styles).toEqual(before.styles)
 })
 
@@ -134,7 +133,7 @@ test('프로젝트 B로 필터한 을지에는 같은 품번의 미확정 A 차�
     runB.snapshot.projectId = projectB.id; runB.snapshot.projectCode = projectB.code; runB.snapshot.round = 1
     style.projectId = projectB.id
     localStorage.setItem(key, JSON.stringify(workspace))
-    return `${projectB.name} · ${projectB.code}`
+    return projectB.name
   }, STORAGE)
   await page.reload()
   await page.getByRole('button', { name: '프로젝트 명칭', exact: true }).click()

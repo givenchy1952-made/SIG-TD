@@ -53,7 +53,7 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
   const rows: SigEuljiRow[] = [], errors: string[] = []
   const profile = workspace.profiles.find(item => item.id === suppliedProfile.id)
   if (!profile?.approved || !profile.active || profile.role === 'factory') return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
-  if (workspace.settlementTermsAvailable !== true) errors.push('을지 단가·프로젝트 코드 저장 기능을 먼저 설정해 주세요. 관리자에게 004_settlement_terms.sql 적용을 요청하세요.')
+  if (workspace.settlementTermsAvailable !== true) errors.push('본사 정산용 을지 단가·예산 관리 코드 저장 기능을 먼저 설정해 주세요. 관리자에게 004_settlement_terms.sql 적용을 요청하세요.')
   const selectedIds = new Set<string>()
   for (const selected of styles) {
     if (selectedIds.has(selected.id)) { errors.push('내보낼 스타일이 중복되었습니다.'); continue }
@@ -129,7 +129,7 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
     if (!selectedLines.length || selectedLines.length !== selected.production.length) continue
     const owners = selectedLines.map(line => ownerName(workspace, line.ownerId ?? style.ownerId))
     if (owners.some(owner => owner === null)) { errors.push(`${style.code}: 본사 담당자를 확인해 주세요.`); continue }
-    const savedPrice = (lineId: string, itemKey: string): number | null => workspace.processingUnitPrices?.find(price => price.styleId === style.id && price.lineId === lineId && price.kind === kind && price.itemKey === itemKey)?.unitCost ?? null
+    const savedQuote = (lineId: string, itemKey: string) => workspace.processingUnitPrices?.find(price => price.styleId === style.id && price.lineId === lineId && price.kind === kind && price.itemKey === itemKey)
     const actualQuantity = (line: typeof style.production[number]) => quantityTotal(kind === 'label' ? line.shipped : line.received)
     // Keep malformed or excessive source amounts inside the normal row error
     // path below instead of throwing while the export preview is rendering.
@@ -142,8 +142,13 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
         const owner = ownerName(workspace, line.ownerId ?? style.ownerId)!
         const quality = workspace.productionDetails?.find(item => item.styleId === style.id && item.lineId === line.id)?.quality
         if (!quality?.category) continue
-        const unitCost = savedPrice(line.id, quality.category), receivedQuantity = actualQuantity(line)
-        rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: '', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: `품질검사 · ${quality.category}`, note: [`검사 요청 수량 ${quality.quantity}개`, STATUS_LABEL[quality.status], quality.note].filter(Boolean).join(' / ') })
+        const quote = savedQuote(line.id, quality.category)
+        const assignment = workspace.inspectionAssignments?.find(item => item.styleId === style.id && item.lineId === line.id)
+        const supplier = assignment?.provider ? workspace.factories.find(factory => factory.serviceType === 'inspection' && factory.inspectionProvider === assignment.provider) : undefined
+        const matched = supplier ? quote?.supplierFactoryId === supplier.id : workspace.inspectionAssignmentsAvailable !== true && !quote?.supplierFactoryId && !assignment?.provider
+        const unitCost = matched ? quote?.unitCost ?? null : null, receivedQuantity = actualQuantity(line)
+        const supplierName = supplier ? matched && quote?.supplierNameSnapshot || supplier.name : ''
+        rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: supplierName, colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: `품질검사 · ${quality.category}`, note: [`검사 요청 수량 ${quality.quantity}개`, STATUS_LABEL[quality.status], quality.note].filter(Boolean).join(' / ') })
       }
     } else {
       const records = workspace.operations?.styleOperations.filter(item => item.styleId === style.id && item.kind === kind && !item.voided) || []
@@ -154,8 +159,11 @@ function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], supp
           if (seenWork.has(key)) { errors.push(`${fullStyleSku(style.code, line.color)}: 같은 작업이 중복되었습니다. 저장된 가공 내역을 확인해 주세요.`); continue }
           seenWork.add(key)
           const owner = ownerName(workspace, line.ownerId ?? style.ownerId)!
-          const unitCost = savedPrice(line.id, item.id), receivedQuantity = actualQuantity(line)
-          rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수', colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: item.name, note: [item.specification, `스타일 공통 작업 요청 수량 ${item.quantity}개`, `로스 수량 ${item.lossQuantity}개`, `가공 완료 수량 ${item.completedQuantity}개`, STATUS_LABEL[item.status], item.note, record.note].filter(Boolean).join(' / ') })
+          const quote = savedQuote(line.id, item.id)
+          const matched = record.supplierFactoryId ? quote?.supplierFactoryId === record.supplierFactoryId && (!quote.supplierCatalogId || quote.supplierCatalogId === item.catalogId) : !quote?.supplierFactoryId
+          const unitCost = matched ? quote?.unitCost ?? null : null, receivedQuantity = actualQuantity(line)
+          const supplierName = record.supplierFactoryId ? record.supplierNameSnapshot || workspace.factories.find(factory => factory.id === record.supplierFactoryId)?.name || '' : kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수'
+          rows.push({ ...projectMetadata, kind, projectCode: resolveProject(style, [line.id]), receivedAtISO: validDate(line.receivedAt) ? line.receivedAt : '', factory: supplierName, colorStyleCode: fullStyleSku(style.code, line.color), unitCost, orderQuantity: quantityTotal(line.order), receivedQuantity, unit: 'EA', netAmount: amount(unitCost, receivedQuantity), owner, itemName: item.name, note: [item.specification, `스타일 공통 작업 요청 수량 ${item.quantity}개`, `로스 수량 ${item.lossQuantity}개`, `가공 완료 수량 ${item.completedQuantity}개`, STATUS_LABEL[item.status], item.note, record.note].filter(Boolean).join(' / ') })
         }
       }
     }
@@ -194,7 +202,7 @@ function validateRow(row: SigEuljiRow): void {
   }
   if (row.kind) {
     if (!['label', 'embroidery', 'quality'].includes(row.kind) || row.projectCode !== '' && !projectCode(row.projectCode) || !optionalOwner(row.owner) || !text(row.colorStyleCode, 62) || row.receivedAtISO !== '' && !validDate(row.receivedAtISO) || row.unit !== 'EA' || !quantity(row.orderQuantity) || row.receivedQuantity !== null && !quantity(row.receivedQuantity) || !text(row.itemName, 4000) || row.note !== undefined && (typeof row.note !== 'string' || row.note.length > 32767 || XML_CONTROL.test(row.note))) throw new Error('가공·품질 을지의 품번·작업명·수량·담당자·날짜를 확인해 주세요.')
-    if (row.kind === 'quality' ? row.factory !== '' : row.factory !== (row.kind === 'label' ? '주식회사 중화라벨' : 'BY컴퓨터자수')) throw new Error('가공·품질 을지의 업체명을 확인해 주세요.')
+    if (!(row.factory === '' && row.kind === 'quality') && !text(row.factory)) throw new Error('가공·품질 을지의 업체명을 확인해 주세요.')
     if (row.unitCost !== null) cents(row.unitCost)
     if (row.netAmount !== (row.unitCost === null || row.receivedQuantity === null ? null : sigEuljiNetAmount(row.unitCost, row.receivedQuantity))) throw new Error('가공·품질 을지의 단가·수량·금액을 확인해 주세요.')
     return
@@ -285,8 +293,8 @@ export async function fillSigEuljiTemplate(source: Uint8Array, rows: SigEuljiRow
     let guideName = '프로젝트 안내', nameSuffix = 2
     while (workbook.includes(`name="${guideName}"`)) guideName = `프로젝트 안내 ${nameSuffix++}`
     const guideRows: (string | number)[][] = [
-      ['을지 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'],
-      ...rows.map((row, index) => [index + 3, row.projectName?.trim() || row.projectCode, row.projectCode, row.season || '', row.colorStyleCode, row.projectId || '']),
+      ['을지 행', '프로젝트 명칭', '예산 관리 코드 (A열)', '시즌', '스타일코드', '프로젝트 ID'],
+      ...rows.map((row, index) => [index + 3, row.projectName?.trim() || '프로젝트 명칭 미등록', row.projectCode, row.season || '', row.colorStyleCode, row.projectId || '']),
     ]
     const guideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:F${guideRows.length}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="12" customWidth="1"/><col min="2" max="3" width="38" customWidth="1"/><col min="4" max="5" width="22" customWidth="1"/><col min="6" max="6" width="40" customWidth="1"/></cols><sheetData>${guideRows.map((values, index) => `<row r="${index + 1}">${values.map((value, column) => literalCell(String.fromCharCode(65 + column), index + 1, value)).join('')}</row>`).join('')}</sheetData><autoFilter ref="A1:F${guideRows.length}"/></worksheet>`
     zip.file(`xl/worksheets/sheet${sheetId}.xml`, guideXml)

@@ -17,7 +17,7 @@ describe('프로젝트 명칭 안내 시트를 통한 SIG 고정 을지 보존',
     const workbook = await open(await fillSigEuljiTemplate(await source(), rows))
     expect(workbook.worksheets.map(sheet => sheet.name)).toEqual(['대금지급(을)', '프로젝트 안내'])
     const guide = workbook.getWorksheet('프로젝트 안내')!
-    expect(guide.getRow(1).values).toEqual([, '을지 행', '프로젝트 명칭', '프로젝트 코드', '시즌', '스타일코드', '프로젝트 ID'])
+    expect(guide.getRow(1).values).toEqual([, '을지 행', '프로젝트 명칭', '예산 관리 코드 (A열)', '시즌', '스타일코드', '프로젝트 ID'])
     expect(guide.getRow(2).values).toEqual([, 3, rows[0].projectName, rows[0].projectCode, '2026FY', rows[0].colorStyleCode, 'project-a'])
     expect(guide.getRow(3).values).toEqual([, 4, rows[1].projectName, rows[1].projectCode, '2026FY', rows[1].colorStyleCode, 'project-b'])
     expect(guide.autoFilter).toBe('A1:F3')
@@ -49,11 +49,11 @@ describe('프로젝트 명칭 안내 시트를 통한 SIG 고정 을지 보존',
     expect(guide.getCell('F2').value).toBe('selected')
   })
 
-  it('명칭이 비어 있으면 기존 프로젝트 코드를 쓰고 Excel 수식·XML 기호는 문자열로 보존한다', async () => {
+  it('명칭이 비어 있으면 등록 안내를 쓰고 예산 코드를 대신 쓰지 않으며 Excel 수식·XML 기호는 문자열로 보존한다', async () => {
     const malicious = '=HYPERLINK("https://example.test","공식 & <명칭>")'
     const workbook = await open(await fillSigEuljiTemplate(await source(), [row({ projectName: '' }), row({ projectName: malicious })]))
     const guide = workbook.getWorksheet('프로젝트 안내')!
-    expect(guide.getCell('B2').value).toBe(row().projectCode)
+    expect(guide.getCell('B2').value).toBe('프로젝트 명칭 미등록')
     expect(guide.getCell('B3').value).toBe(malicious)
     expect(guide.getCell('B3').type).toBe(ExcelJS.ValueType.String)
   })
@@ -81,6 +81,6 @@ describe('프로젝트 명칭 안내 시트를 통한 SIG 고정 을지 보존',
     expect(result.rows[0]).toMatchObject({ projectId: project.id, projectName: '공식 프로젝트 명칭', projectCode: project.code, season: '2026FY', netAmount: 200 })
     expect(workspace).toEqual(before)
     project.name = ''
-    expect(buildSigEuljiRows(workspace, [style], profile).rows[0].projectName).toBe(project.code)
+    expect(buildSigEuljiRows(workspace, [style], profile).rows[0].projectName).toBe('프로젝트 명칭 미등록')
   })
 })

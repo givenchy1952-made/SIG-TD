@@ -5,7 +5,7 @@ import { validateOperationReason } from './operations-domain'
 
 export function validateSettlementTerms(data: SettlementTermsInput): void {
   if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length !== 3 || !['projectCode', 'unitCost', 'itemType'].every(key => key in data)) throw new Error('을지 정산 정보의 항목을 확인해 주세요.')
-  if (typeof data.projectCode !== 'string' || data.projectCode.length > 120 || /[\x00-\x1f\x7f]/.test(data.projectCode)) throw new Error('프로젝트 코드는 제어 문자 없이 120자 이내로 입력해 주세요.')
+  if (typeof data.projectCode !== 'string' || data.projectCode.length > 120 || /[\x00-\x1f\x7f]/.test(data.projectCode)) throw new Error('예산 관리 코드는 제어 문자 없이 120자 이내로 입력해 주세요.')
   if (!['product', 'fabric', 'label'].includes(data.itemType)) throw new Error('제품·원단·라벨 중 정산 품목 종류를 선택해 주세요.')
   if (data.unitCost !== null && (typeof data.unitCost !== 'number' || !Number.isFinite(data.unitCost) || data.unitCost < 0 || data.unitCost > 1_000_000_000 || !/^\d+(?:\.\d{1,2})?$/.test(String(data.unitCost)))) throw new Error('장당 원가는 미기재 또는 0~1,000,000,000 범위의 소수 둘째 자리까지 입력해 주세요.')
 }

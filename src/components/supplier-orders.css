@@ -1,11 +1,24 @@
 .supplier-orders { display: grid; gap: 20px; }
 .supplier-orders h2, .supplier-acceptance-record h4, .supplier-po-content summary { display: flex; align-items: center; gap: 7px; }
-.supplier-order-picker { max-width: 650px; }
+.supplier-order-selection { min-width: 0; }
+.supplier-order-selection > h3 { font-size: 13px; margin: 0 0 12px; }
+.supplier-order-choice-wrap { overflow-x: auto; max-width: 100%; }
+.supplier-order-choice-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 12px; }
+.supplier-order-choice-table th,.supplier-order-choice-table td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #e5eaf1; }
+.supplier-order-choice-table th { color: #7f8ca0; font-size: 11px; font-weight: 500; background: #f7f9fc; }
+.supplier-order-choice-table th:last-child,.supplier-order-choice-table td:last-child { text-align: right; white-space: nowrap; }
+.supplier-order-choice-table tr.selected { background: #f1f6fb; }
+.supplier-order-radio { display: flex; gap: 9px; align-items: start; line-height: 1.6; cursor: pointer; }
+.supplier-order-radio input { margin-top: 3px; flex-shrink: 0; accent-color: #1c2a3e; }
+.supplier-order-reference { display: block; color: var(--muted, #7f8ca0); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; margin: 5px 0 0 23px; }
+.supplier-order-summary { display: grid; grid-template-columns: 2fr 1.4fr .7fr .8fr; gap: 16px; margin: 0; }
+.supplier-order-summary dt { color: var(--muted, #7f8ca0); font-size: 11px; margin-bottom: 7px; }
+.supplier-order-summary dd { margin: 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .supplier-order-card { padding: 22px; display: grid; gap: 20px; min-width: 0; }
 .supplier-order-card > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .supplier-order-card > header strong { color: var(--muted, #7f8ca0); font-size: 11px; }
 .supplier-order-card h3 { margin: 7px 0 0; font-size: 15px; overflow-wrap: anywhere; }
-.supplier-order-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.supplier-order-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
 .supplier-order-facts dt, .supplier-acceptance-record dt { color: var(--muted, #7f8ca0); font-size: 11px; margin-bottom: 7px; }
 .supplier-order-facts dd, .supplier-acceptance-record dd { margin: 0; font-size: 13px; }
 .supplier-order-table { overflow-x: auto; }
@@ -79,3 +92,4 @@
   .conditions-editor { padding: 14px; }
   .conditions-editor .form-grid { grid-template-columns: 1fr!important; }
 }
+@media(max-width:600px) { .supplier-order-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap:14px; } .supplier-order-choice-table { min-width:480px; } }

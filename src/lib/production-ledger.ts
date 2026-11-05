@@ -63,7 +63,7 @@ export function assertProductionLedgerTotals(workspace: ProductionLedgerWorkspac
 export function saveProductionRunInWorkspace(workspace: ProductionLedgerWorkspace, supplied: Profile, id: string, styleId: string, lineId: string, data: ProductionRunInput, expectedVersion: number, reason: string): ProductionLedgerWorkspace {
   const person = actor(workspace, supplied), style = parent(workspace, person, styleId, lineId); validateOperationReason(reason); validateProductionRunInput(data)
   const project = workspace.projects.find(item => item.id === data.projectId)
-  if (!project || project.code?.trim() && project.code.trim() !== data.projectCode.trim()) throw new Error('등록된 프로젝트와 프로젝트 코드를 확인해 주세요.')
+  if (!project || project.code?.trim() && project.code.trim() !== data.projectCode.trim()) throw new Error('선택한 프로젝트 명칭과 본사에 등록된 예산 관리 코드의 연결을 확인해 주세요.')
   if (!isUuid(id) || !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) throw new Error('생산 차수 버전을 확인해 주세요.')
   const prior = workspace.productionRuns?.find(run => run.id === id)
   if (workspace.productionPoLinksAvailable === true && data.poId && (!prior || prior.poId !== data.poId)) throw new Error('PO_LINK_CONFIRMATION_REQUIRED: 차수를 먼저 저장한 뒤 생산 조건 협의·승인에서 발송 문서와 수량을 확인해 연결해 주세요.')
@@ -95,7 +95,7 @@ export function allocateProductionReceiptInWorkspace(workspace: ProductionLedger
   const run = openRun(workspace, runId, expectedRunVersion); parent(workspace, person, run.styleId, run.lineId)
   assertProductionRunStarted(workspace, runId)
   if (!isUuid(id) || workspace.productionReceipts?.some(receipt => receipt.id === id) || !keys(data, ['receivedAt', 'quantities']) || !text(data.receivedAt, 10, true) || !date(data.receivedAt)) throw new Error('입고 배분 식별자·일자를 확인해 주세요.')
-  validateRunQuantities(data.quantities); if (!quantityTotal(data.quantities)) throw new Error('배분할 입고 수량을 입력해 주세요.'); if (run.unitCost === null || !run.projectCode.trim()) throw new Error('차수 단가와 프로젝트 코드를 먼저 입력해 주세요.')
+  validateRunQuantities(data.quantities); if (!quantityTotal(data.quantities)) throw new Error('배분할 입고 수량을 입력해 주세요.'); if (run.unitCost === null || !run.projectCode.trim()) throw new Error('차수 단가와 본사 정산용 예산 관리 코드 설정을 확인해 주세요.')
   const prior = (workspace.productionReceipts || []).filter(receipt => receipt.runId === runId && !receipt.voided)
   for (const size of SIZES) if (prior.reduce((sum, receipt) => sum + receipt.quantities[size], 0) + data.quantities[size] > run.order[size]) throw new Error('입고 배분이 해당 생산 차수의 오더 수량을 초과합니다.')
   const next = structuredClone(workspace), now = new Date().toISOString(), amounts = productionAmounts(run.unitCost, quantityTotal(data.quantities))

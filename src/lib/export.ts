@@ -33,12 +33,12 @@ export function buildExportSheets(workspace: Workspace, selectedStyles: Style[],
   const styleSheet: ExportSheet = {
     name: '스타일',
     headers: ['스타일 ID', '시즌', '프로젝트', '스타일 코드', '스타일명', '분류', '공장', '담당자', '컬러', '기준 납기', '진행 단계', 'PP 승인', '오더 수량', '패킹 수량', '실 출고 수량', '실 입고 수량', '샘플 차수 수', '본사 요청·메모', '최종 수정일', '수정자', '버전'],
-    rows: styles.map(style => [style.id, style.season, projectName(style.projectId), style.code, style.name, style.category, factoryName(style.factoryId), ownerName(style.ownerId), style.colors.join(', '), style.dueDate, STAGE_LABEL[style.stage], style.ppApproved ? '승인' : '미승인', sum(style, 'order'), sum(style, 'packing'), sum(style, 'shipped'), sum(style, 'received'), style.samples.length, style.notes, style.updatedAt, ownerName(style.updatedBy), style.version]),
+    rows: styles.map(style => [style.id, getProjectIdentity(workspace, style.projectId).season || style.season, projectName(style.projectId), style.code, style.name, style.category, factoryName(style.factoryId), ownerName(style.ownerId), style.colors.join(', '), style.dueDate, STAGE_LABEL[style.stage], style.ppApproved ? '승인' : '미승인', sum(style, 'order'), sum(style, 'packing'), sum(style, 'shipped'), sum(style, 'received'), style.samples.length, style.notes, style.updatedAt, ownerName(style.updatedBy), style.version]),
   }
   const sampleSheet: ExportSheet = {
     name: '샘플 이력',
     headers: ['시즌', '프로젝트', '스타일 코드', '스타일명', '샘플 ID', '샘플 차수', 'PP 샘플', '상태', '공장', '담당자', '요청일', '제작 예정일', '제작 완료일', '발송일', '본사 입고일', '리뷰·컨펌일', '운송장 번호', '수정 요청사항', '공장 코멘트', '샘플 최종 수정일'],
-    rows: styles.flatMap(style => style.samples.map(sample => [style.season, projectName(style.projectId), style.code, style.name, sample.id, sample.round, sample.isPP ? 'PP' : '일반', STATUS_LABEL[sample.status], factoryName(sample.factoryId), ownerName(sample.ownerId), sample.requestedAt, sample.plannedAt, sample.completedAt, sample.shippedAt, sample.receivedAt, sample.reviewedAt, sample.tracking, sample.request, sample.factoryComment, sample.updatedAt])),
+    rows: styles.flatMap(style => style.samples.map(sample => [getProjectIdentity(workspace, style.projectId).season || style.season, projectName(style.projectId), style.code, style.name, sample.id, sample.round, sample.isPP ? 'PP' : '일반', STATUS_LABEL[sample.status], factoryName(sample.factoryId), ownerName(sample.ownerId), sample.requestedAt, sample.plannedAt, sample.completedAt, sample.shippedAt, sample.receivedAt, sample.reviewedAt, sample.tracking, sample.request, sample.factoryComment, sample.updatedAt])),
   }
   const productionSheet: ExportSheet = {
     name: '메인 생산',
@@ -46,7 +46,7 @@ export function buildExportSheets(workspace: Workspace, selectedStyles: Style[],
       const label = { order: '오더', packing: '패킹리스트', shipped: '실 출고', received: '실 입고' }[key]
       return [...SIZES.map(size => `${label} ${size}`), `${label} 합계`]
     }), '컨펌 예정일', '실 출고일', '실 입고일', '세금계산서 발행', '정산 금액(KRW)', '결제 마감일', '결제 상태', '사이즈 측정', '공장 코멘트', '최종 수정일'],
-    rows: styles.flatMap(style => style.production.map(line => [style.season, projectName(style.projectId), factoryName(style.factoryId), ownerName(line.ownerId ?? style.ownerId), style.code, style.name, fullStyleSku(style.code, line.color), line.color, style.dueDate, style.ppApproved ? '승인' : '미승인', ...CHECKS.map(([key]) => STATUS_LABEL[line.checks[key]]), ...(['order', 'packing', 'shipped', 'received'] as const).flatMap(key => [...SIZES.map(size => line[key][size]), quantityTotal(line[key])]), line.confirmDue, line.shippedAt, line.receivedAt, STATUS_LABEL[line.invoice], line.invoiceAmount, line.paymentDue, STATUS_LABEL[line.paymentStatus], line.measurements, line.factoryComment, style.updatedAt])),
+    rows: styles.flatMap(style => style.production.map(line => [getProjectIdentity(workspace, style.projectId).season || style.season, projectName(style.projectId), factoryName(style.factoryId), ownerName(line.ownerId ?? style.ownerId), style.code, style.name, fullStyleSku(style.code, line.color), line.color, style.dueDate, style.ppApproved ? '승인' : '미승인', ...CHECKS.map(([key]) => STATUS_LABEL[line.checks[key]]), ...(['order', 'packing', 'shipped', 'received'] as const).flatMap(key => [...SIZES.map(size => line[key][size]), quantityTotal(line[key])]), line.confirmDue, line.shippedAt, line.receivedAt, STATUS_LABEL[line.invoice], line.invoiceAmount, line.paymentDue, STATUS_LABEL[line.paymentStatus], line.measurements, line.factoryComment, style.updatedAt])),
   }
   const auditSheet: ExportSheet = {
     name: '변경 이력',
@@ -63,20 +63,20 @@ export function buildExportSheets(workspace: Workspace, selectedStyles: Style[],
     headers: ['스타일 코드', '샘플 ID', '파일명', '종류', '크기(bytes)', '업로드 담당자', '업로드일'],
     rows: workspace.attachments.filter(attachment => ids.has(attachment.styleId)).map(attachment => [styleCode(attachment.styleId), attachment.sampleId ?? '', attachment.name, attachment.mime, attachment.size, ownerName(attachment.uploadedBy), attachment.createdAt]),
   }
-  // Append project keys so existing quantity/status/owner column positions stay
-  // compatible with consumers of these non-fixed-layout reports.
+  // Production reports communicate M (name) and L (season). A is a private
+  // budget reference and belongs only to the separate accounting templates.
   for (const sheet of [styleSheet, sampleSheet, productionSheet]) {
     sheet.headers[sheet.headers.indexOf('프로젝트')] = '프로젝트 명칭'
-    sheet.headers.push('프로젝트 코드', '프로젝트 ID')
+    sheet.headers.push('프로젝트 ID')
   }
-  const appendProjectKeys = (sheet: ExportSheet, rowStyles: Style[]) => sheet.rows.forEach((row, index) => { const style = rowStyles[index]; row.push(getProjectIdentity(workspace, style.projectId).code, style.projectId) })
+  const appendProjectKeys = (sheet: ExportSheet, rowStyles: Style[]) => sheet.rows.forEach((row, index) => { const style = rowStyles[index]; row.push(style.projectId) })
   appendProjectKeys(styleSheet, styles)
   appendProjectKeys(sampleSheet, styles.flatMap(style => style.samples.map(() => style)))
   appendProjectKeys(productionSheet, styles.flatMap(style => style.production.map(() => style)))
   const styleProjects = new Map(styles.map(style => [style.code, getProjectIdentity(workspace, style.projectId)]))
   for (const sheet of [auditSheet, commentsSheet, attachmentSheet]) {
-    sheet.headers.push('프로젝트 명칭', '프로젝트 코드', '프로젝트 ID')
-    sheet.rows.forEach(row => { const project = styleProjects.get(String(row[0])); row.push(project?.name || '', project?.code || '', project?.id || '') })
+    sheet.headers.push('프로젝트 명칭', '프로젝트 ID')
+    sheet.rows.forEach(row => { const project = styleProjects.get(String(row[0])); row.push(project?.name || '', project?.id || '') })
   }
   return [styleSheet, sampleSheet, productionSheet, auditSheet, commentsSheet, attachmentSheet]
 }

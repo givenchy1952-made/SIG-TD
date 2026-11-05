@@ -1,0 +1,39 @@
+.inspection-assignment { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 18px; min-width: 0; }
+.inspection-assignment-boundary { border: 0; padding: 0; margin: 0; min-width: 0; }
+.inspection-assignment .section-heading,.inspection-rate-editor .section-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+.inspection-assignment h3 { display: flex; align-items: center; gap: 7px; }
+.inspection-assignment .muted,.inspection-rate-editor .muted { line-height: 1.7; font-size: 12px; }
+.inspection-assignment-editor,.inspection-rate-form { display: grid; gap: 12px; margin-top: 12px; }
+.inspection-provider-options { border: 0; margin: 0; padding: 0; display: flex; gap: 18px; flex-wrap: wrap; }
+.inspection-provider-options legend { font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+.inspection-provider-options label { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.inspection-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.inspection-rate-editor { padding: 14px; border: 1px solid var(--border); border-radius: 8px; margin-top: 14px; min-width: 0; }
+.inspection-money { font-size: 17px; font-weight: 600; white-space: nowrap; }
+.inspection-order-price { display: grid; gap: 10px; margin-top: 14px; padding: 14px; border-radius: 7px; background: #f7f9fc; }
+.inspection-order-price > strong { font-size: 13px; }
+.inspection-empty { text-align: center; padding: 24px 16px; color: var(--muted); line-height: 1.7; }
+.inspection-empty h2 { color: var(--text); font-size: 18px; margin: 10px 0; }
+.inspection-portal { max-width: 1300px; min-height: 100vh; margin: 0 auto; padding: 32px 28px; background: #f5f7fa; }
+.inspection-portal-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+.inspection-portal-heading h1 { font-size: 28px; margin: 8px 0; }
+.inspection-portal-heading p { color: var(--muted); font-size: 13px; }
+.inspection-scope-note { color: var(--muted); line-height: 1.7; font-size: 13px; margin: 20px 0; }
+.inspection-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border); padding: 0 10px; border-radius: 6px; margin-bottom: 18px; }
+.inspection-search .input { border: 0; background: transparent; }
+.inspection-order-list { display: grid; gap: 14px; }
+.inspection-order-card { padding: 18px; min-width: 0; }
+.inspection-order-summary { display: grid; grid-template-columns: 2fr 1.5fr .7fr 1fr; gap: 14px; margin: 0; }
+.inspection-order-summary dt { color: var(--muted); font-size: 11px; margin-bottom: 7px; }
+.inspection-order-summary dd { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.inspection-order-facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 11px; color: var(--muted); margin: 18px 0 10px; }
+.inspection-size-table { overflow-x: auto; max-width: 100%; }
+.inspection-size-table table { width: 100%; border-collapse: collapse; min-width: 420px; font-size: 12px; text-align: center; }
+.inspection-size-table th,.inspection-size-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+.inspection-size-table th { font-weight: 500; color: var(--muted); background: #f7f9fc; }
+.inspection-quality-note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.inspection-portal-rates { padding: 18px; margin-top: 24px; }
+.inspection-portal-rates h2 { font-size: 17px; margin-bottom: 15px; }
+.inspection-service-table { margin-top: 18px; }
+.inspection-service-table .button { font-size: 12px; }
+@media(max-width:600px) { .inspection-portal { padding: 20px 12px; } .inspection-portal-heading { flex-direction: column; gap: 6px; } .inspection-portal-heading h1 { font-size: 24px; } .inspection-order-summary { grid-template-columns: 1fr 1fr; } .inspection-order-card { padding: 14px; } .inspection-actions > .button { flex: 1 1 auto; } }

@@ -4,6 +4,7 @@ import { getDemoWorkspace, locked, persist, supabase } from './repository'
 import { saveAssignmentInWorkspace, saveCalendarInWorkspace, saveCatalogInWorkspace, saveOperationInWorkspace, saveOrderSourceInWorkspace, savePoInWorkspace, saveShipmentInWorkspace } from './operations-domain'
 import { importProductionOrdersInWorkspace } from './round-import'
 import { assertActive } from './permissions'
+import { saveStyleOperationWithSupplier } from './supplier-work-rates-repository'
 
 async function rpc(name: string, args: Record<string, unknown>) {
   const result = await supabase!.rpc(name, args)
@@ -39,6 +40,7 @@ export async function saveShipmentBatch(id: string, styleId: string, lineId: str
   await locked(() => persist(saveShipmentInWorkspace(getDemoWorkspace(), profile, id, styleId, lineId, data, expectedVersion, expectedStyleVersion, reason)))
 }
 export async function saveStyleOperation(id: string, styleId: string, kind: StyleOperationKind, data: StyleOperationInput, expectedVersion: number, reason: string, profile: Profile): Promise<void> {
+  if (data.supplierFactoryId !== undefined) { await saveStyleOperationWithSupplier(id, styleId, kind, data.supplierFactoryId, expectedVersion, data, reason, profile, data.catalogVersions || {}); return }
   if (supabase) { await rpc('save_style_operation', { p_id: id, p_style_id: styleId, p_kind: kind, p_expected_version: expectedVersion, p_data: data, p_reason: reason }); return }
   await locked(() => persist(saveOperationInWorkspace(getDemoWorkspace(), profile, id, styleId, kind, data, expectedVersion, reason)))
 }
@@ -67,9 +69,9 @@ export async function importOrderQuantities(changes: OrderImportChange[], mode: 
     const result = await supabase.rpc('bulk_import_production_orders', { p_import_id: importId, p_changes: changes, p_mode: mode, p_reason: reason })
     if (result.error) {
       if (['PGRST202', 'PGRST205', '42P01'].includes(result.error.code)) throw new Error('프로젝트·생산 차수별 오더 등록 설정이 필요합니다. Supabase에 006~009 SQL을 순서대로 적용한 뒤 다시 접속해 주세요.')
-      if (/IMPORT_PROJECT_REQUIRED/.test(result.error.message)) throw new Error('A열 프로젝트 코드를 먼저 등록해 주세요. 스타일·프로젝트 등록에서 확인한 뒤 다시 업로드해 주세요.')
+      if (/IMPORT_PROJECT_REQUIRED/.test(result.error.message)) throw new Error('A열 예산 관리 코드와 M열 프로젝트 명칭을 본사 프로젝트 관리에서 연결한 뒤 다시 업로드해 주세요.')
       if (/IMPORT_MIXED_PROJECTS/.test(result.error.message)) throw new Error('같은 품번·컬러에 서로 다른 프로젝트가 있습니다. 프로젝트별로 나누어 업로드해 주세요.')
-      if (/IMPORT_PROJECT_MISMATCH/.test(result.error.message)) throw new Error('A열 프로젝트에 등록된 명칭·시즌이 M·L열과 다릅니다. 프로젝트 기본 정보를 확인해 주세요.')
+      if (/IMPORT_PROJECT_MISMATCH/.test(result.error.message)) throw new Error('A열 예산 코드에 연결된 프로젝트 명칭·시즌이 M·L열과 다릅니다. 프로젝트 기본 정보를 확인해 주세요.')
       throw result.error
     }
     return

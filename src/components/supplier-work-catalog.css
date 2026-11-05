@@ -1,0 +1,16 @@
+.supplier-work-catalog { margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: 7px; min-width: 0; background: #fafbfd; }
+.supplier-work-catalog .section-heading { flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.supplier-work-catalog h4 { margin: 0; font-size: 13px; }
+.supplier-work-catalog .muted,.supplier-work-note { font-size: 11px; line-height: 1.6; }
+.supplier-work-table-wrap { max-width: 100%; overflow-x: auto; margin-top: 12px; }
+.supplier-work-table-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+.supplier-work-table-wrap td,.supplier-work-table-wrap th { border-bottom: 1px solid var(--border); padding: 8px; overflow-wrap: anywhere; min-width: 80px; }
+.supplier-work-editor { display: grid; gap: 12px; margin-top: 14px; }
+.supplier-work-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.supplier-work-selection { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.supplier-work-selection .field { flex: 1 1 230px; }
+.supplier-work-price-note { font-size: 11px; line-height: 1.6; color: var(--muted); margin: 5px 0 0; }
+@media(max-width:600px) { .supplier-work-catalog { padding: 11px; } .supplier-work-actions .button { flex: 1 1 140px; } }
+.supplier-own-library { padding: 20px; margin-bottom: 24px; }
+.supplier-own-library > h2 { font-size: 18px; margin-bottom: 16px; }
+.supplier-library-boundary { padding: 0; border: 0; margin: 0; min-width: 0; }

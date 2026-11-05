@@ -9,6 +9,9 @@ const CLIENT = '81000000-0000-4000-8000-000000000001'
 const TENANT = '82000000-0000-4000-8000-000000000001'
 const RECEIPT = '83000000-0000-4000-8000-000000000001'
 const ORIGIN = 'https://sig-test.example'
+const PROJECT_NAME = '시그니피컨트 2026 3Q'
+const BUDGET_CODE = 'SIGNIFICANT-2026FY-MPQ-46093'
+const PROJECT_ID = '30000000-0000-4000-8000-000000000001'
 const TOKEN = 'private-opaque-microsoft-token'
 const ID_TOKEN = 'private-signed-microsoft-id-token'
 const success = <T>(data: T) => ({ data, error: null })
@@ -16,7 +19,7 @@ const success = <T>(data: T) => ({ data, error: null })
 function setup() {
   const environment: Record<string, string> = { PO_ALLOWED_ORIGINS: `${ORIGIN},http://localhost:5173`, SUPABASE_URL: 'https://db-test.supabase.co', SUPABASE_ANON_KEY: 'public-test-key', SUPABASE_SERVICE_ROLE_KEY: 'private-service-key' }
   const draft: OutlookDispatchRecord = {
-    id: ID, style_id: STYLE, due_date: '2026-11-30', recipient: 'factory@example.test', subject: '작업 요청 PO', body: '저장된 PO 본문',
+    id: ID, style_id: STYLE, due_date: '2026-11-30', recipient: 'factory@example.test', subject: `${PROJECT_NAME} / 작업 요청 PO`, body: `프로젝트 명칭: ${PROJECT_NAME}\n저장된 PO 본문`,
     evidence_attachment_id: null, status: 'draft', version: 3, voided: false, attempts: 0,
     idempotency_key: `sig-po-${ID}`, factory_id_snapshot: '20000000-0000-4000-8000-000000000002', style_code_snapshot: 'BO42FYHD0101',
     provider: 'resend', sender_email_snapshot: null, provider_request_id: null, provider_message_id: null, sent_at: null,
@@ -27,6 +30,7 @@ function setup() {
     getProfile: vi.fn(async (_id: string) => success({ ...profile })),
     getConfiguration: vi.fn(async () => success({ clientId: CLIENT, tenantId: TENANT })),
     getDispatch: vi.fn(async (_id: string) => success({ ...draft })),
+    getProjectContext: vi.fn(async (_poId: string, _styleId: string) => success({ projectId: PROJECT_ID, name: PROJECT_NAME, budgetCodes: [BUDGET_CODE] })),
     getAttachment: vi.fn(async (_id: string) => success({ id: FILE, style_id: STYLE, path: `${STYLE}/PO.pdf`, name: 'PO\r\n명세서.pdf', mime: 'application/pdf', size: 3 })),
     downloadAttachment: vi.fn(async (_path: string) => success(new Blob([new Uint8Array([1, 2, 3])], { type: 'application/pdf' }))),
     beginDispatch: vi.fn(async (_id: string, _version: number) => success({ ...draft, status: 'sending', version: 4, attempts: draft.attempts + 1, provider: 'outlook', sender_email_snapshot: profile.email })),
@@ -154,7 +158,7 @@ describe('Outlook PO: 본인 Microsoft 365 메일함의 명시적 직접 발송'
     expect(payload.message.from).toBeUndefined()
     expect(payload.message.toRecipients).toEqual([{ emailAddress: { address: f.draft.recipient } }])
     expect(payload.message.replyTo).toEqual([{ emailAddress: { address: f.profile.email } }])
-    expect(payload.message.subject).toBe('[납기 2026-11-30] 작업 요청 PO')
+    expect(payload.message.subject).toBe(`[납기 2026-11-30] ${PROJECT_NAME} / 작업 요청 PO`)
     expect(payload.message.body.content).toContain(f.draft.body)
     expect(payload.message.body.content).toContain(f.draft.style_code_snapshot)
     expect(f.service.finalizeDispatch).toHaveBeenCalledWith({ id: ID, requestId: RECEIPT, error: null, outcome: 'sent' })
@@ -309,5 +313,38 @@ describe('Outlook PO: 본인 Microsoft 365 메일함의 명시적 직접 발송'
     expect(response.status).toBe(503); expect(body).toMatchObject({ status: 'unknown', code: 'UNCERTAIN_SYNC_FAILURE' })
     expect(JSON.stringify(body)).not.toContain('private-service-key')
     expect(f.sendCalls()).toHaveLength(1)
+  })
+})
+
+describe('Outlook PO 프로젝트 명칭·예산 코드 발송 차단', () => {
+  it.each(['subject', 'body'] as const)('명칭이 있어도 %s에 내부 A 코드가 있으면 발송 시도를 만들지 않는다', async field => {
+    const f = setup(); f.draft[field] += ` ${BUDGET_CODE}`
+    const before = structuredClone(f.draft), response = await f.handler(f.request())
+    expect(response.status).toBe(422); expect((await response.json()).code).toBe('PO_PROJECT_POLICY')
+    expect(f.user.beginDispatch).not.toHaveBeenCalled(); expect(f.sendCalls()).toHaveLength(0); expect(f.service.finalizeDispatch).not.toHaveBeenCalled()
+    expect(f.draft).toEqual(before)
+  })
+  it.each(['subject', 'body'] as const)('%s에 M 명칭이 빠지면 기존 문서를 자동으로 고치지 않고 차단한다', async field => {
+    const f = setup(); f.draft[field] = '명칭이 없는 예전 PO 원문'
+    const response = await f.handler(f.request())
+    expect(response.status).toBe(422); expect((await response.json()).message).toContain('제목과 본문')
+    expect(f.user.beginDispatch).not.toHaveBeenCalled(); expect(f.sendCalls()).toHaveLength(0); expect(f.draft[field]).toBe('명칭이 없는 예전 PO 원문')
+  })
+  it('공식 M이 없거나 프로젝트 정보를 읽을 수 없으면 보내지 않는다', async () => {
+    const f = setup(); f.user.getProjectContext.mockResolvedValueOnce({ data: null, error: null } as never)
+    expect((await f.handler(f.request())).status).toBe(422)
+    f.user.getProjectContext.mockResolvedValueOnce({ data: null, error: { code: '42501' } } as never)
+    expect((await f.handler(f.request())).status).toBe(503)
+    expect(f.user.beginDispatch).not.toHaveBeenCalled(); expect(f.sendCalls()).toHaveLength(0)
+  })
+  it('발송 클레임 뒤 프로젝트가 바뀌면 원문·접수 이력을 유지하고 Graph 발송 없이 실패로 기록한다', async () => {
+    const f = setup(), before = structuredClone(f.draft)
+    f.user.getProjectContext.mockResolvedValueOnce(success({ projectId: PROJECT_ID, name: PROJECT_NAME, budgetCodes: [BUDGET_CODE] }))
+    f.user.getProjectContext.mockResolvedValueOnce(success({ projectId: PROJECT_ID, name: '변경된 공식 명칭', budgetCodes: [BUDGET_CODE] }))
+    const response = await f.handler(f.request())
+    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'PO_PROJECT_RECHECK_REQUIRED', status: 'failed', provider: 'outlook' })
+    expect(f.user.getProjectContext).toHaveBeenCalledTimes(2); expect(f.user.beginDispatch).toHaveBeenCalledTimes(1); expect(f.sendCalls()).toHaveLength(0)
+    expect(f.service.finalizeDispatch).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed', requestId: null }))
+    expect(f.draft).toEqual(before)
   })
 })

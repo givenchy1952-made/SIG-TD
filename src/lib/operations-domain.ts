@@ -28,13 +28,22 @@ export function scopeOperations(workspace: Workspace, profile: Profile): Operati
   const poIds = new Set(poDispatches.map(item => item.id))
   const events = ops.calendarEvents.filter(event => canReadCalendarEvent(event, profile))
   const eventIds = new Set(events.map(event => event.id))
+  // Supplier work libraries are independent of assigned production styles.
+  // Resolve the canonical account and service before exposing its own catalog;
+  // a client-supplied factory or role must not select another vendor's work.
+  const catalogActor = workspace.profiles.find(person => person.id === profile.id)
+  const catalogSupplier = workspace.factories.find(factory => factory.id === catalogActor?.factoryId)
+  const operationCatalogs = !catalogActor?.approved || !catalogActor.active ? [] : catalogActor.role !== 'factory' ? ops.operationCatalogs
+    : catalogSupplier && catalogSupplier.active !== false && (catalogSupplier.serviceType === 'label' || catalogSupplier.serviceType === 'embroidery')
+      ? ops.operationCatalogs.filter(item => item.supplierFactoryId === catalogSupplier.id && item.kind === catalogSupplier.serviceType)
+      : []
   return {
     poDispatches, poDispatchAttempts: ops.poDispatchAttempts.filter(item => poIds.has(item.dispatchId)),
     shipmentLedgers: ops.shipmentLedgers.filter(item => ids.has(item.styleId)), shipmentBatches: ops.shipmentBatches.filter(item => ids.has(item.styleId)),
     styleOperations: ops.styleOperations.filter(item => ids.has(item.styleId)), calendarEvents: events,
     calendarEventAudits: ops.calendarEventAudits.filter(audit => eventIds.has(audit.eventId) && [audit.before, audit.after].every(snapshot => { const event = eventSnapshot(snapshot); return !event || canReadCalendarEvent(event, profile) })),
     employeeFactoryAssignments: profile.role === 'factory' ? [] : ops.employeeFactoryAssignments,
-    operationCatalogs: profile.role === 'factory' ? [] : ops.operationCatalogs,
+    operationCatalogs,
     orderSourceRecords: profile.role === 'factory' ? [] : ops.orderSourceRecords.filter(item => ids.has(item.styleId)),
   }
 }

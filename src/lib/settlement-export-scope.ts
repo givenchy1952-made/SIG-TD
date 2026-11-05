@@ -50,7 +50,7 @@ export type EuljiProjectSort = 'name' | 'code'
 export function sortEuljiRowsByProject(rows: readonly SigEuljiRow[], by: EuljiProjectSort = 'name'): SigEuljiRow[] {
   const collator = new Intl.Collator('ko-KR', { numeric: true })
   return [...rows].sort((a, b) => {
-    const nameA = a.projectName || a.projectCode, nameB = b.projectName || b.projectCode
+    const nameA = a.projectName || '프로젝트 명칭 미등록', nameB = b.projectName || '프로젝트 명칭 미등록'
     return (by === 'name' ? collator.compare(nameA, nameB) || collator.compare(a.projectCode, b.projectCode) : collator.compare(a.projectCode, b.projectCode) || collator.compare(nameA, nameB))
       || (a.projectId || '').localeCompare(b.projectId || '') || collator.compare(a.colorStyleCode, b.colorStyleCode)
   })

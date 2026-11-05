@@ -29,7 +29,7 @@ export function buildFrozenProductionEuljiRows(workspace: ProductionLedgerWorksp
         return inScope(identity.projectId, identity.factoryIdSnapshot, identity.ownerIdSnapshot, workspace.projects.find(project => project.id === identity.projectId)?.season || style.season)
       })) {
         if (run.closedAt && run.snapshot) runIds.push(run.id)
-        else errors.push(`${style.code} ${line.color} · ${run.projectCode} ${run.round}차: 마감 확정 후 다운로드해 주세요. 확정 차수 한 건은 스타일 상세에서 별도로 내려받을 수 있습니다.`)
+        else errors.push(`${style.code} ${line.color} · ${getProjectIdentity(workspace, run.projectId).name} ${run.round}차: 마감 확정 후 다운로드해 주세요. 확정 차수 한 건은 스타일 상세에서 별도로 내려받을 수 있습니다.`)
       }
     }
     if (legacyLines.length) legacy.push({ ...style, production: legacyLines })
@@ -54,8 +54,7 @@ export function buildProductionRunEuljiRows(workspace: ProductionLedgerWorkspace
       const received = snapshot.receipts.reduce((total, receipt) => total + quantityTotal(receipt.quantities), 0)
       if (received !== snapshot.receivedQuantity || snapshot.netAmount !== sigEuljiNetAmount(snapshot.unitCost, snapshot.receivedQuantity)) throw new Error('확정된 입고 수량과 마감 금액을 확인해 주세요.')
       const project = getProjectIdentity(workspace, snapshot.projectId)
-      const hasProjectLabel = workspace.projects.some(item => item.id === snapshot.projectId && (item.name?.trim() || item.code?.trim()))
-      rows.push({ projectId: snapshot.projectId, projectName: hasProjectLabel ? project.name : snapshot.projectCode, season: project.season, projectCode: snapshot.projectCode, receivedAtISO: snapshot.lastReceivedAt, factory: snapshot.factory, colorStyleCode: snapshot.styleCode, unitCost: snapshot.unitCost, orderQuantity: snapshot.orderQuantity, receivedQuantity: snapshot.receivedQuantity, unit: snapshot.itemType === 'fabric' ? 'YDS' : 'EA', netAmount: snapshot.netAmount, owner: snapshot.owner })
+      rows.push({ projectId: snapshot.projectId, projectName: project.name, season: project.season, projectCode: snapshot.projectCode, receivedAtISO: snapshot.lastReceivedAt, factory: snapshot.factory, colorStyleCode: snapshot.styleCode, unitCost: snapshot.unitCost, orderQuantity: snapshot.orderQuantity, receivedQuantity: snapshot.receivedQuantity, unit: snapshot.itemType === 'fabric' ? 'YDS' : 'EA', netAmount: snapshot.netAmount, owner: snapshot.owner })
     } catch (error) { errors.push(`${run.name} · ${run.round}차: ${error instanceof Error ? error.message : String(error)}`) }
   }
   return { rows, errors }

@@ -22,6 +22,10 @@ import { getDemoProductionConditions } from './production-conditions'
 import { loadProductionPoLinks } from './production-po-links-repository'
 import { loadPartialDeliveryPlans } from './partial-deliveries-repository'
 import { loadMaterialReviews } from './material-reviews-repository'
+import { loadProductionProjectNames } from './production-project-names-repository'
+import { loadInspectionAssignments } from './inspection-assignments-repository'
+import { loadSupplierWorkRates } from './supplier-work-rates-repository'
+import { loadInspectionOnlyWorkspace } from './inspection-cloud-workspace'
 export const demoAllowed = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true' || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 // Capture before the SDK consumes/removes the callback hash during startup.
 export const authCallbackError = readAuthCallbackError(window.location.href)
@@ -33,7 +37,7 @@ if (url && key && !configurationError) { try { supabase = createClient(url, key)
 export { configurationError, supabase }
 const STORAGE_KEY = 'sig-workspace-demo-v1'
 function withProductionDefaults(workspace: Workspace): Workspace {
-  const next = { ...workspace, materialReviewItems: workspace.materialReviewItems || [], materialReviewRounds: workspace.materialReviewRounds || [], materialReviewsAvailable: true, processingUnitPrices: workspace.processingUnitPrices || [], processingPricesAvailable: true, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, partialDeliveryPlans: workspace.partialDeliveryPlans || [], partialDeliveryAvailable: true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
+  const next = { ...workspace, inspectionAssignments: workspace.inspectionAssignments || [], inspectionAssignmentsAvailable: workspace.inspectionAssignmentsAvailable ?? true, supplierWorkRates: workspace.supplierWorkRates || [], supplierWorkRateAudits: workspace.supplierWorkRateAudits || [], supplierWorkRatesAvailable: workspace.supplierWorkRatesAvailable ?? true, materialReviewItems: workspace.materialReviewItems || [], materialReviewRounds: workspace.materialReviewRounds || [], materialReviewsAvailable: true, processingUnitPrices: workspace.processingUnitPrices || [], processingPricesAvailable: true, importColorOwnersAvailable: true, memberWithdrawalAvailable: true, partialDeliveryPlans: workspace.partialDeliveryPlans || [], partialDeliveryAvailable: true, partialDeliverySizesAvailable: workspace.partialDeliverySizesAvailable ?? true, productionRuns: workspace.productionRuns || [], productionReceipts: workspace.productionReceipts || [], productionRunAudits: workspace.productionRunAudits || [], productionLedgerAvailable: true, supplierOrdersAvailable: true }
   const withOrders = { ...next, productionPoContexts: workspace.productionPoContexts || [], productionPoLinksAvailable: true, supplierProductionOrders: getDemoSupplierProductionOrders(next) }
   return { ...withOrders, productionConditions: getDemoProductionConditions(withOrders), productionConditionsAvailable: true }
 }
@@ -43,8 +47,11 @@ export async function locked<T>(fn: () => T | Promise<T>): Promise<T> { if (!nav
 function check<T extends { error: unknown; data: unknown }>(result: T): T['data'] { if (result.error) throw result.error; return result.data }
 export function cloudStyle(row: Record<string, unknown>): Style { return { ...(row.data as Style), id: String(row.id), version: Number(row.version), updatedAt: String(row.updated_at), updatedBy: String(row.updated_by), deletedAt: row.deleted_at as string | null } }
 function cloudProfile(row: Record<string, unknown>): Profile { return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as Profile['role'], approved: !!row.approved, active: !!row.active, factoryId: row.factory_id as string | null, ...('withdrawn_at' in row ? { withdrawnAt: row.withdrawn_at as string | null, withdrawnBy: row.withdrawn_by as string | null } : {}) } }
+export function cloudFactory(row: Record<string, any>): Factory { return { id: String(row.id), name: String(row.name), country: String(row.country), ...(row.active !== undefined ? { active: !!row.active } : {}), ...(row.service_type !== undefined ? { serviceType: row.service_type, inspectionProvider: row.inspection_provider || null, serviceSettingsVersion: row.service_settings_version || 0 } : {}) } }
 export async function loadWorkspace(): Promise<Workspace> {
   if (!supabase) return getDemoWorkspace()
+  const inspectionOnly = await loadInspectionOnlyWorkspace(supabase)
+  if (inspectionOnly) return inspectionOnly
   const tables = ['styles', 'profiles', 'factories', 'projects', 'comments', 'attachments', 'audits'] as const
   const results = await Promise.all(tables.map(async table => {
     const rows: Record<string, any>[] = []
@@ -68,13 +75,13 @@ export async function loadWorkspace(): Promise<Workspace> {
     styleImages.push(...page.map(r => ({ styleId: r.style_id, color: r.color, attachmentId: r.attachment_id, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by })))
     if (page.length < 500) break
   }
-  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners, processingPrices, productionConditions, productionPoLinks, partialDeliveryPlans, materialReviews] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability'), loadProcessingUnitPrices(supabase), loadProductionConditions(supabase), loadProductionPoLinks(supabase), loadPartialDeliveryPlans(supabase), loadMaterialReviews(supabase)])
+  const [operations, settlement, workflow, approvals, productionLedger, supplierOrders, memberWithdrawalAvailable, importColorOwners, processingPrices, productionConditions, productionPoLinks, partialDeliveryPlans, materialReviews, productionProjectNames, inspectionAssignments, supplierWorkRates] = await Promise.all([loadOperationsWorkspace(supabase), loadSettlementTermsWorkspace(supabase), loadWorkflowRefinements(supabase), supabase.rpc('get_staff_approvals_capability'), loadProductionLedgerWorkspace(supabase), loadSupplierProductionOrders(supabase), loadMemberWithdrawalCapability(supabase), supabase.rpc('get_import_color_owners_capability'), loadProcessingUnitPrices(supabase), loadProductionConditions(supabase), loadProductionPoLinks(supabase), loadPartialDeliveryPlans(supabase), loadMaterialReviews(supabase), loadProductionProjectNames(supabase), loadInspectionAssignments(supabase), loadSupplierWorkRates(supabase)])
   if (approvals.error && !['PGRST202', '42883'].includes(approvals.error.code)) throw approvals.error
   if (importColorOwners.error && !['PGRST202', '42883'].includes(importColorOwners.error.code)) throw importColorOwners.error
   return {
-    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders, ...processingPrices, ...productionConditions, ...productionPoLinks, ...partialDeliveryPlans, ...materialReviews,
+    ...operations, ...settlement, ...workflow, ...productionLedger, ...supplierOrders, ...processingPrices, ...productionConditions, ...productionPoLinks, ...partialDeliveryPlans, ...materialReviews, ...productionProjectNames, ...inspectionAssignments, ...supplierWorkRates,
     styleImages, styleImagesAvailable, memberWithdrawalAvailable, importColorOwnersAvailable: !importColorOwners.error && importColorOwners.data === true, staffApprovalsAvailable: !approvals.error && approvals.data === true,
-    styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories as Factory[], projects: rows.projects as Project[],
+    styles: rows.styles.filter(r => !r.deleted_at).map(cloudStyle), profiles: rows.profiles.map(cloudProfile), factories: rows.factories.map(cloudFactory), projects: rows.projects as Project[],
     comments: rows.comments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, authorId: r.author_id, authorName: r.author_name, body: r.body, createdAt: r.created_at })),
     attachments: rows.attachments.map(r => ({ id: r.id, styleId: r.style_id, sampleId: r.sample_id, name: r.name, path: r.path, mime: r.mime, size: r.size, uploadedBy: r.uploaded_by, createdAt: r.created_at })),
     audits: rows.audits.map(r => ({ id: r.id, styleId: r.style_id, actorId: r.actor_id, actorName: r.actor_name, action: r.action, reason: r.reason, before: r.before, after: r.after, createdAt: r.created_at })),
@@ -100,8 +107,8 @@ export async function saveProfile(target: Profile, profile: Profile) {
   await locked(() => persist(manageProfileInWorkspace(getDemoWorkspace(), profile, target)))
 }
 export async function saveMetadata<T extends Factory | Project>(table: 'factories' | 'projects', target: T, profile: Profile) {
-  if (supabase) { check(await supabase.from(table).upsert(target)); return }
-  await locked(() => { assertActive(profile); if (profile.role !== 'admin') throw new Error('관리자만 설정할 수 있습니다.'); const w = getDemoWorkspace(); if (table === 'factories') w.factories = w.factories.some(f => f.id === target.id) ? w.factories.map(f => f.id === target.id ? target as Factory : f) : [...w.factories, target as Factory]; else w.projects = w.projects.some(p => p.id === target.id) ? w.projects.map(p => p.id === target.id ? target as Project : p) : [...w.projects, target as Project]; persist(w) })
+  if (supabase) { const payload = table === 'factories' ? { id: target.id, name: target.name, country: (target as Factory).country } : target; check(await supabase.from(table).upsert(payload as T)); return }
+  await locked(() => { assertActive(profile); if (profile.role !== 'admin') throw new Error('관리자만 설정할 수 있습니다.'); const w = getDemoWorkspace(); if (table === 'factories') w.factories = w.factories.some(f => f.id === target.id) ? w.factories.map(f => f.id === target.id ? { ...f, id: target.id, name: target.name, country: (target as Factory).country } : f) : [...w.factories, target as Factory]; else w.projects = w.projects.some(p => p.id === target.id) ? w.projects.map(p => p.id === target.id ? target as Project : p) : [...w.projects, target as Project]; persist(w) })
 }
 export async function addComment(styleId: string, body: string, profile: Profile, sampleId?: string) {
   if (!body.trim() || body.length > 5000) throw new Error('코멘트를 1~5,000자로 입력해 주세요.')

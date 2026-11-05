@@ -36,8 +36,11 @@ export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet
     const rawSku = literal(row[5], 'F열 품번').toUpperCase()
     const { base: code, color, fullSku } = resolveSigOrderIdentity(workspace, fullSkuOverride ?? rawSku, selectedColor)
     result.fullSku = fullSku; result.color = color
-    const projectCode = literal(row[0], 'A열 프로젝트 코드'), projectName = literal(row[12], 'M열 프로젝트 명칭'), season = literal(row[11], 'L열 시즌')
-    if (!projectCode || projectCode.length > 120 || !projectName || projectName.length > 160 || !season || season.length > 30) throw new Error('A열 프로젝트 코드·M열 프로젝트 명칭·L열 시즌을 확인해 주세요.')
+    const projectCode = literal(row[0], 'A열 예산 관리 코드'), projectName = literal(row[12], 'M열 프로젝트 명칭'), season = literal(row[11], 'L열 시즌')
+    if (!projectName || projectName.length > 160) throw new Error('M열 프로젝트 명칭을 입력해 주세요. 생산·PO에 사용할 명칭이며 A열 예산 관리 코드나 L열 시즌으로 대신하지 않습니다.')
+    if (!projectCode || projectCode.length > 120) throw new Error('A열 예산 관리 코드를 확인해 주세요. 프로젝트 명칭은 M열에 별도로 입력합니다.')
+    if (!season || season.length > 30) throw new Error('L열 시즌을 확인해 주세요. 프로젝트 명칭과 시즌은 별도로 보관합니다.')
+    if (key(projectName) === key(projectCode)) throw new Error('M열 프로젝트 명칭에 A열 예산 관리 코드가 들어 있습니다. 업체와 생산 일정에 사용할 공식 프로젝트 명칭을 M열에 입력해 주세요.')
     result.sourceFactory = literal(row[22], 'W열 생산처'); result.sourceOwner = literal(row[24], 'Y열 담당자')
     // Y is authoritative. Blank cells remain unassigned; neither the uploader
     // nor a bulk default may silently become the owner.
@@ -47,9 +50,9 @@ export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet
     const ownerId = !result.sourceOwner ? '' : mappedOwner !== undefined ? mappedOwner : ownerMatches.length === 1 ? ownerMatches[0].id : ''
     if (result.sourceOwner && !eligibleOwners.some(item => item.id === ownerId)) result.errors.push(`Y열 담당자 '${result.sourceOwner}'를 승인된 본사 구성원 한 명과 연결해 주세요.`)
     const codeMatches = workspace.projects.filter(project => !!project.code?.trim() && key(project.code) === key(projectCode))
-    if (codeMatches.length > 1) throw new Error('동일 프로젝트 코드가 여러 번 등록되어 있습니다. 프로젝트 관리에서 확인해 주세요.')
+    if (codeMatches.length > 1) throw new Error('동일 예산 관리 코드가 여러 프로젝트 ID에 등록되어 있습니다. 프로젝트 관리에서 확인해 주세요.')
     let project: Project | undefined = codeMatches[0]
-    if (project && (project.name.trim() !== projectName || project.season.trim() !== season)) throw new Error('A열 프로젝트 코드에 등록된 명칭·시즌이 M·L열과 다릅니다. 기존 프로젝트를 먼저 확인해 주세요.')
+    if (project && (project.name.trim() !== projectName || project.season.trim() !== season)) throw new Error('A열 예산 코드에 연결된 프로젝트 명칭·시즌이 M·L열과 다릅니다. 기존 프로젝트를 먼저 확인해 주세요.')
     if (!project) {
       const legacyCodeMatches = workspace.projects.filter(item => !item.code?.trim() && key(item.name) === key(projectCode))
       if (legacyCodeMatches.length > 1) throw new Error('A열 코드가 명칭으로 들어간 기존 프로젝트가 여러 개입니다. 프로젝트 관리에서 ID와 원본 매핑을 먼저 확인해 주세요.')

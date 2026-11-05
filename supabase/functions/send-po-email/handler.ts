@@ -2,6 +2,8 @@
  * JWT verification is performed by the Auth server on every POST; begin RPC
  * rechecks approved HQ privileges and atomically claims the database snapshot.
  */
+import { poProjectPolicyError, samePoProjectContext, type PoProjectContext } from '../_shared/po-project-policy.ts'
+
 export interface PoDispatchRecord {
   id: string; style_id: string; due_date: string; recipient: string; subject: string; body: string;
   evidence_attachment_id: string | null; status: string; version: number; voided: boolean;
@@ -14,6 +16,7 @@ export interface PoEmailResult<T> { data: T | null; error: PoEmailError | null }
 export interface PoEmailUserClient {
   getUser(): Promise<PoEmailResult<{ id: string }>>
   getDispatch(id: string): Promise<PoEmailResult<PoDispatchRecord>>
+  getProjectContext(poId: string, styleId: string): Promise<PoEmailResult<PoProjectContext>>
   getAttachment(id: string): Promise<PoEmailResult<PoAttachmentRecord>>
   downloadAttachment(path: string): Promise<PoEmailResult<Blob>>
   beginDispatch(id: string, expectedVersion: number): Promise<PoEmailResult<PoDispatchRecord>>
@@ -105,6 +108,7 @@ export function createPoEmailHandler(dependencies: PoEmailDependencies): (reques
       input = { id: record.id, expectedVersion: Number(record.expectedVersion) }
     } catch { return respond(400, { code: 'INVALID_REQUEST', message: 'PO ID와 현재 버전만 전달해 주세요.' }) }
 
+    let projectContext: PoProjectContext | null = null
     let before: PoDispatchRecord
     let attachments: { filename: string; content: string; content_type: string }[] | undefined
     try {
@@ -114,6 +118,11 @@ export function createPoEmailHandler(dependencies: PoEmailDependencies): (reques
       before = selected.data
       if (before.version !== input.expectedVersion) return respond(409, { code: 'VERSION_CONFLICT', message: 'PO가 변경되었습니다. 최신 내용을 확인해 주세요.' })
       if (!['draft', 'failed'].includes(before.status)) return respond(409, { code: 'PO_SEND_BLOCKED', message: '처리 중·접수 완료·결과 미확인 PO는 자동 재발송할 수 없습니다.' })
+      const projectResult = await user.getProjectContext(before.id, before.style_id)
+      if (projectResult.error) return respond(503, { code: 'PO_PROJECT_UNAVAILABLE', message: '프로젝트 명칭을 확인할 수 없습니다. 발송 시도는 시작하지 않았습니다.' })
+      projectContext = projectResult.data
+      const projectError = poProjectPolicyError(projectContext, before.subject, before.body)
+      if (projectError) return respond(422, { code: 'PO_PROJECT_POLICY', message: projectError })
       if (before.evidence_attachment_id) {
         const result = await user.getAttachment(before.evidence_attachment_id), file = result.data
         if (result.error || !file || file.id !== before.evidence_attachment_id || file.style_id !== before.style_id || typeof file.path !== 'string' || !file.path.startsWith(`${before.style_id}/`) || !MIMES.has(file.mime) || !Number.isInteger(file.size) || file.size < 1 || file.size > MAX_FILE) return respond(422, { code: 'INVALID_ATTACHMENT', message: '이 스타일의 PDF·이미지 첨부파일(최대 10MB)을 확인해 주세요.' })
@@ -135,7 +144,14 @@ export function createPoEmailHandler(dependencies: PoEmailDependencies): (reques
     let providerError: string | null = '이메일 공급자 응답을 확인하지 못했습니다. 공급자 이력과 PO 발송 이력을 확인해 주세요.'
     const snapshotKeys = ['id', 'style_id', 'due_date', 'recipient', 'subject', 'body', 'evidence_attachment_id', 'idempotency_key', 'style_code_snapshot', 'factory_id_snapshot'] as const
     const snapshotMatches = validRecord(claimed, input.id) && claimed.status === 'sending' && claimed.version === input.expectedVersion + 1 && snapshotKeys.every(key => claimed[key] === before[key])
+    let projectMatches = false
     if (snapshotMatches) {
+      try {
+        const currentProject = await user.getProjectContext(claimed.id, claimed.style_id)
+        projectMatches = !currentProject.error && samePoProjectContext(projectContext, currentProject.data) && !poProjectPolicyError(currentProject.data, claimed.subject, claimed.body)
+      } catch { /* Fail before the provider call when project metadata is unavailable. */ }
+    }
+    if (snapshotMatches && projectMatches) {
       const controller = new AbortController()
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
@@ -159,12 +175,14 @@ export function createPoEmailHandler(dependencies: PoEmailDependencies): (reques
         }
       } catch { /* The provider may have accepted the email: never auto-retry. */ }
       finally { if (timer) clearTimeout(timer) }
-    } else providerError = '발송 요청의 저장된 스냅샷을 확인할 수 없어 공급자를 호출하지 않았습니다. 발송 이력을 점검해 주세요.'
+    } else if (snapshotMatches) { outcome = 'failed'; providerError = '프로젝트 명칭·예산 코드 정보를 다시 확인할 수 없어 메일을 발송하지 않았습니다. 최신 원본을 확인하고 새 PO를 작성해 주세요.' }
+    else providerError = '발송 요청의 저장된 스냅샷을 확인할 수 없어 공급자를 호출하지 않았습니다. 발송 이력을 점검해 주세요.'
 
     try {
       const service = dependencies.createServiceClient(environment.SUPABASE_URL, environment.SUPABASE_SERVICE_ROLE_KEY)
       const finalized = await service.finalizeDispatch({ id: input.id, providerMessageId, error: providerError, outcome })
       if (finalized.error || !finalized.data || finalized.data.id !== input.id || finalized.data.status !== outcome || (outcome === 'sent' && (finalized.data.provider_message_id !== providerMessageId || !finalized.data.sent_at))) throw new Error('finalize unavailable')
+      if (snapshotMatches && !projectMatches) return respond(409, { code: 'PO_PROJECT_RECHECK_REQUIRED', status: outcome, version: finalized.data.version, message: providerError })
       if (outcome === 'sent') return respond(200, { status: 'sent', providerMessageId, version: finalized.data.version, message: '이메일 공급자가 PO를 접수했습니다. 실제 수신·열람을 보장하지는 않습니다.' })
       return respond(502, { code: outcome === 'failed' ? 'PROVIDER_REJECTED' : 'PROVIDER_RESULT_UNKNOWN', status: outcome, version: finalized.data.version, message: providerError })
     } catch { return respond(503, { code: 'UNCERTAIN_SYNC_FAILURE', status: 'unknown', message: '이메일 처리 결과를 DB에 저장했는지 확인할 수 없습니다. 다시 발송하지 말고 공급자와 PO 발송 이력을 먼저 대조해 주세요.' }) }

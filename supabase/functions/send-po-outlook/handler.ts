@@ -2,6 +2,7 @@
  * Supabase Auth verifies the application user; Graph /me verifies the mailbox.
  * A Graph 202/request-id is an acceptance receipt, never an email message ID.
  */
+import { poProjectPolicyError, samePoProjectContext, type PoProjectContext } from '../_shared/po-project-policy.ts'
 import type { PoAttachmentRecord, PoDispatchRecord, PoEmailError, PoEmailResult } from '../send-po-email/handler.ts'
 
 export interface OutlookDispatchRecord extends PoDispatchRecord {
@@ -16,6 +17,7 @@ export interface OutlookUserClient {
   getProfile(id: string): Promise<PoEmailResult<OutlookProfile>>
   getConfiguration(): Promise<PoEmailResult<OutlookConfiguration>>
   getDispatch(id: string): Promise<PoEmailResult<OutlookDispatchRecord>>
+  getProjectContext(poId: string, styleId: string): Promise<PoEmailResult<PoProjectContext>>
   getAttachment(id: string): Promise<PoEmailResult<PoAttachmentRecord>>
   downloadAttachment(path: string): Promise<PoEmailResult<Blob>>
   beginDispatch(id: string, expectedVersion: number): Promise<PoEmailResult<OutlookDispatchRecord>>
@@ -158,6 +160,7 @@ export function createOutlookPoHandler(dependencies: OutlookDependencies): (requ
       if (!mailboxEmail || !sameEmail(mailboxEmail, actor.email)) return respond(403, { code: 'OUTLOOK_ACCOUNT_MISMATCH', message: '사이트에 등록한 본인 회사 이메일로 Outlook을 연결해 주세요.' })
     } catch { return respond(503, { code: 'OUTLOOK_UNAVAILABLE', message: 'Outlook 계정을 확인할 수 없습니다. 발송 시도는 시작하지 않았습니다.' }) }
 
+    let projectContext: PoProjectContext | null = null
     let before: OutlookDispatchRecord
     let attachments: { '@odata.type': string; name: string; contentType: string; contentBytes: string }[] | undefined
     try {
@@ -169,6 +172,11 @@ export function createOutlookPoHandler(dependencies: OutlookDependencies): (requ
       if (!['draft', 'failed'].includes(before.status)) return respond(409, { code: 'PO_SEND_BLOCKED', message: '처리 중·접수 완료·결과 미확인 PO는 자동 재발송할 수 없습니다.' })
       if (before.attempts > 0 && before.provider !== 'outlook') return respond(409, { code: 'PO_PROVIDER_MISMATCH', message: '이전에 사용한 메일 발송 방식이 다릅니다. 새 PO로 작성해 주세요.' })
       if (before.attempts > 0 && before.sender_email_snapshot && !sameEmail(before.sender_email_snapshot, actor.email)) return respond(409, { code: 'PO_SENDER_CHANGED', message: '이 PO를 처음 발송한 담당자의 Outlook으로 다시 확인하거나 새 PO로 작성해 주세요.' })
+      const projectResult = await user.getProjectContext(before.id, before.style_id)
+      if (projectResult.error) return respond(503, { code: 'PO_PROJECT_UNAVAILABLE', message: '프로젝트 명칭을 확인할 수 없습니다. 발송 시도는 시작하지 않았습니다.' })
+      projectContext = projectResult.data
+      const projectError = poProjectPolicyError(projectContext, before.subject, before.body)
+      if (projectError) return respond(422, { code: 'PO_PROJECT_POLICY', message: projectError })
       if (before.evidence_attachment_id) {
         const result = await user.getAttachment(before.evidence_attachment_id), file = result.data
         if (result.error || !file || file.id !== before.evidence_attachment_id || file.style_id !== before.style_id || typeof file.path !== 'string' || !file.path.startsWith(`${before.style_id}/`) || !MIMES.has(file.mime) || !Number.isInteger(file.size) || file.size < 1 || file.size > MAX_FILE) return respond(422, { code: 'INVALID_ATTACHMENT', message: '이 스타일의 PDF·이미지 첨부파일을 확인해 주세요. Outlook 첨부는 최대 2MB입니다.' })
@@ -192,7 +200,14 @@ export function createOutlookPoHandler(dependencies: OutlookDependencies): (requ
     const snapshotMatches = validRecord(claimed, input.id) && claimed.status === 'sending' && claimed.provider === 'outlook'
       && claimed.version === input.expectedVersion + 1 && claimed.attempts === before.attempts + 1 && email(claimed.sender_email_snapshot) && sameEmail(claimed.sender_email_snapshot, actor.email)
       && snapshotKeys.every(key => claimed[key] === before[key])
+    let projectMatches = false
     if (snapshotMatches) {
+      try {
+        const currentProject = await user.getProjectContext(claimed.id, claimed.style_id)
+        projectMatches = !currentProject.error && samePoProjectContext(projectContext, currentProject.data) && !poProjectPolicyError(currentProject.data, claimed.subject, claimed.body)
+      } catch { /* Fail before the provider call when project metadata is unavailable. */ }
+    }
+    if (snapshotMatches && projectMatches) {
       try {
         const response = await timedFetch(sendFetch, 'https://graph.microsoft.com/v1.0/me/sendMail', {
           method: 'POST', headers: { authorization: `Bearer ${input.outlookAccessToken}`, 'content-type': 'application/json' },
@@ -211,7 +226,8 @@ export function createOutlookPoHandler(dependencies: OutlookDependencies): (requ
           outcome = 'failed'; providerError = `Microsoft가 발송 요청을 거절했습니다 (HTTP ${response.status}). Outlook 연결·권한과 메일함 상태를 확인해 주세요.`
         }
       } catch { /* An accepted mail may exist: never repeat the send request. */ }
-    } else providerError = '저장된 발송 내용 또는 발신자 스냅샷이 달라 Microsoft에 보내지 않았습니다. 발송 이력을 확인해 주세요.'
+    } else if (snapshotMatches) { outcome = 'failed'; providerError = '프로젝트 명칭·예산 코드 정보를 다시 확인할 수 없어 메일을 발송하지 않았습니다. 최신 원본을 확인하고 새 PO를 작성해 주세요.' }
+    else providerError = '저장된 발송 내용 또는 발신자 스냅샷이 달라 Microsoft에 보내지 않았습니다. 발송 이력을 확인해 주세요.'
 
     try {
       const service = dependencies.createServiceClient(environment.SUPABASE_URL, environment.SUPABASE_SERVICE_ROLE_KEY)
@@ -219,6 +235,7 @@ export function createOutlookPoHandler(dependencies: OutlookDependencies): (requ
       const row = finalized.data
       if (finalized.error || !row || row.id !== input.id || row.status !== outcome || row.provider !== 'outlook'
         || (outcome === 'sent' && (row.provider_request_id !== requestId || row.provider_message_id !== null || !row.sent_at))) throw new Error('finalize unavailable')
+      if (snapshotMatches && !projectMatches) return respond(409, { code: 'PO_PROJECT_RECHECK_REQUIRED', status: outcome, provider: 'outlook', version: row.version, message: providerError })
       if (outcome === 'sent') return respond(200, { status: 'sent', provider: 'outlook', providerRequestId: requestId, senderEmail: claimed.sender_email_snapshot, version: row.version, message: 'Microsoft가 PO를 접수했습니다. 실제 수신·열람을 보장하지는 않습니다.' })
       return respond(502, { code: outcome === 'failed' ? 'PROVIDER_REJECTED' : 'PROVIDER_RESULT_UNKNOWN', status: outcome, provider: 'outlook', version: row.version, message: providerError })
     } catch { return respond(503, { code: 'UNCERTAIN_SYNC_FAILURE', status: 'unknown', message: 'Microsoft 처리 결과의 저장 여부를 확인할 수 없습니다. 보낸 편지함과 PO 발송 이력을 확인하고 다시 보내지 마세요.' }) }
