@@ -1,6 +1,6 @@
 import type { Factory, Profile, Workspace } from './types'
 import type { OperationCatalog, StyleOperationInput, StyleOperationKind } from './operations-types'
-import { assertActive, canViewStyle } from './permissions'
+import { assertProductionAccess, canViewStyle } from './permissions'
 import { saveOperationInWorkspace, validateOperationReason } from './operations-domain'
 import { QUALITY_CATEGORIES } from './workflow-refinements'
 import { findProcessingUnitPrice, validateProcessingUnitCost, type ProcessingPriceKind, type ProcessingUnitPrice } from './processing-prices'
@@ -32,7 +32,7 @@ export function findSupplierWorkRate(workspace: SupplierWorkRatesFields, factory
 function actorFor(workspace: Workspace, supplied: Profile): Profile {
   const actor = workspace.profiles.find(profile => profile.id === supplied.id)
   if (!actor) throw new Error('사용자 계정을 확인해 주세요.')
-  assertActive(actor); return actor
+  assertProductionAccess(actor); return actor
 }
 function supplierFor(workspace: Workspace, actor: Profile, factoryId: string, kind: ProcessingPriceKind): SupplierFactory {
   const factory = workspace.factories.find(item => item.id === factoryId)
@@ -57,7 +57,7 @@ function checkRateItem(workspace: Workspace, factoryId: string, kind: Processing
 }
 export function scopeSupplierWorkRates(workspace: SupplierWorkspace, supplied: Profile): SupplierWorkRatesFields {
   const actor = workspace.profiles.find(profile => profile.id === supplied.id)
-  const allowed = actor?.active && actor.approved
+  const allowed = actor?.role !== 'finance' && actor?.active && actor.approved
   const visible = (row: { factoryId: string; kind: ProcessingPriceKind }) => !!allowed && supplierSupportsKind(workspace.factories.find(factory => factory.id === row.factoryId), row.kind) && (actor.role !== 'factory' || actor.factoryId === row.factoryId)
   return { supplierWorkRatesAvailable: workspace.supplierWorkRatesAvailable, supplierWorkRates: (workspace.supplierWorkRates || []).filter(visible), supplierWorkRateAudits: (workspace.supplierWorkRateAudits || []).filter(visible) }
 }

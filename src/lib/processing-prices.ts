@@ -1,5 +1,5 @@
 import type { Profile, Workspace } from './types'
-import { assertActive, canViewStyle } from './permissions'
+import { assertProductionAccess, canViewStyle } from './permissions'
 import { validateOperationReason } from './operations-domain'
 
 export type ProcessingPriceKind = 'label' | 'embroidery' | 'quality'
@@ -28,7 +28,7 @@ export function scopeProcessingPricesWorkspace(workspace: PricesWorkspace, suppl
 export function saveProcessingUnitPriceInWorkspace(workspace: PricesWorkspace, supplied: Profile, styleId: string, lineId: string, kind: ProcessingPriceKind, itemKey: string, unitCost: number | null, expectedVersion: number, reason: string): PricesWorkspace {
   const actor = workspace.profiles.find(person => person.id === supplied.id)
   if (!actor) throw new Error('계정을 확인해 주세요.')
-  assertActive(actor)
+  assertProductionAccess(actor)
   const style = workspace.styles.find(item => item.id === styleId && canViewStyle(actor, item))
   const line = style?.production.find(line => line.id === lineId)
   if (!style || !line) throw new Error('접근 가능한 스타일과 저장된 생산 컬러를 선택해 주세요.')

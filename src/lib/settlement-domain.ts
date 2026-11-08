@@ -1,5 +1,5 @@
 import type { Profile } from './types'
-import { assertActive, canViewStyle } from './permissions'
+import { assertProductionAccess, canViewStyle } from './permissions'
 import type { SettlementTerms, SettlementTermsInput, SettlementWorkspace, SettlementWorkspaceFields } from './settlement-types'
 import { validateOperationReason } from './operations-domain'
 
@@ -21,7 +21,7 @@ export function scopeSettlementTermsWorkspace(workspace: SettlementWorkspace, pr
 export function saveSettlementTermsInWorkspace(workspace: SettlementWorkspace, supplied: Profile, styleId: string, lineId: string, data: SettlementTermsInput, expectedVersion: number, reason: string): SettlementWorkspace {
   const actor = workspace.profiles.find(profile => profile.id === supplied.id)
   if (!actor) throw new Error('사용자 계정을 확인할 수 없습니다.')
-  assertActive(actor)
+  assertProductionAccess(actor)
   if (actor.role === 'factory') throw new Error('을지 정산 정보는 승인된 관리자·본사 직원만 수정할 수 있습니다.')
   validateOperationReason(reason)
   validateSettlementTerms(data)

@@ -13,6 +13,8 @@ import { scopePartialDeliveryWorkspace } from './partial-deliveries'
 import { isInspectionProfile, scopeInspectionWorkspace } from './inspection-assignments'
 import { inspectionOnlyWorkspace } from './inspection-workspace'
 import { scopeSupplierWorkRates } from './supplier-work-rates'
+import { financeOnlyWorkspace } from './finance-workspace'
+import { buildBudgetSources } from './budget-domain'
 export function localDate(date = new Date()): string { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
 export function addDays(days: number, from = new Date()): string { const d = new Date(from); d.setDate(d.getDate() + days); return localDate(d) }
 export function isOverdue(style: Style): boolean { return !!style.dueDate && style.dueDate < localDate() && style.stage !== 'approved' && !(style.stage === 'production' && style.production.length > 0 && style.production.every(p => quantityTotal(p.order) > 0 && quantityTotal(p.received) >= quantityTotal(p.order))) }
@@ -26,11 +28,12 @@ export function isMainProductionStyle(style: Style): boolean {
   return style.stage === 'production' || ['registered', 'approved'].includes(style.stage) && style.production.some(line => quantityTotal(line.order) > 0 || quantityTotal(line.shipped) > 0 || quantityTotal(line.received) > 0)
 }
 export function scopeWorkspace(workspace: Workspace, profile: import('./types').Profile): Workspace {
+  if (workspace.profiles.find(person => person.id === profile.id)?.role === 'finance') return financeOnlyWorkspace(workspace, profile)
   if (isInspectionProfile(workspace, profile)) return inspectionOnlyWorkspace(workspace, profile)
   const operations = scopeOperations(workspace, profile)
   const settlement = { ...scopeInspectionWorkspace(workspace, profile), ...scopeSupplierWorkRates(workspace, profile), ...scopePartialDeliveryWorkspace(workspace, profile), ...scopeMaterialReviewsWorkspace(workspace, profile), ...scopeSettlementTermsWorkspace(workspace, profile), ...scopeProductionLedgerWorkspace(workspace, profile), ...scopeSupplierOrders(workspace, profile), ...scopeProcessingPricesWorkspace(workspace, profile), ...scopeProductionConditionsWorkspace(workspace, profile), ...scopeProductionPoLinks(workspace, profile), productionDetails: scopeProductionDetails(workspace, profile), refinementsAvailable: workspace.refinementsAvailable }
   if (!profile.approved || !profile.active) return { ...settlement, styles: [], profiles: [profile], factories: [], projects: [], productionProjectNames: [], comments: [], attachments: [], audits: [], styleImages: [], styleImagesAvailable: workspace.styleImagesAvailable, operations, operationsAvailable: workspace.operationsAvailable }
-  if (profile.role !== 'factory') { const styles = workspace.styles.filter(s => !s.deletedAt); const ids = new Set(styles.map(s => s.id)); return { ...workspace, ...settlement, styles, styleImages: (workspace.styleImages || []).filter(image => ids.has(image.styleId)), operations } }
+  if (profile.role !== 'factory') { const styles = workspace.styles.filter(s => !s.deletedAt); const ids = new Set(styles.map(s => s.id)); return { ...workspace, ...settlement, ...(workspace.budgetAvailable === true ? { budgetSources: workspace.budgetSources || buildBudgetSources(workspace) } : {}), styles, styleImages: (workspace.styleImages || []).filter(image => ids.has(image.styleId)), operations } }
   const styles = workspace.styles.filter(s => s.factoryId === profile.factoryId && !s.deletedAt)
   const ids = new Set(styles.map(s => s.id)); const projectIds = new Set(styles.map(s => s.projectId))
   const ownerIds = new Set(styles.flatMap(s => [s.ownerId, ...s.samples.map(sample => sample.ownerId)]))

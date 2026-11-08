@@ -47,7 +47,7 @@ export function scopeProductionPoLinks(workspace: LinkWorkspace, supplied: Profi
  * identifies its capture scope; it does not prove the mail body contained it. */
 export function linkProductionPoInWorkspace(workspace: LinkWorkspace, supplied: Profile, runId: string, poId: string, expectedRunVersion: number, expectedPoVersion: number, confirmation: ProductionPoLinkConfirmation, reason: string): LinkWorkspace {
   const actor = workspace.profiles.find(item => item.id === supplied.id)
-  if (!actor?.active || !actor.approved || actor.role === 'factory') throw new Error('생산 차수 PO 연결은 승인된 본사만 가능합니다.')
+  if (!actor?.active || !actor.approved || !['admin', 'internal'].includes(actor.role)) throw new Error('생산 차수 PO 연결은 승인된 본사만 가능합니다.')
   validateOperationReason(reason); validateRunQuantities(confirmation.order)
   const run = workspace.productionRuns?.find(item => item.id === runId), po = workspace.operations?.poDispatches.find(item => item.id === poId)
   const style = run && workspace.styles.find(item => item.id === run.styleId && canViewStyle(actor, item))

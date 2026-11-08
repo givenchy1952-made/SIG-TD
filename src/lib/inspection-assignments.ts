@@ -44,7 +44,7 @@ function minimalOrder(row: InspectionOrder): InspectionOrder {
  * only the server projection because raw styles remain closed by RLS. */
 export function getInspectionOrders(workspace: InspectionWorkspace, supplied: Profile): InspectionOrder[] {
   const actor = activeActor(workspace, supplied)
-  if (!actor?.active || !actor.approved || workspace.inspectionAssignmentsAvailable !== true) return []
+  if (!actor?.active || !actor.approved || actor.role === 'finance' || workspace.inspectionAssignmentsAvailable !== true) return []
   const inspector = isInspectionProfile(workspace, actor), factory = actorFactory(workspace, actor)
   if (actor.role === 'factory' && (!inspector || factory?.active === false || !factory?.inspectionProvider)) return []
   const provider = inspector ? factory!.inspectionProvider : undefined
@@ -65,7 +65,7 @@ export function getInspectionOrders(workspace: InspectionWorkspace, supplied: Pr
 
 export function scopeInspectionWorkspace(workspace: InspectionWorkspace, supplied: Profile): InspectionAssignmentFields {
   const actor = activeActor(workspace, supplied), available = workspace.inspectionAssignmentsAvailable === true
-  if (!actor?.active || !actor.approved || !available) return { inspectionAssignmentsAvailable: available, inspectionAssignments: [], inspectionOrders: [] }
+  if (!actor?.active || !actor.approved || actor.role === 'finance' || !available) return { inspectionAssignmentsAvailable: available, inspectionAssignments: [], inspectionOrders: [] }
   const styleIds = new Set(workspace.styles.filter(style => !style.deletedAt).map(style => style.id))
   return { inspectionAssignmentsAvailable: true,
     inspectionAssignments: actor.role === 'factory' ? [] : (workspace.inspectionAssignments || []).filter(row => styleIds.has(row.styleId)).map(row => structuredClone(row)),
@@ -74,7 +74,7 @@ export function scopeInspectionWorkspace(workspace: InspectionWorkspace, supplie
 
 export function saveInspectionAssignmentInWorkspace(workspace: InspectionWorkspace, supplied: Profile, styleId: string, lineId: string, provider: InspectionProvider | null, expectedVersion: number, reason: string): InspectionWorkspace {
   const actor = activeActor(workspace, supplied)
-  if (!actor?.active || !actor.approved || actor.role === 'factory') throw new Error('승인된 본사 담당자만 검사 업체를 배정할 수 있습니다.')
+  if (!actor?.active || !actor.approved || !['admin', 'internal'].includes(actor.role)) throw new Error('승인된 본사 담당자만 검사 업체를 배정할 수 있습니다.')
   if (workspace.inspectionAssignmentsAvailable !== true) throw new Error('검사 업체 배정 설정(020)을 먼저 적용해 주세요.')
   validateOperationReason(reason)
   if (!providerValid(provider)) throw new Error('검사 업체는 미배정·에이블·KOTITI 중 선택해 주세요.')

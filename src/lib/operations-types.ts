@@ -22,10 +22,13 @@ export interface CalendarEventInput { leaveType?: LeaveType; startTime?: string;
 export interface CalendarEventAudit { id: string; eventId: string; actorId: string; actorName: string; action: string; reason: string; before: unknown; after: unknown; createdAt: string }
 export interface EmployeeFactoryAssignment extends OperationStamp { employeeId: string; factoryIds: string[] }
 export const ORDER_SOURCE_COLUMNS = ['A', 'F', 'L', 'M', 'S', 'V', 'W', 'X', 'Y', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AV', 'AY'] as const
+export const ORDER_BUDGET_SOURCE_COLUMNS = ['K', 'BH', 'BZ'] as const
 export type OrderSourceColumn = typeof ORDER_SOURCE_COLUMNS[number]
+export type OrderBudgetSourceColumn = typeof ORDER_BUDGET_SOURCE_COLUMNS[number]
+export type OrderSourceColumns<T> = Record<OrderSourceColumn, T> & Partial<Record<OrderBudgetSourceColumn, T>>
 export type OrderSourceCell = string | number | boolean | null
-export interface OrderSourceRow { rowNumber: number; columns: Record<OrderSourceColumn, OrderSourceCell> }
-export interface OrderSourceData { fileName: string; sheetName: string; headers: Record<OrderSourceColumn, string>; rows: OrderSourceRow[] }
+export interface OrderSourceRow { rowNumber: number; columns: OrderSourceColumns<OrderSourceCell> }
+export interface OrderSourceData { fileName: string; sheetName: string; headers: OrderSourceColumns<string>; rows: OrderSourceRow[] }
 export interface OrderSourceRecord extends OrderSourceData, OperationStamp { styleId: string; lineId: string }
 export interface OrderImportChange { styleId: string; expectedVersion: number; lines: { lineId: string; color: string; quantities: Quantities; source?: OrderSourceData & { expectedVersion: number } }[] }
 export interface OperationsWorkspace { orderSourceRecords: OrderSourceRecord[]; poDispatches: PoDispatch[]; poDispatchAttempts: PoDispatchAttempt[]; operationCatalogs: OperationCatalog[]; shipmentLedgers: ShipmentLedger[]; shipmentBatches: ShipmentBatch[]; styleOperations: StyleOperation[]; calendarEvents: CalendarEvent[]; calendarEventAudits: CalendarEventAudit[]; employeeFactoryAssignments: EmployeeFactoryAssignment[] }

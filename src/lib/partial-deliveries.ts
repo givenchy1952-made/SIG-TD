@@ -81,7 +81,7 @@ export function savePartialDeliveryInWorkspace(workspace: Workspace, actor: Prof
   const person = workspace.profiles.find(item => item.id === actor.id)
   const run = workspace.productionRuns?.find(item => item.id === runId)
   const style = workspace.styles.find(item => item.id === run?.styleId && !item.deletedAt)
-  if (!person?.active || !person.approved || person.role === 'factory' || !run || !style) throw new Error('승인된 본사 담당자만 부분 납기 일정을 수정할 수 있습니다.')
+  if (!person?.active || !person.approved || !['admin', 'internal'].includes(person.role) || !run || !style) throw new Error('승인된 본사 담당자만 부분 납기 일정을 수정할 수 있습니다.')
   if (run.closedAt || workspace.productionReceipts?.some(item => item.runId === runId) || workspace.productionConditions?.some(item => item.runId === runId && (item.proposal || item.approval || item.legacy || item.status === 'rejected')) || workspace.supplierProductionOrders?.some(item => item.runId === runId && item.startedAt))
     throw new Error('업체 회신·생산 시작·입고 이후에는 기존 분할 납기를 수정할 수 없습니다.')
   const existing = workspace.partialDeliveryPlans?.find(item => item.runId === runId)

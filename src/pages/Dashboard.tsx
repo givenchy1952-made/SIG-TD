@@ -94,9 +94,9 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   const projectName = (id: string) => getProjectIdentity(workspace, id).name
   const projectSeason = (style: Style) => getProjectIdentity(workspace, style.projectId).season || style.season
   const projectOptions = projectFilterOptions(workspace)
-  const showBudgetCode = profile.role !== 'factory'
+  const showBudgetCode = ['admin', 'internal'].includes(profile.role)
   const ownerName = (id: string) => workspace.profiles.find(p => p.id === id)?.name || '미지정'
-  const ownerOptions = [{ value: '', label: '미지정' }, ...workspace.profiles.filter(item => item.role !== 'factory').map(item => ({ value: item.id, label: item.name }))]
+  const ownerOptions = [{ value: '', label: '미지정' }, ...workspace.profiles.filter(item => ['admin', 'internal'].includes(item.role)).map(item => ({ value: item.id, label: item.name }))]
   const upcoming = (style: Style) => !complete(style) && ([style.dueDate, ...style.samples.filter(s => s.status !== 'done' && s.status !== 'approved').map(s => s.plannedAt), ...style.production.map(p => p.confirmDue)]).some(date => !!date && date >= today && date <= weekEnd)
   const totalOrders = visibleStyles.reduce((sum, s) => sum + s.production.reduce((n, p) => n + quantityTotal(p.order), 0), 0)
   const totalReceived = visibleStyles.reduce((sum, s) => sum + s.production.reduce((n, p) => n + quantityTotal(p.received), 0), 0)
@@ -203,7 +203,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
 
     <div className="dashboard-page-heading">
       <div><div className="page-eyebrow">{eyebrow}</div><h1>{title}<span className="heading-period">.</span></h1><p>{subtitle}</p></div>
-      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{profile.role !== 'factory' && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{profile.role !== 'factory' && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
+      <div className="page-heading-actions"><span className="today-chip"><CalendarDays size={14} />{today.replaceAll('-', '.')}</span>{['admin', 'internal'].includes(profile.role) && view !== 'settlement' && <button className="button" onClick={() => setOrderImportOpen(true)}><ArrowDownToLine size={15} />오더 엑셀 업로드</button>}{['admin', 'internal'].includes(profile.role) && <button className="button" disabled={!exportStyles.length} onClick={() => setTemplateOpen(true)}><ArrowDownToLine size={15} />을지 양식 다운로드</button>}{['admin', 'internal'].includes(profile.role) && <button className="button button-primary" onClick={onCreate}><Plus size={16} />스타일 등록</button>}</div>
     </div>
 
     {view === 'production' && <ProductionRoundBoard workspace={workspace} onOpenStyle={onOpenStyle}/>}
@@ -301,7 +301,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
           <td><span className={`due-date ${isLate ? 'late' : ''}`}>{shortDate(style.dueDate)}{isLate && <span className="delay-indicator"/>}</span></td><td><span className="owner-cell"><span className="owner-avatar">{ownerName(line?.ownerId ?? style.ownerId).slice(0, 1)}</span>{ownerName(line?.ownerId ?? style.ownerId)}</span></td><td className="arrow-cell"><ArrowUpRight size={15}/></td>
         </tr>
       })}</tbody></table></div>
-      {!rows.length && <div className="dashboard-empty"><div><Search size={25} strokeWidth={1.2}/></div><h3>{visibleStyles.length ? '조건에 맞는 스타일이 없습니다.' : '첫 번째 스타일을 등록해 보세요.'}</h3><p>{visibleStyles.length ? '검색어나 필터 조건을 조정해 주세요.' : '스타일을 등록하면 샘플부터 메인 생산까지 함께 관리할 수 있습니다.'}</p>{visibleStyles.length ? <button className="button button-ghost" onClick={clearFilters}>필터 초기화</button> : profile.role !== 'factory' && <button className="button button-primary" onClick={onCreate}><Plus size={15}/>스타일 등록</button>}</div>}
+      {!rows.length && <div className="dashboard-empty"><div><Search size={25} strokeWidth={1.2}/></div><h3>{visibleStyles.length ? '조건에 맞는 스타일이 없습니다.' : '첫 번째 스타일을 등록해 보세요.'}</h3><p>{visibleStyles.length ? '검색어나 필터 조건을 조정해 주세요.' : '스타일을 등록하면 샘플부터 메인 생산까지 함께 관리할 수 있습니다.'}</p>{visibleStyles.length ? <button className="button button-ghost" onClick={clearFilters}>필터 초기화</button> : ['admin', 'internal'].includes(profile.role) && <button className="button button-primary" onClick={onCreate}><Plus size={15}/>스타일 등록</button>}</div>}
       <div className="table-pagination"><span>전체 <strong>{number(rows.length)}</strong>개 {pageLabel}{rows.length > 0 && <span className="pagination-range">{(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, rows.length)} 표시</span>}</span><div><select aria-label="페이지당 항목 수" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); resetPage() }}><option value={15}>15개씩 보기</option><option value={25}>25개씩 보기</option><option value={50}>50개씩 보기</option></select><button className="icon-button" aria-label="이전 페이지" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15}/></button>{Array.from({ length: Math.min(5, totalPages) }, (_, i) => Math.max(1, Math.min(currentPage - 2, totalPages - 4)) + i).map(n => <button className={`page-number ${n === currentPage ? 'active' : ''}`} key={n} onClick={() => setPage(n)}>{n}</button>)}<button className="icon-button" aria-label="다음 페이지" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={15}/></button></div></div>
     </section>
 

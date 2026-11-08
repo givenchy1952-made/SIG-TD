@@ -25,7 +25,7 @@ function text(value: unknown, max = 120): value is string { return typeof value 
 const optionalOwner = (value: unknown): value is string => value === '' || text(value)
 function ownerName(workspace: Workspace, ownerId: string): string | null {
   if (ownerId === '') return ''
-  const name = workspace.profiles.find(item => item.id === ownerId && item.role !== 'factory')?.name
+  const name = workspace.profiles.find(item => item.id === ownerId && ['admin', 'internal'].includes(item.role))?.name
   return text(name) ? name.trim() : null
 }
 function projectCode(value: unknown): value is string { return text(value) && !UUID.test(value.trim()) && !/^(?:-|#(?:REF!|NAME\?|VALUE!|N\/A|DIV\/0!|NUM!|NULL!))$/i.test(value.trim()) }
@@ -52,7 +52,7 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
   if (kind !== 'product') return buildProcessingSigEuljiRows(workspace, styles, suppliedProfile, kind)
   const rows: SigEuljiRow[] = [], errors: string[] = []
   const profile = workspace.profiles.find(item => item.id === suppliedProfile.id)
-  if (!profile?.approved || !profile.active || profile.role === 'factory') return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
+  if (!profile?.approved || !profile.active || !['admin', 'internal'].includes(profile.role)) return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
   if (workspace.settlementTermsAvailable !== true) errors.push('본사 정산용 을지 단가·예산 관리 코드 저장 기능을 먼저 설정해 주세요. 관리자에게 004_settlement_terms.sql 적용을 요청하세요.')
   const selectedIds = new Set<string>()
   for (const selected of styles) {
@@ -98,7 +98,7 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
 function buildProcessingSigEuljiRows(workspace: Workspace, styles: Style[], suppliedProfile: Profile, kind: Exclude<SigEuljiKind, 'product'>): SigEuljiPreview {
   const rows: SigEuljiRow[] = [], errors: string[] = []
   const actor = workspace.profiles.find(item => item.id === suppliedProfile.id)
-  if (!actor?.approved || !actor.active || actor.role === 'factory') return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
+  if (!actor?.approved || !actor.active || !['admin', 'internal'].includes(actor.role)) return { rows, errors: ['을지 자동 다운로드는 승인된 관리자·본사 직원만 사용할 수 있습니다.'] }
   if (kind === 'quality' ? workspace.refinementsAvailable !== true : workspace.operationsAvailable !== true) return { rows, errors: ['가공·품질 관리의 저장 기능을 먼저 설정해 주세요.'] }
   const kindLabel = kind === 'label' ? '중화라벨' : kind === 'embroidery' ? '비와이 자수' : '품질검사'
   const seenStyles = new Set<string>()

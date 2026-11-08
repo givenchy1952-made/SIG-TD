@@ -1,6 +1,6 @@
 import { SIZES, emptyQuantities, quantityTotal } from './types'
 import type { Quantities, Size, Style, Workspace } from './types'
-import { ORDER_SOURCE_COLUMNS, type OrderImportChange, type OrderSourceData } from './operations-types'
+import { ORDER_SOURCE_COLUMNS, ORDER_BUDGET_SOURCE_COLUMNS, type OrderImportChange, type OrderSourceData } from './operations-types'
 
 export type ImportCell = string | number | boolean | null | { error: string }
 export interface ImportSheet { name: string; rows: ImportCell[][] }
@@ -160,8 +160,8 @@ export function orderImportDefaults(book: ImportWorkbook, selectedSheet?: number
   return { sheetIndex, preset, headerRow, mapping: preset === 'sig-order-qty' ? sigMap : detected.mapping, layout: preset === 'sig-order-qty' ? 'wide' : detected.layout }
 }
 const columnIndex = (name: string) => [...name].reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0) - 1
-function sourceMetadata(source: ImportCell[], rowNumber: number): OrderSourceMetadata {
-  return { rowNumber, columns: Object.fromEntries(SIG_ORDER_SOURCE_COLUMNS.map(column => [column, source[columnIndex(column)] ?? null])) }
+function sourceMetadata(source: ImportCell[], rowNumber: number, sourceColumns: readonly string[]): OrderSourceMetadata {
+  return { rowNumber, columns: Object.fromEntries(sourceColumns.map(column => [column, source[columnIndex(column)] ?? null])) }
 }
 /** Preserve F as the source value. An explicit user override wins; otherwise
  * an approved budget-code fallback must be exactly A + F + two letters. */
@@ -236,7 +236,8 @@ function matchLine(workspace: Workspace, sku: string, color: string) {
   return candidates[0]
 }
 function sourceIdentity(data: OrderSourceData): string {
-  return JSON.stringify([data.fileName, data.sheetName, ORDER_SOURCE_COLUMNS.map(column => data.headers[column]), data.rows.map(row => [row.rowNumber, ORDER_SOURCE_COLUMNS.map(column => row.columns[column])])])
+  const columns = [...ORDER_SOURCE_COLUMNS, ...ORDER_BUDGET_SOURCE_COLUMNS.filter(column => Object.hasOwn(data.headers, column))]
+  return JSON.stringify([data.fileName, data.sheetName, columns.map(column => [column, data.headers[column]]), data.rows.map(row => [row.rowNumber, columns.map(column => row.columns[column])])])
 }
 const blankPreview = (row: number, sku = '', color = ''): OrderImportPreviewRow => ({ rowNumbers: [row], sku, color, styleId: null, lineId: null, styleName: '', before: emptyQuantities(), imported: emptyQuantities(), after: emptyQuantities(), changed: false, errors: [], warnings: [] })
 
@@ -249,8 +250,16 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
   if (!Number.isInteger(headerRow) || headerRow < 1 || headerRow >= sheet.rows.length) { errors.push('제목 행 아래에 수량 데이터가 있는지 확인해 주세요.'); return result() }
   if (sheet.rows.length > MAX_ROWS) { errors.push('한 번에 10,000행 이하만 가져올 수 있습니다.'); return result() }
   const sourceHeaders = {} as OrderSourceData['headers']
+  // Only a confirmed 024 server accepts the extra financial columns. Older
+  // sixteen-column originals remain valid and can still be edited/imported.
+  const financialHeader = { K: /^(?:브랜드|BRAND)$/i, BH: /^JOORGB$/i, BZ: /^ADERKOR$/i }
+  const budgetColumns = workspace.budgetOrderMetadataAvailable === true ? ORDER_BUDGET_SOURCE_COLUMNS.filter(column => {
+    const value = sheet.rows[headerRow - 1]?.[columnIndex(column)]
+    return typeof value === 'string' && financialHeader[column].test(value.normalize('NFKC').replace(/\s/g, ''))
+  }) : []
+  const sourceColumns = [...SIG_ORDER_SOURCE_COLUMNS, ...budgetColumns]
   if (fixed) {
-    for (const column of SIG_ORDER_SOURCE_COLUMNS) {
+    for (const column of sourceColumns) {
       const value = sheet.rows[headerRow - 1]?.[columnIndex(column)] ?? null
       if (typeof value === 'object' && value !== null) errors.push(`원본 ${column}열 제목: ${value.error}`)
       else if (excelErrorLiteral(value)) errors.push(`원본 ${column}열 제목: Excel 셀 오류 ${excelErrorLiteral(value)}. 원본을 수정한 뒤 다시 가져와 주세요.`)
@@ -276,7 +285,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
     sourceRows += 1
     const rowNumber = index + 1
     let preview = blankPreview(rowNumber)
-    if (fixed) preview.sourceMetadata = [sourceMetadata(source, rowNumber)]
+    if (fixed) preview.sourceMetadata = [sourceMetadata(source, rowNumber, sourceColumns)]
     try {
       const sku = fixed ? readSigRowSku(source, options.sigSkus?.[rowNumber], options.sigBudgetFallback) : textCell(source[mapping.sku!], '품번'), color = mapping.color === null ? '' : textCell(source[mapping.color], '색상')
       preview.sku = sku; preview.color = color
@@ -327,7 +336,7 @@ export function buildOrderImportPreview(workspace: Workspace, sheet: ImportSheet
       const sourceRows: OrderSourceData['rows'] = []
       for (const original of originals) {
         const columns = {} as OrderSourceData['rows'][number]['columns']
-        for (const column of SIG_ORDER_SOURCE_COLUMNS) {
+        for (const column of sourceColumns) {
           const value = original.columns[column]
           if (typeof value === 'object' && value !== null) row.errors.push(`${original.rowNumber}행 원본 ${column}열: ${value.error}`)
           else if (excelErrorLiteral(value)) row.errors.push(`${original.rowNumber}행 원본 ${column}열: Excel 셀 오류 ${excelErrorLiteral(value)}. 원본을 수정한 뒤 다시 가져와 주세요.`)
