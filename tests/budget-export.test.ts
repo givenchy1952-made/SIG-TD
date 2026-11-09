@@ -28,6 +28,30 @@ async function formulas(bytes: Uint8Array) {
 }
 
 describe('신규 예산·FA 누적 Excel/CSV', () => {
+  it('사후원가 확인을 제거하고 M=장당 O×수량 J와 O 주소를 Excel·CSV에서 유지한다', async () => {
+    const report = fixture(), workbook = await reopen(await buildBudgetWorkbook(report))
+    const sheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!
+    expect(sheet.getCell('M1').value).toBe('생산 예산')
+    expect(sheet.getCell('N1').value).toBe('')
+    expect(sheet.getColumn(14).hidden).toBe(true)
+    expect(sheet.getCell('N2').value).toBeNull()
+    expect(sheet.getCell('O1').value).toBe('생산 원가')
+    expect(sheet.getCell('O2').value).toBe(617.28)
+    expect(sheet.getCell('O2').formula).toBeUndefined()
+    expect(sheet.getCell('M2').value).toEqual({ formula: 'IF(O2="","",O2*J2)', result: 1234.56 })
+    const csv = budgetCSV(report, 'orders'), rows = parseOrderCSV(csv)
+    expect(csv).not.toContain('사후원가 확인')
+    expect(rows[0]).toHaveLength(15)
+    expect(rows[0][13]).toBe(''); expect(rows[1][13]).toBe('')
+    expect(rows[1][12]).toBe('1234.56'); expect(rows[1][14]).toBe('617.28')
+    expect(rows[2][12]).toBe(''); expect(rows[2][14]).toBe('')
+    report.orders[0].quantity = 0; report.orders[0].productionUnitCost = 0; report.orders[0].productionBudget = 0
+    const zero = (await reopen(await buildBudgetWorkbook(report))).getWorksheet(BUDGET_SHEET_NAMES.orders)!
+    expect(zero.getCell('O2').value).toBe(0)
+    expect(zero.getCell('M2').formula).toBe('IF(O2="","",O2*J2)')
+    expect(zero.getCell('M2').result).toBe(0)
+  })
+
   it('업로드한 원가에만 Q×S 수식을 넣고 수동 금액과 소수 6자리를 보존한다', async () => {
     const report = fixture()
     report.budgetCostImportRecordIds = ['pre-a']
@@ -77,7 +101,8 @@ describe('신규 예산·FA 누적 Excel/CSV', () => {
     const order = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!, cost = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!, fa = workbook.getWorksheet(BUDGET_SHEET_NAMES.fa)!
     expect(order.getCell('B2').result).toBe('SIG-2027RPQ-AQA001BK')
     expect(order.getCell('B2').formula).toContain('A2&D2')
-    expect(order.getCell('O2').value).toEqual({ formula: 'IF(OR(M2="",J2=0),"",M2/J2)', result: 617.28 })
+    expect(order.getCell('O2').value).toBe(617.28)
+    expect(order.getCell('M2').value).toEqual({ formula: 'IF(O2="","",O2*J2)', result: 1234.56 })
     expect(cost.getCell('B2').result).toBe('SIG-2027RPQ-AQA001BK')
     expect(cost.getCell('I2').value).toBe('사전 · 제품')
     expect(cost.getCell('I3').value).toBe('사후 · 제품')
@@ -97,9 +122,9 @@ describe('신규 예산·FA 누적 Excel/CSV', () => {
     const report = fixture(); report.totals.annualLimit = null; report.totals.unallocated = null
     report.costs[0].data.unitCost = 0; report.costs[0].data.amount = 0
     const workbook = await reopen(await buildBudgetWorkbook(report)), order = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!, cost = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!, fa = workbook.getWorksheet(BUDGET_SHEET_NAMES.fa)!, dashboard = workbook.getWorksheet(BUDGET_SHEET_NAMES.dashboard)!
-    expect(order.getCell('M3').value).toBeNull()
+    expect(order.getCell('M3').result ?? '').toBe('')
     expect(order.getCell('K3').value).toBeNull()
-    expect(order.getCell('O3').result ?? '').toBe('')
+    expect(order.getCell('O3').value).toBeNull()
     expect(cost.getCell('U2').value).toBe(0)
     expect(cost.getCell('R2').value).toBeNull()
     expect(fa.getCell('O5').result).toBe(0)

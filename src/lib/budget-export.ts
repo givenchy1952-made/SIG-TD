@@ -11,7 +11,7 @@ export const BUDGET_SHEET_NAMES = {
   orders: '1-0.발주요청세부(Order Quantity 관련)', costs: '2-0.원가계산서(TD 사전원가와 관련)',
   fa: 'FA을지 누적용', dashboard: '7-0.대시보드(최종 취합)', excess: '7-1.초과 내역', unclosed: '7-2.미종결 내역',
 } as const
-export const BUDGET_ORDER_HEADERS = ['프로젝트 코드', '예산 코드', '프로젝트 명칭', '스타일코드', '브랜드', '년도/시즌', '생산구분', '발주 코드', '발주 요청일', '합계 : TTL', '합계 : JOOR GB', '합계 : ADER KOR', '생산 예산', '2-0.사후원가 확인', '생산 원가']
+export const BUDGET_ORDER_HEADERS = ['프로젝트 코드', '예산 코드', '프로젝트 명칭', '스타일코드', '브랜드', '년도/시즌', '생산구분', '발주 코드', '발주 요청일', '합계 : TTL', '합계 : JOOR GB', '합계 : ADER KOR', '생산 예산', '', '생산 원가']
 export const BUDGET_COST_HEADERS = ['프로젝트코드', '예산코드', '프로젝트 명칭', '스타일코드', '브랜드', '년도/시즌', '생산구분', '발주 코드', '종류', '업체', '내역', '위치', '규격', '품명', '혼용율', '컬러2', '단가', '변동단가', '요척량', '단위', '금액']
 export const BUDGET_FA_HEADERS = ['지급일', '품의서 #', '업체명', '발주날짜', '프로젝트코드', '프로젝트+업체 코드', '스타일코드', 'ERP계정과목', '품목', '단가', '요척', '오더수량', '입고수량', '단위', '금액', 'VAT', '합계', '담당자', '산출근거', '분할 결제', '결제 상태']
 const PROJECT_HEADERS = ['년도/시즌', '프로젝트 명칭', '프로젝트코드', '발주날짜', '합계 : 예산', '지출내역', '진행율', '예산종결여부']
@@ -35,7 +35,7 @@ const metadata = (report: BudgetReport, group: BudgetGroup, kind: 'project' | 'f
 const groupBudget = (group: BudgetGroup) => group.totals.missingCostCount > 0 && group.totals.budget === 0 ? null : group.totals.budget
 const progress = (paidAmount: number, budget: number | null) => budget === null || budget <= 0 ? null : paidAmount / budget
 function orderCells(order: BudgetOrderRow): Value[] {
-  return [order.projectCode, budgetCode(order.projectCode, order.styleCode), order.projectName, order.styleCode, order.brand, order.season, order.productionType, order.orderCode, order.orderDate, order.quantity, order.joorQuantity, order.aderQuantity, order.productionBudget, order.costMatched, order.productionUnitCost]
+  return [order.projectCode, budgetCode(order.projectCode, order.styleCode), order.projectName, order.styleCode, order.brand, order.season, order.productionType, order.orderCode, order.orderDate, order.quantity, order.joorQuantity, order.aderQuantity, order.productionBudget, null, order.productionUnitCost]
 }
 function exceptionCells(exception: BudgetException, report: BudgetReport): Value[] {
   const rows = report.orders.filter(order => JSON.stringify([order.projectId, order.budgetCode]) === exception.key)
@@ -115,10 +115,12 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
     sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: `1:${table.headerRow}` }
   }
   const orderSheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!
+  // Preserve the requested M/O addresses while removing the old N field.
+  orderSheet.getColumn(14).hidden = true
   report.orders.forEach((order, index) => {
     const row = index + 2
     orderSheet.getCell(row, 2).value = { formula: whitespaceFormula(row), result: budgetCode(order.projectCode, order.styleCode) }
-    orderSheet.getCell(row, 15).value = { formula: `IF(OR(M${row}="",J${row}=0),"",M${row}/J${row})`, result: blankIfUnknown(order.productionUnitCost) }
+    orderSheet.getCell(row, 13).value = { formula: `IF(O${row}="","",O${row}*J${row})`, result: blankIfUnknown(order.productionBudget) }
   })
   money(orderSheet, [13, 15], 2, report.orders.length + 1)
   const costSheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!

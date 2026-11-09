@@ -46,6 +46,13 @@ export function multiplyBudgetCost(unitCost: number, consumption: number): numbe
   return value
 }
 
+/** A per-garment amount can already have six decimals after price × consumption.
+ * Multiply by the actual whole order quantity without rounding that unit cost. */
+export function multiplyBudgetQuantity(unitAmount: number, quantity: number): number {
+  if (!Number.isFinite(unitAmount) || unitAmount < 0 || !Number.isSafeInteger(quantity) || quantity < 0) throw rangeError()
+  return asNumber(scaled(unitAmount, 6) * BigInt(quantity), 6)
+}
+
 /** Signed inputs support exact remaining/overage calculations as well as sums. */
 export function sumBudgetMoney(values: readonly number[]): number {
   return asNumber(values.reduce((total, value) => {

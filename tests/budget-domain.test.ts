@@ -17,6 +17,11 @@ function record<K extends BudgetRecord['kind']>(kind: K, data: Extract<BudgetRec
 function workspace(sources: BudgetSources = { orders: [order()], settlements: [entry()], warnings: [] }): Workspace { return { profiles: [admin, finance, internal, factory], factories: [1, 2, 3].map(n => ({ id: id(20 + n), name: `업체 ${n}`, country: '대한민국' })), styles: [], projects: [], comments: [], attachments: [], audits: [], budgetSources: sources, budgetRecords: [], budgetAvailable: true } }
 function saved(workspace: Workspace, kind: BudgetRecord['kind'], data: BudgetRecord['data'], n = 60, version = 0): Workspace { return saveBudgetRecordInWorkspace(workspace, admin, id(n), kind, data, version, '확인 후 저장') }
 function paid(workspace: Workspace, value = entry(), n = 70): Workspace { return saved(workspace, 'payment', { ...defaultBudgetPayment(value), status: 'paid', paidAt: '2026-11-07' }, n) }
+function uploaded(workspace: Workspace, data: BudgetCostData, n = 60): Workspace {
+  const next = saved(workspace, 'cost', data, n)
+  next.budgetCostImports = [...(next.budgetCostImports || []), { recordId: id(n), projectId: data.projectId, styleCode: data.styleCode, fileName: 'QA-unit-cost.xlsx', sheetName: 'QA 원가', rowNumber: n - 44, sourceKey: `qa:${n}`, rowFingerprint: 'f'.repeat(64), contentHash: 'a'.repeat(64), updatedAt: '2026-11-09T00:00:00Z', updatedBy: admin.id }]
+  return next
+}
 
 describe('예산·FA 누적 도메인', () => {
   it('업로드 원가를 직접 수정해도 Q×S 금액을 유지하고 수동 금액은 별도로 보존한다', () => {
@@ -49,7 +54,7 @@ describe('예산·FA 누적 도메인', () => {
     expect(report.totals.missingCostCount).toBe(1); expect(report.excess).toHaveLength(0); expect(report.totals.overage).toBe(0)
     expect(report.unclosed[0].explanation).toContain('사전 원가 미등록')
   })
-  it('사전 원가 합계 M과 장당 O, 사후 원가 매칭 N을 구분하며 요척 계산을 추정하지 않는다', () => {
+  it('기존 수동 총액과 장당 원가를 유지하고 사후 원가 기록을 보존한다', () => {
     let w = saved(workspace(), 'cost', { ...cost(), unitCost: 5, consumption: 2, amount: 12345 })
     w = saved(w, 'cost', cost(1, 9000, 'post'), 61)
     const row = buildBudgetReport(w, admin).orders[0]
@@ -60,6 +65,97 @@ describe('예산·FA 누적 도메인', () => {
     expect(buildBudgetReport(w, admin).excess).toHaveLength(0)
     const report = buildBudgetReport(paid(w), admin)
     expect(report.orders[0].productionBudget).toBe(0); expect(report.totals.missingCostCount).toBe(0); expect(report.excess[0].overage).toBe(12000)
+  })
+  it('업로드 장당 항목 원가의 소수를 합산한 뒤 생산 수량을 정확히 한 번 곱한다', () => {
+    const source = { ...order(), quantity: 350, receivedQuantity: 0 }
+    let w = workspace({ orders: [source], settlements: [], warnings: [] })
+    w = uploaded(w, { ...cost(1, 1.5425), unitCost: 12.34, consumption: 0.125 })
+    w = uploaded(w, { ...cost(1, 17.4), unitCost: 8.7, consumption: 2 }, 61)
+    const before = structuredClone(w), report = buildBudgetReport(w, admin)
+    expect(report.orders[0]).toMatchObject({ productionUnitCost: 18.9425, productionBudget: 6629.875, quantity: 350 })
+    expect(report.totals).toMatchObject({ budget: 6629.875, remaining: 6629.875 })
+    expect(report.groups[0].totals.budget).toBe(6629.875)
+    expect(w).toEqual(before)
+  })
+  it('업로드 변동단가를 원단가보다 우선하고 명시한 변동단가 0도 그대로 사용한다', () => {
+    const source = { ...order(), quantity: 350, receivedQuantity: 0 }
+    for (const variable of [0, 15.5]) {
+      const data = { ...cost(1, 20), unitCost: 10, variableUnitCost: variable, consumption: 2 }
+      const w = uploaded(workspace({ orders: [source], settlements: [], warnings: [] }), data)
+      const report = buildBudgetReport(w, admin)
+      expect(report.orders[0]).toMatchObject({ productionUnitCost: variable * 2, productionBudget: variable * 700 })
+      expect(report.totals.missingCostCount).toBe(0)
+      expect(w.budgetRecords?.[0].data).toEqual(data)
+    }
+  })
+  it('공용비용과 기존 수동 총액은 수량을 중복 곱하지 않고 장당 금액에는 생산 수량으로 배분한다', () => {
+    const source = { ...order(), quantity: 350, receivedQuantity: 0 }
+    let w = workspace({ orders: [source], settlements: [], warnings: [] })
+    w = uploaded(w, { ...cost(1, 50), unitCost: 25, consumption: 2 })
+    w = uploaded(w, { ...cost(1, 1000), category: '공용비용', unitCost: 1000, consumption: 1 }, 61)
+    w = saved(w, 'cost', cost(1, 500), 62)
+    const before = structuredClone(w), report = buildBudgetReport(w, admin)
+    expect(report.orders[0].productionBudget).toBe(19000)
+    expect(report.orders[0].productionUnitCost).toBe(19000 / 350)
+    expect(report.totals.budget).toBe(19000)
+    expect(w).toEqual(before)
+  })
+  it('수량 0의 장당 원가와 명시적 0원을 유지하고 누락된 원가는 미등록으로 표시한다', () => {
+    const source = { ...order(), quantity: 0, receivedQuantity: 0 }
+    const zeroQuantity = uploaded(workspace({ orders: [source], settlements: [], warnings: [] }), { ...cost(1, 50), unitCost: 50, consumption: 1 })
+    expect(buildBudgetReport(zeroQuantity, admin).orders[0]).toMatchObject({ productionUnitCost: 50, productionBudget: 0 })
+    expect(buildBudgetReport(zeroQuantity, admin).totals.missingCostCount).toBe(0)
+    const zeroPrice = uploaded(workspace(), { ...cost(1, 0), unitCost: 0, consumption: 2 })
+    expect(buildBudgetReport(zeroPrice, admin).orders[0]).toMatchObject({ productionUnitCost: 0, productionBudget: 0 })
+    const incomplete = saved(zeroPrice, 'cost', cost(1, null), 61)
+    expect(buildBudgetReport(incomplete, admin).orders[0]).toMatchObject({ productionUnitCost: null, productionBudget: null })
+    expect(buildBudgetReport(incomplete, admin).totals.missingCostCount).toBe(1)
+    const ignored = saved(incomplete, 'cost', { ...cost(1, null), voided: true }, 61, 1)
+    expect(buildBudgetReport(ignored, admin).orders[0]).toMatchObject({ productionUnitCost: 0, productionBudget: 0 })
+  })
+  it('복수 차수는 수량만 합산하며 전체 시즌 잔액에서도 장당 원가와 고정 총액을 한 번 계산한다', () => {
+    const first = { ...order(), quantity: 100, receivedQuantity: 0 }, second = { ...order(), sourceKey: 'production:round-two', quantity: 250, receivedQuantity: 0 }
+    const other = { ...order(2), quantity: 80, receivedQuantity: 0 }
+    let w = workspace({ orders: [first, second, other], settlements: [], warnings: [] })
+    w = uploaded(w, { ...cost(1, 50), unitCost: 50, consumption: 1 })
+    w = uploaded(w, { ...cost(2, 25), unitCost: 25, consumption: 1 }, 61)
+    w = uploaded(w, { ...cost(1, 1000), category: '공용비용', unitCost: 1000, consumption: 1 }, 62)
+    w = saved(w, 'cost', cost(2, 500), 63); w = saved(w, 'limit', { season: '2027FY', amount: 100000 }, 64)
+    const full = buildBudgetReport(w, admin)
+    expect(full.orders).toHaveLength(2)
+    expect(full.orders.find(row => row.projectId === first.projectId)).toMatchObject({ quantity: 350, productionBudget: 18500, productionUnitCost: 18500 / 350 })
+    expect(full.totals).toMatchObject({ budget: 21000, annualLimit: 100000, unallocated: 79000 })
+    const narrowed = buildBudgetReport(w, admin, { projectIds: [first.projectId], seasons: ['2027FY'] })
+    expect(narrowed.totals).toMatchObject({ budget: 18500, annualLimit: 100000, unallocated: 79000 })
+  })
+  it('업체 그룹과 필터도 장당 원가에 전체 수량을 곱하고 공용비용·수동 금액은 한 번 배분한다', () => {
+    const source = { ...order(), quantity: 350, receivedQuantity: 0 }
+    let w = workspace({ orders: [source], settlements: [], warnings: [] })
+    w = uploaded(w, { ...cost(1, 20), unitCost: 20, consumption: 1 })
+    w = uploaded(w, { ...cost(1, 30, 'pre', id(22)), unitCost: 30, consumption: 1 }, 61)
+    w = uploaded(w, { ...cost(1, 1000, 'pre', id(22)), category: '공용비용', unitCost: 1000, consumption: 1 }, 62)
+    w = saved(w, 'cost', cost(1, 500), 63)
+    const report = buildBudgetReport(w, admin), groups = groupBudgetReport(report, 'factory')
+    expect(report.orders[0].productionBudget).toBe(19000)
+    expect(groups.find(row => row.key === id(21))?.totals).toMatchObject({ budget: 7500, orderQuantity: 350 })
+    expect(groups.find(row => row.key === id(22))?.totals).toMatchObject({ budget: 11500, orderQuantity: 0 })
+    expect(groups.reduce((sum, group) => sum + group.totals.budget, 0)).toBe(19000)
+    const filtered = buildBudgetReport(w, admin, { factoryIds: [id(22)] })
+    expect(filtered.orders[0]).toMatchObject({ quantity: 350, productionBudget: 11500, productionUnitCost: 11500 / 350 })
+    expect(filtered.totals.budget).toBe(11500)
+    expect(groupBudgetReport(filtered, 'factory').find(group => group.key === id(22))?.totals.budget).toBe(11500)
+  })
+  it('동일한 프로젝트 코드·품번의 다른 프로젝트 ID는 장당 원가와 수량을 별도 계산한다', () => {
+    const first = { ...order(), quantity: 350 }, second = { ...order(), projectId: id(12), sourceKey: 'production:another-project', quantity: 200 }
+    let w = workspace({ orders: [first, second], settlements: [], warnings: [] })
+    w = uploaded(w, { ...cost(1, 10), unitCost: 10, consumption: 1 })
+    w = uploaded(w, { ...cost(1, 30), projectId: second.projectId, unitCost: 30, consumption: 1 }, 61)
+    const report = buildBudgetReport(w, admin)
+    expect(report.orders).toHaveLength(2)
+    expect(report.orders.find(row => row.projectId === first.projectId)).toMatchObject({ quantity: 350, productionUnitCost: 10, productionBudget: 3500 })
+    expect(report.orders.find(row => row.projectId === second.projectId)).toMatchObject({ quantity: 200, productionUnitCost: 30, productionBudget: 6000 })
+    expect(report.totals.budget).toBe(9500)
+    expect(buildBudgetReport(w, admin, { projectIds: [second.projectId] }).totals.budget).toBe(6000)
   })
   it('결제 전 확정 을지는 미결제이며 지급 후 공급가·VAT·합계가 각각 집계된다', () => {
     const w = saved(workspace(), 'cost', cost())
@@ -177,11 +273,12 @@ describe('예산·FA 누적 도메인', () => {
     const report = buildBudgetReport(w, admin); groupBudgetReport(report, 'factory'); groupBudgetReport(report, 'style')
     expect(w).toEqual(before)
   })
-  it('사후 원가 확인과 결제 원본 검토가 남아 있으면 그룹도 미종결을 유지한다', () => {
+  it('사후 원가를 종결 조건으로 요구하지 않으며 결제 원본 재확인은 미종결을 유지한다', () => {
     const preOnly = paid(saved(workspace(), 'cost', cost()))
     const pending = buildBudgetReport(preOnly, admin)
-    expect(pending.unclosed[0].explanation).toContain('사후 원가 미등록')
-    expect(pending.groups[0].closed).toBe(false)
+    expect(pending.unclosed).toEqual([])
+    expect(pending.groups[0].closed).toBe(true)
+    expect(pending.orders[0].postCost).toBeNull()
     const complete = saved(preOnly, 'cost', cost(1, 12000, 'post'), 61)
     expect(buildBudgetReport(complete, admin).groups[0].closed).toBe(true)
     const changed = { ...entry(), sourceVersion: 4, sourceFingerprint: `${entry().sourceKey}@4`, netAmount: 15000, vatAmount: 1500, grossAmount: 16500 }
