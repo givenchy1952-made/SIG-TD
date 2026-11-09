@@ -1,6 +1,7 @@
 import { SIZES, type Profile, type Style } from './types'
 export function assertActive(profile: Profile) { if (!profile.approved || !profile.active) throw new Error('관리자 승인 후 사용할 수 있습니다.') }
-export function canViewStyle(profile: Profile, style: Style) { return profile.approved && profile.active && !style.deletedAt && (profile.role !== 'factory' || !!profile.factoryId && style.factoryId === profile.factoryId) }
+export function assertProductionAccess(profile: Profile) { assertActive(profile); if (!['admin', 'internal', 'factory'].includes(profile.role)) throw new Error('FA팀은 예산·을지 누적만 열람할 수 있습니다.') }
+export function canViewStyle(profile: Profile, style: Style) { return ['admin', 'internal', 'factory'].includes(profile.role) && profile.approved && profile.active && !style.deletedAt && (profile.role !== 'factory' || !!profile.factoryId && style.factoryId === profile.factoryId) }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function unchangedKeys(a: object, b: object, except: string[]) { for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) if (!except.includes(key) && !same(a[key as keyof typeof a], b[key as keyof typeof b])) throw new Error(`이 항목을 변경할 권한이 없습니다: ${key}`) }
 export function validateStyle(style: Style) {
@@ -16,7 +17,7 @@ export function validateStyle(style: Style) {
   for (const p of style.production) if (!Number.isFinite(p.invoiceAmount) || p.invoiceAmount < 0) throw new Error('금액을 확인해 주세요.')
 }
 export function assertStyleSave(profile: Profile, before: Style | undefined, after: Style, reason: string) {
-  assertActive(profile); validateStyle(after)
+  assertProductionAccess(profile); validateStyle(after)
   if (reason.trim().length < 2) throw new Error('변경 사유를 두 글자 이상 입력해 주세요.')
   if (before && !canViewStyle(profile, before)) throw new Error('이 스타일에 접근할 수 없습니다.')
   if (!before && profile.role === 'factory') throw new Error('스타일 등록은 본사 담당자만 가능합니다.')

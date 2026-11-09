@@ -1,7 +1,7 @@
 import type { PoDispatchInput, PoDispatchStatus } from './operations-types'
 import type { ProductionLedgerWorkspace, ProductionRun } from './production-ledger'
 import { savePoInWorkspace } from './operations-domain'
-import { assertActive } from './permissions'
+import { assertProductionAccess } from './permissions'
 import { quantityTotal, type Profile, type Quantities, type Workspace } from './types'
 import { captureRunPoContextInWorkspace } from './production-po-links'
 
@@ -22,7 +22,7 @@ export type SupplierOrderWorkspace = ProductionLedgerWorkspace & SupplierOrderFi
 function liveActor(workspace: Workspace, profile: Profile): Profile {
   const actor = workspace.profiles.find(person => person.id === profile.id)
   if (!actor) throw new Error('계정을 확인해 주세요.')
-  assertActive(actor); return actor
+  assertProductionAccess(actor); return actor
 }
 function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
@@ -49,7 +49,7 @@ export function getDemoSupplierProductionOrders(workspace: SupplierOrderWorkspac
 }
 export function scopeSupplierOrders(workspace: SupplierOrderWorkspace, profile: Profile): SupplierOrderFields {
   const all = workspace.supplierProductionOrders || getDemoSupplierProductionOrders(workspace)
-  if (!profile.active || !profile.approved) return { supplierProductionOrders: [], supplierOrdersAvailable: workspace.supplierOrdersAvailable }
+  if (profile.role === 'finance' || !profile.active || !profile.approved) return { supplierProductionOrders: [], supplierOrdersAvailable: workspace.supplierOrdersAvailable }
   const orders = all.filter(order => {
     const style = workspace.styles.find(style => style.id === order.styleId && !style.deletedAt)
     return !!style && (profile.role !== 'factory' || !!profile.factoryId && order.factoryId === profile.factoryId && style.factoryId === profile.factoryId)

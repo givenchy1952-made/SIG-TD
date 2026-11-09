@@ -1,7 +1,7 @@
 import type { ProductionRun } from './production-ledger'
 import type { SupplierAcceptance, SupplierOrder } from './supplier-orders'
 import { getDemoSupplierProductionOrders } from './supplier-orders'
-import { assertActive } from './permissions'
+import { assertProductionAccess } from './permissions'
 import { validateOperationReason } from './operations-domain'
 import { emptyQuantities, quantityTotal, SIZES, type Profile, type Quantities, type Workspace } from './types'
 import type { PoDispatch } from './operations-types'
@@ -77,7 +77,7 @@ export function validateProductionConditionsInput(value: ProductionConditionsInp
 function actorFor(workspace: Workspace, supplied: Profile) {
   const actor = workspace.profiles.find(person => person.id === supplied.id)
   if (!actor) throw new Error('계정을 확인해 주세요.')
-  assertActive(actor); return actor
+  assertProductionAccess(actor); return actor
 }
 function orderVisible(workspace: Workspace, order: SupplierOrder, actor: Profile) {
   const style = workspace.styles.find(item => item.id === order.styleId && !item.deletedAt)
@@ -105,7 +105,7 @@ export function getProductionCondition(workspace: Workspace, runId: string): Pro
 }
 export function scopeProductionConditionsWorkspace(workspace: Workspace, supplied: Profile): ProductionConditionsFields {
   const actor = workspace.profiles.find(person => person.id === supplied.id)
-  if (!actor?.approved || !actor.active) return { productionConditionsAvailable: workspace.productionConditionsAvailable, productionConditions: [] }
+  if (!actor?.approved || !actor.active || actor.role === 'finance') return { productionConditionsAvailable: workspace.productionConditionsAvailable, productionConditions: [] }
   const orders = workspace.supplierProductionOrders || getDemoSupplierProductionOrders(workspace)
   const visible = new Set(orders.filter(order => orderVisible(workspace, order, actor)).map(order => order.runId))
   const conditions = workspace.productionRuns?.length && workspace.productionLedgerAvailable ? getDemoProductionConditions(workspace) : workspace.productionConditions || []

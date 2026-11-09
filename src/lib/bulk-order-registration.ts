@@ -52,7 +52,7 @@ export function sourceOwnerGroups(workspace: Workspace, sheet: ImportSheet, head
     if (group) group.count += 1
     else {
       const normalized = source.toLocaleUpperCase('en-US')
-      const matches = workspace.profiles.filter(profile => profile.role !== 'factory' && profile.active && profile.approved && !profile.withdrawnAt && [profile.name, profile.email].some(value => value.trim().toLocaleUpperCase('en-US') === normalized))
+      const matches = workspace.profiles.filter(profile => ['admin', 'internal'].includes(profile.role) && profile.active && profile.approved && !profile.withdrawnAt && [profile.name, profile.email].some(value => value.trim().toLocaleUpperCase('en-US') === normalized))
       groups.set(source, { source, count: 1, ownerId: matches.length === 1 ? matches[0].id : '' })
     }
   }

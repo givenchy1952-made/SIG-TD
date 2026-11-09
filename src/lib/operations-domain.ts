@@ -1,7 +1,7 @@
 import { SIZES, emptyQuantities, quantityTotal, type Profile, type Quantities, type Style, type Workspace } from './types'
-import { assertActive, assertStyleSave, canViewStyle } from './permissions'
+import { assertProductionAccess, assertStyleSave, canViewStyle } from './permissions'
 import type { CalendarEvent, CalendarEventInput, OperationRow, OperationsWorkspace, OrderImportChange, OrderSourceData, OrderSourceRecord, PoDispatchInput, ShipmentBatchInput, StyleOperationInput, StyleOperationKind } from './operations-types'
-import { EMPTY_OPERATIONS, ORDER_SOURCE_COLUMNS } from './operations-types'
+import { EMPTY_OPERATIONS, ORDER_SOURCE_COLUMNS, ORDER_BUDGET_SOURCE_COLUMNS } from './operations-types'
 import { validateLeave } from './workflow-refinements'
 import { captureStylePoContextInWorkspace } from './production-po-links'
 
@@ -9,7 +9,7 @@ export function freshOperations(value?: Partial<OperationsWorkspace>): Operation
   return Object.fromEntries(Object.keys(EMPTY_OPERATIONS).map(key => [key, [...(value?.[key as keyof OperationsWorkspace] || [])]])) as unknown as OperationsWorkspace
 }
 export function canReadCalendarEvent(event: CalendarEvent, profile: Profile): boolean {
-  if (!profile.approved || !profile.active) return false
+  if (profile.role === 'finance' || !profile.approved || !profile.active) return false
   if (event.kind === 'factory_holiday') return profile.role !== 'factory'
   if (event.kind === 'launch') return true
   if (event.kind !== 'personal_leave') return false
@@ -22,7 +22,7 @@ function eventSnapshot(value: unknown): CalendarEvent | null {
 }
 export function scopeOperations(workspace: Workspace, profile: Profile): OperationsWorkspace {
   const ops = freshOperations(workspace.operations)
-  if (!profile.approved || !profile.active) return freshOperations()
+  if (profile.role === 'finance' || !profile.approved || !profile.active) return freshOperations()
   const ids = new Set(workspace.styles.filter(style => canViewStyle(profile, style)).map(style => style.id))
   const poDispatches = ops.poDispatches.filter(item => ids.has(item.styleId) && (profile.role !== 'factory' || item.status === 'sent' && item.factoryIdSnapshot === profile.factoryId))
   const poIds = new Set(poDispatches.map(item => item.id))
@@ -58,7 +58,7 @@ export function validateOperationQuantities(quantities: Quantities): void {
 function actorFor(workspace: Workspace, supplied: Profile): Profile {
   const actor = workspace.profiles.find(item => item.id === supplied.id)
   if (!actor) throw new Error('사용자 계정을 확인할 수 없습니다.')
-  assertActive(actor); return actor
+  assertProductionAccess(actor); return actor
 }
 function hqActor(workspace: Workspace, supplied: Profile): Profile { const actor = actorFor(workspace, supplied); if (actor.role === 'factory') throw new Error('관리자·본사 직원만 변경할 수 있습니다.'); return actor }
 function existingStyle(workspace: Workspace, id: string, actor: Profile): Style { const style = workspace.styles.find(item => item.id === id); if (!style || !canViewStyle(actor, style)) throw new Error('이 스타일에 접근할 수 없습니다.'); return style }
@@ -154,7 +154,7 @@ export function saveCalendarInWorkspace(workspace: Workspace, profile: Profile, 
 }
 export function saveAssignmentInWorkspace(workspace: Workspace, profile: Profile, employeeId: string, factoryIds: string[], expected: number, reason: string): Workspace {
   const actor = hqActor(workspace, profile)
-  const employee = workspace.profiles.find(item => item.id === employeeId && item.role !== 'factory' && item.approved && item.active)
+  const employee = workspace.profiles.find(item => item.id === employeeId && ['admin', 'internal'].includes(item.role) && item.approved && item.active)
   if (actor.role === 'internal' && employee?.role !== 'internal') throw new Error('관리자의 담당 공장은 관리자만 변경할 수 있습니다.')
   if (!employee || new Set(factoryIds).size !== factoryIds.length || factoryIds.some(id => !workspace.factories.some(item => item.id === id))) throw new Error('활성 본사 담당자와 등록된 공장을 선택해 주세요.')
   const next = start(workspace, reason), ops = next.operations!, before = ops.employeeFactoryAssignments.find(item => item.employeeId === employeeId); checkVersion(before, expected)
@@ -197,16 +197,21 @@ export function importOrdersInWorkspace(workspace: Workspace, profile: Profile, 
   return next
 }
 
-const sourceError = () => new Error('ORDER QTY 원본 정보의 파일명·시트·16개 열과 값을 확인해 주세요.')
+const sourceError = () => new Error('ORDER QTY 원본 정보의 파일명·시트·기본 16개 열과 예산 참조 열의 값을 확인해 주세요.')
 function exactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
 }
+function sourceColumnShape(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && ORDER_SOURCE_COLUMNS.every(key => Object.hasOwn(value, key))
+    && Object.keys(value).every(key => ([...ORDER_SOURCE_COLUMNS, ...ORDER_BUDGET_SOURCE_COLUMNS] as readonly string[]).includes(key))
+}
 /** Validate source values as literal data; formula objects never reach storage. */
 export function validateOrderSourceData(data: OrderSourceData): void {
-  if (!exactObject(data, ['fileName', 'sheetName', 'headers', 'rows']) || typeof data.fileName !== 'string' || !data.fileName.trim() || data.fileName.length > 255 || typeof data.sheetName !== 'string' || !data.sheetName.trim() || data.sheetName.length > 100 || !exactObject(data.headers, ORDER_SOURCE_COLUMNS) || Object.values(data.headers).some(value => typeof value !== 'string' || value.length > 4000) || !Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 100) throw sourceError()
+  if (!exactObject(data, ['fileName', 'sheetName', 'headers', 'rows']) || typeof data.fileName !== 'string' || !data.fileName.trim() || data.fileName.length > 255 || typeof data.sheetName !== 'string' || !data.sheetName.trim() || data.sheetName.length > 100 || !sourceColumnShape(data.headers) || Object.values(data.headers).some(value => typeof value !== 'string' || value.length > 4000) || !Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 100) throw sourceError()
   const rowNumbers = new Set<number>()
   for (const row of data.rows) {
-    if (!exactObject(row, ['rowNumber', 'columns']) || !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 1 || row.rowNumber > 10000 || rowNumbers.has(row.rowNumber) || !exactObject(row.columns, ORDER_SOURCE_COLUMNS)) throw sourceError()
+    if (!exactObject(row, ['rowNumber', 'columns']) || !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 1 || row.rowNumber > 10000 || rowNumbers.has(row.rowNumber) || !sourceColumnShape(row.columns) || Object.keys(row.columns).length !== Object.keys(data.headers).length || !Object.keys(data.headers).every(key => Object.hasOwn(row.columns, key))) throw sourceError()
     rowNumbers.add(row.rowNumber)
     for (const cell of Object.values(row.columns)) {
       if (cell === null || typeof cell === 'boolean' || typeof cell === 'string' && cell.length <= 4000 || typeof cell === 'number' && Number.isFinite(cell) && Math.abs(cell) <= 1e15) continue

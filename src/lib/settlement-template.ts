@@ -48,7 +48,7 @@ export interface SettlementTemplateOptions { sheetName: string; headerRow: numbe
 
 /** The caller supplies its filtered rows. Recheck approval, deletion and factory scope. */
 export function buildSettlementRows(workspace: Workspace, styles: Style[], profile: Profile): SettlementRow[] {
-  if (!profile.approved || !profile.active) return []
+  if (profile.role === 'finance' || !profile.approved || !profile.active) return []
   return styles.filter(style => !style.deletedAt && (profile.role !== 'factory' || !!profile.factoryId && style.factoryId === profile.factoryId)).flatMap(style => style.production.map(line => {
     const row = {
       season: style.season, project: getProjectIdentity(workspace, style.projectId).name, projectCode: getProjectIdentity(workspace, style.projectId).code, projectId: style.projectId,

@@ -1,6 +1,6 @@
 import { SIZES, emptyQuantities, quantityTotal, type Profile, type Quantities, type Style, type Workspace } from './types'
 import type { SettlementItemType } from './settlement-types'
-import { assertActive, canViewStyle } from './permissions'
+import { assertProductionAccess, canViewStyle } from './permissions'
 import { validateOperationReason } from './operations-domain'
 import { assertAcceptedProductionTermsUnchanged, assertProductionRunStarted } from './supplier-orders'
 
@@ -46,7 +46,7 @@ export function scopeProductionLedgerWorkspace(workspace: ProductionLedgerWorksp
   const ids = new Set(workspace.styles.filter(style => canViewStyle(profile, style)).map(style => style.id))
   return { productionRuns: (workspace.productionRuns || []).filter(run => ids.has(run.styleId)), productionReceipts: (workspace.productionReceipts || []).filter(receipt => ids.has(receipt.styleId)), productionRunAudits: (workspace.productionRunAudits || []).filter(audit => ids.has(audit.styleId)), productionLedgerAvailable: workspace.productionLedgerAvailable }
 }
-function actor(workspace: ProductionLedgerWorkspace, supplied: Profile): Profile { const person = workspace.profiles.find(profile => profile.id === supplied.id); if (!person) throw new Error('계정을 확인해 주세요.'); assertActive(person); if (person.role === 'factory') throw new Error('생산 차수별 단가·정산은 본사 전용입니다.'); return person }
+function actor(workspace: ProductionLedgerWorkspace, supplied: Profile): Profile { const person = workspace.profiles.find(profile => profile.id === supplied.id); if (!person) throw new Error('계정을 확인해 주세요.'); assertProductionAccess(person); if (person.role === 'factory') throw new Error('생산 차수별 단가·정산은 본사 전용입니다.'); return person }
 function parent(workspace: ProductionLedgerWorkspace, person: Profile, styleId: string, lineId: string): Style { const style = workspace.styles.find(style => style.id === styleId && canViewStyle(person, style)); if (!style || !style.production.some(line => line.id === lineId)) throw new Error('접근 가능한 생산 컬러를 확인해 주세요.'); return style }
 function openRun(workspace: ProductionLedgerWorkspace, runId: string, version: number): ProductionRun { const run = workspace.productionRuns?.find(run => run.id === runId); if (!run) throw new Error('생산 차수를 확인해 주세요.'); if (!Number.isSafeInteger(version) || version < 1 || run.version !== version) throw new Error('VERSION_CONFLICT'); if (run.closedAt) throw new Error('마감 확정된 생산 차수는 수정할 수 없습니다.'); return run }
 function audit(workspace: ProductionLedgerWorkspace, person: Profile, run: ProductionRun, action: string, reason: string, before: unknown, after: unknown) {
@@ -80,7 +80,7 @@ export function saveProductionRunInWorkspace(workspace: ProductionLedgerWorkspac
   for (const size of SIZES) if (receipts.reduce((sum, receipt) => sum + receipt.quantities[size], 0) > data.order[size]) throw new Error('차수 오더를 이미 배분한 입고 수량보다 줄일 수 없습니다.')
   const next = structuredClone(workspace), now = new Date().toISOString()
   const factoryName = workspace.factories.find(item => item.id === factoryId)?.name
-  const assignedOwner = workspace.profiles.find(item => item.id === ownerId && item.role !== 'factory' && item.approved && item.active)
+  const assignedOwner = workspace.profiles.find(item => item.id === ownerId && ['admin', 'internal'].includes(item.role) && item.approved && item.active)
   const ownerName = prior?.ownerIdSnapshot ? prior.ownerNameSnapshot : assignedOwner?.name || ''
   if (!factoryName?.trim() || ownerId && !ownerName.trim()) throw new Error('차수의 업체·담당자를 확인해 주세요.')
   if (data.unitCost !== null) productionAmounts(data.unitCost, quantityTotal(data.order))
@@ -123,7 +123,7 @@ export function finalizeProductionRunInWorkspace(workspace: ProductionLedgerWork
   const receivedQuantity = receipts.reduce((sum, item) => sum + quantityTotal(item.quantities), 0), amounts = productionAmounts(run.unitCost, receivedQuantity)
   const line = workspace.styles.find(item => item.id === run.styleId)!.production.find(item => item.id === run.lineId)!
   const currentOwnerId = line.ownerId !== undefined ? line.ownerId : workspace.styles.find(item => item.id === run.styleId)!.ownerId
-  const assignedOwner = workspace.profiles.find(item => item.id === currentOwnerId && item.role !== 'factory' && item.approved && item.active)
+  const assignedOwner = workspace.profiles.find(item => item.id === currentOwnerId && ['admin', 'internal'].includes(item.role) && item.approved && item.active)
   const ownerIdSnapshot = run.ownerIdSnapshot || assignedOwner?.id || '', ownerNameSnapshot = run.ownerIdSnapshot ? run.ownerNameSnapshot : assignedOwner?.name || ''
   const factory = run.factoryNameSnapshot, owner = ownerNameSnapshot
   if (!factory?.trim() || !owner?.trim()) throw new Error('마감 시점의 업체·담당자를 확인해 주세요.')

@@ -1,5 +1,5 @@
 import type { Profile, Status, Workspace } from './types'
-import { assertActive, canViewStyle } from './permissions'
+import { assertProductionAccess, canViewStyle } from './permissions'
 import { validateOperationDate, validateOperationReason } from './operations-domain'
 import type { OperationStamp } from './operations-types'
 
@@ -46,7 +46,7 @@ export function validateLeave(event: { kind: string; startDate: string; endDate:
 export function leaveLabel(event: { kind: string; leaveType?: LeaveType; startTime?: string; endTime?: string }): string { return event.kind === 'personal_leave' ? `${LEAVE_LABELS[event.leaveType || 'full']}${event.leaveType === 'two_hours' ? ` ${event.startTime}–${event.endTime}` : ''}` : '' }
 export function scopeProductionDetails(workspace: Workspace, profile: Profile): ProductionDetails[] { return (workspace.productionDetails || []).filter(row => workspace.styles.some(style => style.id === row.styleId && canViewStyle(profile, style))) }
 export function saveProductionDetailsInWorkspace(workspace: Workspace, supplied: Profile, styleId: string, lineId: string, data: ProductionDetailsInput, expected: number, reason: string): Workspace {
-  const actor = workspace.profiles.find(p => p.id === supplied.id); if (!actor) throw new Error('사용자 계정을 확인해 주세요.'); assertActive(actor)
+  const actor = workspace.profiles.find(p => p.id === supplied.id); if (!actor) throw new Error('사용자 계정을 확인해 주세요.'); assertProductionAccess(actor)
   const style = workspace.styles.find(s => s.id === styleId && canViewStyle(actor, s)); if (!style?.production.some(line => line.id === lineId)) throw new Error('저장된 스타일·컬러를 선택해 주세요.')
   validateOperationReason(reason); validateProductionDetails(data)
   const before = workspace.productionDetails?.find(row => row.styleId === styleId && row.lineId === lineId)

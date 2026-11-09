@@ -1,10 +1,10 @@
 import { blankProduction, blankSample, type Workspace, type Style, type Stage, type Status } from './types'
 import { addDays } from './utils'
 export const DEMO_IDS = {
-  admin: '10000000-0000-4000-8000-000000000001', internal: '10000000-0000-4000-8000-000000000002', factory: '10000000-0000-4000-8000-000000000004',
+  admin: '10000000-0000-4000-8000-000000000001', internal: '10000000-0000-4000-8000-000000000002', factory: '10000000-0000-4000-8000-000000000004', finance: '10000000-0000-4000-8000-000000000006',
   korea: '20000000-0000-4000-8000-000000000001', china: '20000000-0000-4000-8000-000000000002', vietnam: '20000000-0000-4000-8000-000000000003',
 }
-export function createSeed(): Workspace {
+export function createSeed(options: { includeFinance?: boolean } = {}): Workspace {
   const factories = [{ id: DEMO_IDS.korea, name: '서울 성수 · 아틀리에', country: '대한민국' }, { id: DEMO_IDS.china, name: '칭다오 · A FACTORY', country: '중국' }, { id: DEMO_IDS.vietnam, name: '호치민 · V GARMENT', country: '베트남' }]
   const profiles = [
     { id: DEMO_IDS.admin, name: '남주현', email: 'admin@example.test', role: 'admin' as const, approved: true, active: true, factoryId: null },
@@ -12,6 +12,7 @@ export function createSeed(): Workspace {
     { id: '10000000-0000-4000-8000-000000000003', name: '박인경', email: 'inkyoung@example.test', role: 'internal' as const, approved: true, active: true, factoryId: null },
     { id: DEMO_IDS.factory, name: '이준 · 칭다오', email: 'factory@example.test', role: 'factory' as const, approved: true, active: true, factoryId: DEMO_IDS.china },
     { id: '10000000-0000-4000-8000-000000000005', name: '신규 협력사', email: 'pending@example.test', role: 'factory' as const, approved: false, active: true, factoryId: null },
+    ...(options.includeFinance ? [{ id: DEMO_IDS.finance, name: 'FA 예산 담당', email: 'finance@example.test', role: 'finance' as const, approved: true, active: true, factoryId: null }] : []),
   ]
   const projects = [{ id: '30000000-0000-4000-8000-000000000001', name: 'SIGNIFICANT · 26 FALL / WINTER', season: '2026FW' }, { id: '30000000-0000-4000-8000-000000000002', name: 'SIG ESSENTIALS · 26 CORE', season: '2026FY' }, { id: '30000000-0000-4000-8000-000000000003', name: 'FIVE SPACE · 27 SPRING', season: '2027SS' }]
   const definitions: [string, string, string, Stage, number, string[]][] = [

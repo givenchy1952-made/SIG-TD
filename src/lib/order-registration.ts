@@ -44,7 +44,7 @@ export function planRegistrationFromRow(workspace: Workspace, sheet: ImportSheet
     result.sourceFactory = literal(row[22], 'W열 생산처'); result.sourceOwner = literal(row[24], 'Y열 담당자')
     // Y is authoritative. Blank cells remain unassigned; neither the uploader
     // nor a bulk default may silently become the owner.
-    const eligibleOwners = workspace.profiles.filter(item => item.role !== 'factory' && item.approved && item.active && !item.withdrawnAt)
+    const eligibleOwners = workspace.profiles.filter(item => ['admin', 'internal'].includes(item.role) && item.approved && item.active && !item.withdrawnAt)
     const ownerMatches = result.sourceOwner ? eligibleOwners.filter(item => key(item.name) === key(result.sourceOwner) || key(item.email) === key(result.sourceOwner)) : []
     const mappedOwner = result.sourceOwner && Object.hasOwn(defaults.ownerMappings || {}, result.sourceOwner) ? defaults.ownerMappings![result.sourceOwner] : undefined
     const ownerId = !result.sourceOwner ? '' : mappedOwner !== undefined ? mappedOwner : ownerMatches.length === 1 ? ownerMatches[0].id : ''

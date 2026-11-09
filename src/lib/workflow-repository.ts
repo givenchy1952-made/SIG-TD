@@ -2,7 +2,7 @@ import { blankProduction, type Project, type Profile, type Style, type Workspace
 import type { ProductionDetails, ProductionDetailsInput } from './workflow-refinements'
 import { saveProductionDetailsInWorkspace } from './workflow-refinements'
 import { getDemoWorkspace, locked, persist, supabase } from './repository'
-import { assertActive, assertStyleSave } from './permissions'
+import { assertProductionAccess, assertStyleSave } from './permissions'
 import { assertManagedShipmentTotals, validateOperationReason } from './operations-domain'
 import { assertProductionLedgerTotals } from './production-ledger'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -26,7 +26,7 @@ export async function saveProductionDetails(styleId: string, lineId: string, dat
   } else await locked(() => persist(saveProductionDetailsInWorkspace(getDemoWorkspace(), profile, styleId, lineId, data, expectedVersion, reason)))
 }
 export function registerOrderStyleInWorkspace(workspace: Workspace, supplied: Profile, style: Style, project: RegistrationProject, reason: string): Workspace {
-  const actor = workspace.profiles.find(p => p.id === supplied.id); if (!actor) throw new Error('계정을 확인해 주세요.'); assertActive(actor)
+  const actor = workspace.profiles.find(p => p.id === supplied.id); if (!actor) throw new Error('계정을 확인해 주세요.'); assertProductionAccess(actor)
   if (actor.role === 'factory') throw new Error('스타일·프로젝트 등록은 본사만 가능합니다.')
   validateOperationReason(reason)
   if (!project.code.trim() || project.code.length > 120 || /[\x00-\x1f\x7f]/.test(project.code) || !project.name.trim() || project.name.length > 160 || !project.season.trim() || project.season.length > 30) throw new Error('프로젝트 코드·명칭·시즌을 확인해 주세요.')
@@ -56,7 +56,7 @@ export function registerOrderStyleInWorkspace(workspace: Workspace, supplied: Pr
   }
   if (!before && (style.samples.length || style.stage !== 'registered' || style.ppApproved || style.name !== style.code)) throw new Error('새 스타일은 기본 품번으로 등록하고 샘플·생산 진행을 비워 주세요.')
 
-  const validOwner = (ownerId: string, previous?: string) => ownerId === '' || next.profiles.some(p => p.id === ownerId && p.role !== 'factory' && (p.active && p.approved || previous === ownerId))
+  const validOwner = (ownerId: string, previous?: string) => ownerId === '' || next.profiles.some(p => p.id === ownerId && ['admin', 'internal'].includes(p.role) && (p.active && p.approved || previous === ownerId))
   if (style.projectId !== project.id || style.season !== project.season || !next.factories.some(f => f.id === style.factoryId) || !validOwner(style.ownerId, before?.ownerId) || style.production.some(line => line.ownerId !== undefined && !validOwner(line.ownerId, before?.production.find(item => item.id === line.id)?.ownerId))) throw new Error('프로젝트·등록 공장·본사 담당자를 확인해 주세요.')
   if (next.styles.some(s => s.id !== style.id && s.code.toUpperCase() === style.code.toUpperCase())) throw new Error('이미 등록된 품번입니다.')
   assertStyleSave(actor, before, style, reason); assertManagedShipmentTotals(next, style); assertProductionLedgerTotals(next, style)

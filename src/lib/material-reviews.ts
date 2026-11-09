@@ -36,7 +36,7 @@ export function scopeMaterialReviewsWorkspace(workspace: ReviewWorkspace, suppli
 }
 function actorFor(workspace: ReviewWorkspace, supplied: Profile): Profile {
   const actor = workspace.profiles.find(profile => profile.id === supplied.id)
-  if (!actor?.active || !actor.approved) throw new Error('승인된 활성 계정만 원부자재 확인을 사용할 수 있습니다.')
+  if (!actor?.active || !actor.approved || actor.role === 'finance') throw new Error('승인된 활성 계정만 원부자재 확인을 사용할 수 있습니다.')
   return actor
 }
 function text(value: unknown, limit: number, required = false): value is string { return typeof value === 'string' && value.length <= limit && (!required || !!value.trim()) && !control.test(value) }
