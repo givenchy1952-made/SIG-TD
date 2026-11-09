@@ -28,7 +28,7 @@ type View = 'overview' | 'samples' | 'production' | 'settlement'
 type QuickFilter = 'all' | 'delayed' | 'upcoming' | 'approved' | 'samples' | 'unpaid'
 type Sort = 'dueAsc' | 'dueDesc' | 'updated' | 'code' | 'project'
 type DateField = 'dueDate' | 'samplePlanned' | 'sampleReceived' | 'sampleShipped' | 'productionShipped' | 'productionReceived' | 'confirmDue' | 'paymentDue'
-interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<Workspace>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string, color?: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
+interface Props { onRegisterStyle?: (style: Style, project: RegistrationProject, reason: string) => Promise<Workspace>; workspace: Workspace; profile: Profile; view: View; onOpenStyle: (id: string, color?: string, projectId?: string, runId?: string) => void; onCreate: () => void; query: string; onQueryChange: (s: string) => void; onImport: (changes: OrderImportChange[], mode: 'replace' | 'add', reason: string) => Promise<void> }
 const formatter = new Intl.NumberFormat('ko-KR')
 const number = (value: number) => formatter.format(value)
 const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -194,7 +194,7 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
   function thumbnail(style: Style, line?: ProductionLine) {
     const attachment = resolveStyleImage(workspace, style.id, line?.color)
     const alt = `${fullStyleSku(style.code, line?.color)} 대표 이미지`
-    return <button type="button" className={`garment-icon ${attachment ? 'garment-photo cutout-background' : ''}`} aria-label={attachment ? `${alt} 크게 보기` : `${fullStyleSku(style.code, line?.color)} 대표 이미지 등록`} title={attachment ? '대표 이미지 크게 보기' : '스타일 상세에서 대표 이미지 등록'} onClick={event => { event.stopPropagation(); if (attachment) setImagePreview({ attachment, styleId: style.id, alt }); else onOpenStyle(style.id, line?.color) }}>{attachment ? <PrivateImage attachment={attachment} scope={imageScope} alt={alt}/> : <Shirt size={21} strokeWidth={1.15}/>}</button>
+    return <button type="button" className={`garment-icon ${attachment ? 'garment-photo cutout-background' : ''}`} aria-label={attachment ? `${alt} 크게 보기` : `${fullStyleSku(style.code, line?.color)} 대표 이미지 등록`} title={attachment ? '대표 이미지 크게 보기' : '스타일 상세에서 대표 이미지 등록'} onClick={event => { event.stopPropagation(); if (attachment) setImagePreview({ attachment, styleId: style.id, alt }); else onOpenStyle(style.id, line?.color, style.projectId) }}>{attachment ? <PrivateImage attachment={attachment} scope={imageScope} alt={alt}/> : <Shirt size={21} strokeWidth={1.15}/>}</button>
   }
   return <div className="dashboard-page">
     {orderImportOpen && <Suspense fallback={<p className="muted" role="status">엑셀 가져오기를 준비하고 있습니다.</p>}><OrderImport workspace={workspace} profile={profile} onClose={() => setOrderImportOpen(false)} onImport={onImport} onRegisterStyle={onRegisterStyle} /></Suspense>}
@@ -284,9 +284,9 @@ export default function Dashboard({ workspace, profile, view, onOpenStyle, onCre
         const received = line ? quantityTotal(line.received) : scopedLines(style).reduce((sum, p) => sum + quantityTotal(p.received), 0)
         const shipment = line ? quantityTotal(line.shipped) : 0
         const projectInfo = getProjectIdentity(workspace, style.projectId)
-        return <tr key={`${style.id}:${line?.id || rowColor}`} onClick={() => onOpenStyle(style.id, rowColor)} className={isLate ? 'row-overdue' : ''}>
+        return <tr key={`${style.id}:${line?.id || rowColor}`} onClick={() => onOpenStyle(style.id, rowColor, style.projectId)} className={isLate ? 'row-overdue' : ''}>
           <td className="number-cell">{String((currentPage - 1) * pageSize + index + 1).padStart(2, '0')}</td>
-          <td className="style-cell"><div className="style-identity">{thumbnail(style, line)}<div><button className="style-code" onClick={e => { e.stopPropagation(); onOpenStyle(style.id, rowColor) }}>{fullStyleSku(style.code, rowColor)}</button><span className="style-name">{style.name}</span></div></div></td>
+          <td className="style-cell"><div className="style-identity">{thumbnail(style, line)}<div><button className="style-code" onClick={e => { e.stopPropagation(); onOpenStyle(style.id, rowColor, style.projectId) }}>{fullStyleSku(style.code, rowColor)}</button><span className="style-name">{style.name}</span></div></div></td>
           <td className="project-identity-cell project-name-cell"><span className="cell-main project-cell" title={projectInfo.name}>{projectInfo.name}</span></td>
           {showBudgetCode && <td className="budget-code-cell"><span title={projectInfo.code || '미등록'}>{projectInfo.code || '미등록'}</span></td>}
           <td className="project-season-cell">{projectSeason(style) || '미등록'}</td>

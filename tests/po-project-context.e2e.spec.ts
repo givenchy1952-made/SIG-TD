@@ -32,6 +32,9 @@ async function fixture(page: Page, budgetDraft = false) {
   await page.getByRole('button', { name: `${CODE}BK`, exact: true }).click()
   const detail = page.getByRole('dialog')
   await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click()
+  // 현재 프로젝트의 상세에서 다른 프로젝트 발주는 임의로 선택하지 않는다.
+  await expect(detail.getByRole('region', { name: '이 차수 PO 발송', exact: true })).toHaveCount(0)
+  await detail.locator(`input[data-run-id="${RUN}"]`).check()
   return detail
 }
 

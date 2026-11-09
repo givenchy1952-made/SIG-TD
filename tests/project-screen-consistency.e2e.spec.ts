@@ -24,7 +24,8 @@ async function fixture(page: Page) {
     const columns = Object.fromEntries(['A', 'F', 'L', 'M', 'S', 'V', 'W', 'X', 'Y', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AV', 'AY'].map(key => [key, null]))
     Object.assign(columns, { A: 'MAP-LEGACY', M: '시그니피컨트 2026 원본 명칭', L: '2026FY', F: `${target.code}BK` })
     w.operations!.calendarEvents = []
-    w.operations!.orderSourceRecords = [{ ...stamp, styleId: target.id, lineId: target.production[0].id, fileName: 'QA_프로젝트_오더.xlsx', sheetName: '오더', headers: columns, rows: [{ rowNumber: 7, columns }] }] as typeof w.operations.orderSourceRecords
+    const headers = Object.fromEntries(Object.keys(columns).map(column => [column, column]))
+    w.operations!.orderSourceRecords = [{ ...stamp, styleId: target.id, lineId: target.production[0].id, fileName: 'QA_프로젝트_오더.xlsx', sheetName: '오더', headers, rows: [{ rowNumber: 7, columns }] }] as typeof w.operations.orderSourceRecords
     w.comments = []; w.attachments = []; w.audits = []; w.styleImages = []
     w.productionRuns = []; w.productionReceipts = []; w.productionRunAudits = []; w.productionConditions = []; w.supplierProductionOrders = []
     localStorage.setItem(key, JSON.stringify(w))

@@ -163,8 +163,10 @@ test('고정 종류에서 라벨·BY를 선택하고 발주·로스 및 요청·
   await expect(factoryDetail.getByRole('button', { name: '자수 관리 수정', exact: true })).toHaveCount(0)
 })
 
-test('부분 출고 차수는 기존 출고를 보존하고 6사이즈 합계를 부모 스타일과 일치시킨다', async ({ page }) => {
+test('SQL026 적용 전 출고 차수 경로도 기존 출고와 사이즈 합계를 보존한다', async ({ page }) => {
   await ready(page)
+  await page.evaluate(key => { const w = JSON.parse(localStorage.getItem(key)!); w.mainProductionSyncAvailable = false; localStorage.setItem(key, JSON.stringify(w)) }, STORAGE)
+  await page.reload()
   const before = await stored(page), original = before.styles.find(style => style.code === SHIPPING_CODE)!, originalLine = original.production[0]
   expect(sum(originalLine.shipped)).toBeGreaterThan(0)
   const first = [1, 2, 3, 4, 5, 6], second = [6, 5, 4, 3, 2, 1]

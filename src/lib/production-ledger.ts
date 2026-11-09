@@ -1,3 +1,4 @@
+import { resolveFactoryOwner } from './factory-owner-defaults'
 import { SIZES, emptyQuantities, quantityTotal, type Profile, type Quantities, type Style, type Workspace } from './types'
 import type { SettlementItemType } from './settlement-types'
 import { assertProductionAccess, canViewStyle } from './permissions'
@@ -73,7 +74,7 @@ export function saveProductionRunInWorkspace(workspace: ProductionLedgerWorkspac
   if (prior && data.projectId !== prior.projectId) throw new Error('차수의 프로젝트는 변경할 수 없습니다. 새 생산 차수를 만들어 주세요.')
   if (prior && receipts.length && (data.unitCost !== prior.unitCost || data.projectCode.trim() !== prior.projectCode || data.itemType !== prior.itemType || data.poId !== prior.poId || data.correctsRunId !== prior.correctsRunId)) throw new Error('실입고가 있는 차수의 단가·프로젝트·PO는 바꿀 수 없습니다. 새 생산 차수로 기록해 주세요.')
   const line = style.production.find(item => item.id === lineId)!
-  const factoryId = prior?.factoryIdSnapshot || style.factoryId, ownerId = prior?.ownerIdSnapshot || (line.ownerId !== undefined ? line.ownerId : style.ownerId)
+  const factoryId = prior?.factoryIdSnapshot || style.factoryId, ownerId = prior?.ownerIdSnapshot || resolveFactoryOwner(workspace, factoryId, line.ownerId !== undefined ? line.ownerId : style.ownerId).ownerId
   if (data.poId && !workspace.operations?.poDispatches.some(po => po.id === data.poId && po.styleId === styleId && !po.voided && po.factoryIdSnapshot === factoryId)) throw new Error('같은 스타일·공장의 유효한 PO만 연결할 수 있습니다.')
   if (data.poId && workspace.productionRuns?.some(run => run.id !== id && run.lineId === lineId && run.poId === data.poId)) throw new Error('해당 컬러의 PO는 이미 다른 생산 차수에 연결되어 있습니다.')
   if (data.correctsRunId && !workspace.productionRuns?.some(run => run.id === data.correctsRunId && run.id !== id && run.styleId === styleId && run.lineId === lineId && run.projectId === data.projectId && !!run.closedAt)) throw new Error('같은 프로젝트·생산 컬러의 마감 확정 기록을 연결해 주세요.')

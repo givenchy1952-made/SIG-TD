@@ -67,6 +67,12 @@ export function buildSigEuljiRows(workspace: Workspace, styles: Style[], supplie
       if (!line || selectedLineIds.has(selection.id)) { errors.push(`${style.code}: 선택한 컬러가 중복되었거나 변경되었습니다. 최신 필터 결과를 확인해 주세요.`); continue }
       selectedLineIds.add(selection.id)
       const label = fullStyleSku(style.code, line.color)
+      // Managed colors use approved order prices and frozen close snapshots.
+      // A legacy line-level price cannot replace that financial evidence.
+      if (workspace.productionRuns?.some(run => run.styleId === style.id && run.lineId === line.id)) {
+        errors.push(`${label}: 생산 차수·마감에서 확정한 차수 기준으로 을지를 다운로드해 주세요.`)
+        continue
+      }
       const owner = ownerName(workspace, line.ownerId ?? style.ownerId)
       const terms = workspace.settlementTerms?.find(item => item.styleId === style.id && item.lineId === line.id)
       const code = terms?.projectCode?.trim() || workspace.projects.find(project => project.id === style.projectId)?.code?.trim() || sigEuljiSourceProjectCode(workspace, style.id, line.id)

@@ -30,7 +30,11 @@ async function open(page: Page) {
   await page.locator('.style-code').filter({ hasText: CODE }).first().click()
   const detail = page.getByRole('dialog').filter({ has: page.getByRole('heading', { level: 1 }) })
   await detail.getByRole('tab', { name: /생산 차수·마감/ }).click()
-  return { detail, ledger: detail.getByRole('region', { name: '프로젝트별 생산 차수 및 마감', exact: true }) }
+  const ledger = detail.getByRole('region', { name: '프로젝트별 생산 차수 및 마감', exact: true })
+  // Project A has two runs. Select the intended order rather than relying on
+  // the previous first-row fallback, which could show another colour/project.
+  await ledger.locator('.ledger-run').filter({ hasText: '1차 · QA 검토 A' }).click()
+  return { detail, ledger }
 }
 
 for (const mobile of [false, true]) test(`차수 화면에서 생산 방식을 명시하고 검토 단가 0원·빈칸을 직접 저장한다 · ${mobile ? '모바일' : 'PC'}`, async ({ page }) => {

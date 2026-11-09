@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, FileCheck2, History, LockKeyhole, Pencil, Plus, Save, X } from 'lucide-react'
 import { emptyQuantities, quantityTotal, SIZES, type Profile, type Quantities, type Style } from '../lib/types'
 import type { ProductionLedgerWorkspace, ProductionRun, ProductionRunInput } from '../lib/production-ledger'
@@ -11,6 +11,7 @@ import { hasProductionRunStartProof, type SupplierOrderFields } from '../lib/sup
 import { getProductionCondition } from '../lib/production-conditions'
 import MultiSelectFilter from './MultiSelectFilter'
 import ProductionRunPriceEditor from './ProductionRunPriceEditor'
+import { productionContextKey, selectProductionContext, type ProductionSelectionContext } from '../lib/production-selection'
 import './production-ledger.css'
 
 export interface ProductionLedgerPanelProps {
@@ -20,6 +21,12 @@ export interface ProductionLedgerPanelProps {
   onChanged: () => Promise<unknown>
   onDirtyChange?: (dirty: boolean) => void
   onOpenPO?: () => void
+  onOpenMainProduction?: () => void
+  activeLineId?: string
+  activeProjectId?: string
+  activeRunId?: string
+  selectionBlocked?: boolean
+  onSelectContext?: (context: ProductionSelectionContext) => void
 }
 interface Draft { id: string; lineId: string; version: number; data: ProductionRunInput; cost: string }
 interface ReceiptDraft { receivedAt: string; quantities: Quantities; runVersion: number }
@@ -31,8 +38,9 @@ function SizeInputs({ value, onChange, disabled, label }: { value: Quantities; o
   return <div className="ledger-quantity-table"><table><thead><tr><th>구분</th>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th></tr></thead><tbody><tr><th>{label}</th>{SIZES.map(size => <td key={size}><input className="input" aria-label={`${label} ${size}`} type="number" min="0" max="10000000" step="1" value={value[size]} disabled={disabled} onChange={event => onChange({ ...value, [size]: event.target.value === '' ? 0 : Number(event.target.value) })} /></td>)}<td><strong>{money(quantityTotal(value))}</strong></td></tr></tbody></table></div>
 }
 
-export default function ProductionLedgerPanel({ workspace, style, actor, onChanged, onDirtyChange, onOpenPO }: ProductionLedgerPanelProps) {
-  const [selectedId, setSelectedId] = useState(''), [projectFilter, setProjectFilter] = useState<string[] | null>(null)
+export default function ProductionLedgerPanel({ workspace, style, actor, onChanged, onDirtyChange, onOpenPO, onOpenMainProduction, activeLineId, activeProjectId, activeRunId, selectionBlocked = false, onSelectContext }: ProductionLedgerPanelProps) {
+  const initialContext = { lineId: activeLineId, projectId: activeProjectId, runId: activeRunId }
+  const [selectedId, setSelectedId] = useState(() => selectProductionContext((workspace.productionRuns || []).filter(run => run.styleId === style.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.round - left.round), initialContext, run => run.id)?.id || ''), [projectFilter, setProjectFilter] = useState<string[] | null>(null)
   const [priceDirty, setPriceDirty] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null), [receiptDraft, setReceiptDraft] = useState<ReceiptDraft | null>(null)
   const [reason, setReason] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('')
@@ -42,7 +50,7 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
   const historicalProjects = [...workspace.projects, ...allRuns.filter(run => !workspace.projects.some(project => project.id === run.projectId)).map(run => { const identity = runProjectIdentity(run); return { id: run.projectId, name: identity.name, code: identity.code, season: identity.season } })]
   const historicalProjectOptions = projectFilterOptions({ ...workspace, projects: historicalProjects })
   const filtered = allRuns.filter(run => projectFilter === null || projectFilter.includes(run.snapshot?.projectId || run.projectId))
-  const selected = filtered.find(run => run.id === selectedId) || (!selectedId ? filtered[0] : undefined)
+  const selected = filtered.find(run => run.id === selectedId) || (!selectedId ? selectProductionContext(filtered, initialContext, run => run.id) : undefined)
   const line = style.production.find(item => item.id === (draft?.lineId || selected?.lineId))
   const receipts = (workspace.productionReceipts || []).filter(item => item.runId === selected?.id).sort((left, right) => right.receivedAt.localeCompare(left.receivedAt) || right.createdAt.localeCompare(left.createdAt))
   const activeReceipts = receipts.filter(item => !item.voided)
@@ -53,6 +61,7 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
   const receiptStale = !!receiptDraft && receiptDraft.runVersion !== selected?.version
   const closingStale = confirmClose && closingVersion !== selected?.version
   const changing = !!draft || !!receiptDraft || busy || priceDirty
+  const contextBlocked = changing || selectionBlocked
   const draftRun = draft?.version ? allRuns.find(run => run.id === draft.id) : undefined
   const draftStructureDirty = !!draft && (!draftRun || (Object.keys(draft.data) as (keyof ProductionRunInput)[]).some(key => JSON.stringify(draft.data[key]) !== JSON.stringify(draftRun[key])))
   const referencePrice = (run: ProductionRun) => run.unitCost === null && workspace.productionConditionsAvailable === true ? getProductionCondition(workspace, run.id).internalUnitCost ?? null : run.unitCost
@@ -60,15 +69,26 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
   const person = workspace.profiles.find(profile => profile.id === actor.id)
   const canManage = !!person?.active && person.approved && person.role !== 'factory'
   const audits = (workspace.productionRunAudits || []).filter(item => item.runId === selected?.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const incomingContextKey = productionContextKey(initialContext), appliedContextKey = useRef(incomingContextKey)
+  useEffect(() => {
+    if (appliedContextKey.current === incomingContextKey || changing) return
+    appliedContextKey.current = incomingContextKey
+    setProjectFilter(null)
+    setSelectedId(selectProductionContext(allRuns, initialContext, run => run.id)?.id || '')
+    clearMessages()
+  }, [incomingContextKey, changing, allRuns])
+  useEffect(() => { if (!selectedId && selected && !changing) setSelectedId(selected.id) }, [selectedId, selected?.id, changing])
   useEffect(() => { onDirtyChange?.(changing); return () => onDirtyChange?.(false) }, [changing, onDirtyChange])
   if (!canManage) return null
 
+  function chooseRun(run: ProductionRun) { if (contextBlocked) return; setSelectedId(run.id); onSelectContext?.({ lineId: run.lineId, projectId: run.projectId, runId: run.id }); clearMessages() }
   function clearMessages() { setError(''); setNotice(''); setConfirmClose(false); setReason('') }
   function begin(run?: ProductionRun, corrects?: ProductionRun) {
+    if (selectionBlocked) return
     clearMessages(); setReceiptDraft(null)
     if (run) { setSelectedId(run.id); setDraft({ id: run.id, lineId: run.lineId, version: run.version, data: { name: run.name, projectId: run.projectId, projectCode: run.projectCode, expectedDue: run.expectedDue, poId: run.poId, unitCost: run.unitCost, itemType: run.itemType, order: { ...run.order }, correctsRunId: run.correctsRunId }, cost: run.unitCost === null ? '' : String(run.unitCost) }); return }
-    const projectId = corrects?.projectId || style.projectId, project = workspace.projects.find(item => item.id === projectId)
-    const target = style.production.find(item => item.id === corrects?.lineId) || style.production[0]
+    const projectId = corrects?.projectId || activeProjectId || style.projectId, project = workspace.projects.find(item => item.id === projectId)
+    const target = style.production.find(item => item.id === (corrects?.lineId || activeLineId)) || style.production[0]
     setDraft({ id: crypto.randomUUID(), lineId: target?.id || '', version: 0, cost: '', data: { name: corrects ? `${corrects.name} 정정 생산` : '신규 생산', projectId, projectCode: project?.code || corrects?.projectCode || '', expectedDue: '', poId: null, unitCost: null, itemType: corrects?.itemType || 'product', order: emptyQuantities(), correctsRunId: corrects?.id || null } })
   }
   function update(data: Partial<ProductionRunInput>) { setDraft(current => current ? { ...current, data: { ...current.data, ...data } } : null) }
@@ -81,12 +101,12 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
     finally { setBusy(false) }
   }
   async function save() {
-    if (!draft || stale) return
+    if (!draft || stale || selectionBlocked) return
     if ((!draft.version || draft.data.projectId !== draftRun?.projectId) && !getProjectIdentity(workspace, draft.data.projectId).hasOfficialName) { setError('생산 차수를 등록하려면 M열의 프로젝트 명칭을 먼저 등록·확인해 주세요.'); return }
     const value = draft.cost.trim()
     if (value && (!/^\d+(\.\d{1,2})?$/.test(value) || Number(value) > 1_000_000_000)) { setError('차수 단가는 미입력 또는 0~1,000,000,000의 소수 둘째 자리까지 입력해 주세요.'); return }
     const id = draft.id
-    await perform(() => saveProductionRun(id, style.id, draft.lineId, { ...draft.data, unitCost: value === '' ? null : Number(value) }, draft.version, reason, actor), '생산 차수를 저장했습니다.', () => { setDraft(null); setSelectedId(id) })
+    await perform(() => saveProductionRun(id, style.id, draft.lineId, { ...draft.data, unitCost: value === '' ? null : Number(value) }, draft.version, reason, actor), '생산 차수를 저장했습니다.', () => { const context = { lineId: draft.lineId, projectId: draft.data.projectId, runId: id }; appliedContextKey.current = productionContextKey(context); setDraft(null); setSelectedId(id); onSelectContext?.(context) })
   }
   async function download(run: ProductionRun) {
     const preview = buildProductionRunEuljiRows(workspace, [run.id], actor)
@@ -100,20 +120,20 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
     } catch (failure) { setError(message(failure)) } finally { setBusy(false) }
   }
   return <section className="production-ledger" aria-label="프로젝트별 생산 차수 및 마감">
-    <div className="section-heading"><div><h2><FileCheck2 size={18} />프로젝트·차수별 생산과 마감</h2><p className="muted">같은 품번도 프로젝트와 생산 차수마다 오더·단가·실입고를 구분합니다.</p></div>{workspace.productionLedgerAvailable === true && <button type="button" className="button button-primary" disabled={changing || !style.production.length} onClick={() => begin()}><Plus size={14} />생산 차수 추가</button>}</div>
+    <div className="section-heading"><div><h2><FileCheck2 size={18} />프로젝트·차수별 생산과 마감</h2><p className="muted">같은 품번도 프로젝트와 생산 차수마다 오더·단가·실입고를 구분합니다.</p></div>{workspace.productionLedgerAvailable === true && <button type="button" className="button button-primary" disabled={contextBlocked || !style.production.length} onClick={() => begin()}><Plus size={14} />생산 차수 추가</button>}</div>
     {workspace.productionLedgerAvailable !== true ? <div className="error-message" role="status">관리자가 007_production_ledger.sql을 적용하면 생산 차수별 단가·입고·마감 확정을 사용할 수 있습니다.</div> : <>
-      <p className="ledger-help">기존 메인 생산의 누적 수량과 별도로 기록합니다. 실제 입고를 차수에 한 번만 입력해 주세요. 마감 확정 후에는 해당 차수의 단가·입고·마감 금액을 변경할 수 없습니다.</p>{workspace.productionPoLinksAvailable === true && onOpenPO && <button type="button" className="button" disabled={changing} onClick={onOpenPO}>PO 연결 확인으로 이동</button>}
+      <p className="ledger-help">{workspace.mainProductionSyncAvailable ? '메인 생산에서 입고 확정하면 해당 차수에 자동 기록됩니다. 실입고 수량을 다시 입력하지 않습니다.' : '기존 메인 생산의 누적 수량과 별도로 기록합니다. 실제 입고를 차수에 한 번만 입력해 주세요.'} 마감 확정 후에는 해당 차수의 단가·입고·마감 금액을 변경할 수 없습니다.</p>{workspace.productionPoLinksAvailable === true && onOpenPO && <button type="button" className="button" disabled={changing} onClick={onOpenPO}>PO 연결 확인으로 이동</button>}
       {error && <div className="error-message" role="alert">{error}</div>}{notice && <div className="success-message" role="status">{notice}</div>}
-      <div className="ledger-layout"><aside className="ledger-runs"><div className="field"><span className="field-label">프로젝트 명칭</span><MultiSelectFilter label="생산 차수 프로젝트 명칭 필터" allLabel="전체 프로젝트 명칭" options={historicalProjectOptions} value={projectFilter} disabled={changing} onChange={value => { setProjectFilter(value); setSelectedId(''); clearMessages() }}/></div>
+      <div className="ledger-layout"><aside className="ledger-runs"><div className="field"><span className="field-label">프로젝트 명칭</span><MultiSelectFilter label="생산 차수 프로젝트 명칭 필터" allLabel="전체 프로젝트 명칭" options={historicalProjectOptions} value={projectFilter} disabled={contextBlocked} onChange={value => { if (contextBlocked) return; setProjectFilter(value); setSelectedId(''); clearMessages() }}/></div>
         {projectFilter !== null && <p className="ledger-help" aria-label="선택한 차수 프로젝트 명칭">선택 명칭: {projectFilter.length ? projectFilter.map(id => historicalProjectOptions.find(item => item.value === id)?.label || '프로젝트 명칭 미등록').join(', ') : '선택 없음'}</p>}
-        {projectFilter !== null && <button type="button" className="button" disabled={changing} onClick={() => { setProjectFilter(null); setSelectedId(''); clearMessages() }}>차수 필터 초기화</button>}
+        {projectFilter !== null && <button type="button" className="button" disabled={contextBlocked} onClick={() => { if (contextBlocked) return; setProjectFilter(null); setSelectedId(''); clearMessages() }}>차수 필터 초기화</button>}
         {!filtered.length && <p className="ledger-empty">아직 등록된 생산 차수가 없습니다.</p>}
-        {filtered.map(run => <button type="button" className={`ledger-run ${selected?.id === run.id && !draft ? 'active' : ''}`} key={run.id} disabled={changing} onClick={() => { setSelectedId(run.id); clearMessages() }}><span>{runProjectIdentity(run).label}</span><strong>{run.round}차 · {run.name}</strong><small>{style.production.find(item => item.id === run.lineId)?.color || ''} / {money(quantityTotal(run.order))} {run.itemType === 'fabric' ? 'YDS' : 'EA'}</small><small>{run.closedAt ? '마감 확정' : '마감 전'} · {run.unitCost === null && referencePrice(run) !== null ? '본사 검토 단가' : '단가'} {referencePrice(run) === null ? '미입력' : `${money(referencePrice(run)!)}원`}</small></button>)}
+        {filtered.map(run => <button type="button" className={`ledger-run ${selected?.id === run.id && !draft ? 'active' : ''}`} key={run.id} disabled={contextBlocked} onClick={() => chooseRun(run)}><span>{runProjectIdentity(run).label}</span><strong>{run.round}차 · {run.name}</strong><small>{style.production.find(item => item.id === run.lineId)?.color || ''} / {money(quantityTotal(run.order))} {run.itemType === 'fabric' ? 'YDS' : 'EA'}</small><small>{run.closedAt ? '마감 확정' : '마감 전'} · {run.unitCost === null && referencePrice(run) !== null ? '본사 검토 단가' : '단가'} {referencePrice(run) === null ? '미입력' : `${money(referencePrice(run)!)}원`}</small></button>)}
       </aside><div className="ledger-content">
         {draft ? <section className="ledger-card" aria-label="생산 차수 편집"><h3>{draft.version ? '생산 차수 수정' : '생산 차수 등록'}</h3>{stale && <div className="error-message" role="alert">다른 사용자가 차수를 변경했습니다. 편집을 취소하고 최신 내용을 확인해 주세요.</div>}
           <div className="form-grid"><label className="field"><span className="field-label">차수명</span><input className="input" aria-label="생산 차수명" value={draft.data.name} maxLength={120} disabled={busy} onChange={event => update({ name: event.target.value })}/></label>
-          <label className="field"><span className="field-label">생산 컬러</span><select className="select" aria-label="생산 차수 컬러" value={draft.lineId} disabled={busy || draft.version > 0} onChange={event => setDraft(current => current ? { ...current, lineId: event.target.value } : null)}>{style.production.map(item => <option key={item.id} value={item.id}>{item.color}</option>)}</select></label>
-          <label className="field"><span className="field-label">프로젝트 명칭</span><select className="select" aria-label="생산 차수 프로젝트 명칭" value={draft.data.projectId} disabled={busy} onChange={event => update({ projectId: event.target.value, projectCode: workspace.projects.find(item => item.id === event.target.value)?.code || '' })}><option value="">프로젝트 명칭 선택</option>{projectFilterOptions(workspace).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <label className="field"><span className="field-label">생산 컬러</span><select className="select" aria-label="생산 차수 컬러" value={draft.lineId} disabled={busy || selectionBlocked || draft.version > 0} onChange={event => setDraft(current => current ? { ...current, lineId: event.target.value } : null)}>{style.production.map(item => <option key={item.id} value={item.id}>{item.color}</option>)}</select></label>
+          <label className="field"><span className="field-label">프로젝트 명칭</span><select className="select" aria-label="생산 차수 프로젝트 명칭" value={draft.data.projectId} disabled={busy || selectionBlocked} onChange={event => update({ projectId: event.target.value, projectCode: workspace.projects.find(item => item.id === event.target.value)?.code || '' })}><option value="">프로젝트 명칭 선택</option>{projectFilterOptions(workspace).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <label className="field"><span className="field-label">본사 요청 납기일</span><input className="input" type="date" aria-label="생산 차수 요청 납기일" value={draft.data.expectedDue} disabled={busy} onChange={event => update({ expectedDue: event.target.value })}/></label>
           <label className="field"><span className="field-label">연결 PO</span><select className="select" aria-label="생산 차수 PO" value={draft.data.poId || ''} disabled={busy || workspace.productionPoLinksAvailable === true} onChange={event => update({ poId: event.target.value || null })}><option value="">미연결 · 생산 조건 협의·승인에서 확인 후 연결</option>{(workspace.operations?.poDispatches || []).filter(po => po.styleId === style.id && !po.voided).map(po => <option key={po.id} value={po.id}>{po.subject} · {po.status === 'sent' ? '발송됨' : '미발송'}</option>)}</select>{workspace.productionPoLinksAvailable === true && <small>차수를 저장한 뒤 생산 조건 협의·승인에서 발송 문서와 수량을 확인해 연결합니다.</small>}</label>
           <label className="field"><span className="field-label">{priceLocked ? '최종 승인 단가 (KRW)' : '차수 단가 (KRW)'}</span><input className="input" type="number" aria-label="생산 차수 단가" min="0" max="1000000000" step="0.01" value={draft.cost} placeholder={priceLocked ? '최종 승인 전 미확정' : '빈칸은 미입력'} disabled={busy || priceDirty || priceLocked} onChange={event => setDraft(current => current ? { ...current, cost: event.target.value } : null)}/>{priceLocked && <small>{draft.version ? '아래 본사 검토 단가 입력에서 저장하면 최종 승인 시 생산 단가가 확정됩니다.' : '차수를 먼저 저장하면 이 화면에서 생산 방식과 본사 검토 단가를 입력할 수 있습니다.'}</small>}</label>
@@ -122,9 +142,9 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
           {priceLocked && draftRun && <ProductionRunPriceEditor workspace={workspace} run={draftRun} profile={actor} blocked={busy || draftStructureDirty} onChanged={onChanged} onDirtyChange={setPriceDirty} onSaved={() => { setDraft(null); setSelectedId(draftRun.id); clearMessages() }}/>}
           <SizeInputs label="차수 오더" value={draft.data.order} disabled={busy} onChange={order => update({ order })}/>
           <label className="field"><span className="field-label">생산 차수 변경 사유</span><input className="input" aria-label="생산 차수 변경 사유" value={reason} maxLength={1000} disabled={busy} onChange={event => setReason(event.target.value)}/></label>
-          <div className="ledger-actions"><button type="button" className="button" disabled={busy || priceDirty} onClick={() => { setDraft(null); clearMessages() }}><X size={13}/>차수 편집 취소</button><button type="button" className="button button-primary" disabled={busy || priceDirty || stale || reason.trim().length < 2 || !draft.data.projectId || !draft.lineId || !draft.data.name.trim()} onClick={() => void save()}><Save size={13}/>차수 저장</button></div>
+          <div className="ledger-actions"><button type="button" className="button" disabled={busy || priceDirty} onClick={() => { setDraft(null); clearMessages() }}><X size={13}/>차수 편집 취소</button><button type="button" className="button button-primary" disabled={busy || selectionBlocked || priceDirty || stale || reason.trim().length < 2 || !draft.data.projectId || !draft.lineId || !draft.data.name.trim()} onClick={() => void save()}><Save size={13}/>차수 저장</button></div>
         </section> : selected ? <>
-          <section className="ledger-card"><div className="section-heading"><div><h3>{selected.round}차 · {selected.name}{selected.closedAt && <LockKeyhole size={14}/>}</h3><p className="muted">프로젝트 명칭: {runProjectIdentity(selected).name} · 시즌: {runProjectIdentity(selected).season || '미등록'}</p><p className="muted">{line?.color} · {selected.factoryNameSnapshot} · 담당 {selected.ownerNameSnapshot || '미지정'}</p></div><div className="ledger-actions">{selected.closedAt ? <><button type="button" className="button" disabled={changing} onClick={() => begin(undefined, selected)}><Plus size={13}/>정정 차수 추가</button><button type="button" className="button" disabled={changing} onClick={() => void download(selected)}><Download size={13}/>확정 을지 다운로드</button></> : <button type="button" className="button" disabled={changing} onClick={() => begin(selected)}><Pencil size={13}/>차수 수정</button>}</div></div>
+          <section className="ledger-card"><div className="section-heading"><div><h3>{selected.round}차 · {selected.name}{selected.closedAt && <LockKeyhole size={14}/>}</h3><p className="muted">프로젝트 명칭: {runProjectIdentity(selected).name} · 시즌: {runProjectIdentity(selected).season || '미등록'}</p><p className="muted">{line?.color} · {selected.factoryNameSnapshot} · 담당 {selected.ownerNameSnapshot || '미지정'}</p></div><div className="ledger-actions">{selected.closedAt ? <><button type="button" className="button" disabled={contextBlocked} onClick={() => begin(undefined, selected)}><Plus size={13}/>정정 차수 추가</button><button type="button" className="button" disabled={changing} onClick={() => void download(selected)}><Download size={13}/>확정 을지 다운로드</button></> : <button type="button" className="button" disabled={contextBlocked} onClick={() => begin(selected)}><Pencil size={13}/>차수 수정</button>}</div></div>
             <div className="ledger-summary"><span>오더 수량<strong>{money(quantityTotal(selected.order))}</strong></span><span>차수 실입고<strong>{money(selected.snapshot?.receivedQuantity ?? received)}</strong></span><span>{selected.unitCost === null && workspace.productionConditionsAvailable === true ? '차수 단가 · 본사 검토' : '차수 단가'}<strong>{referencePrice(selected) === null ? '미입력' : `${money(selected.snapshot?.unitCost ?? referencePrice(selected)!)}원`}</strong></span><span>금액 · 부가세 제외<strong>{selected.snapshot ? `${money(selected.snapshot.netAmount)}원` : selected.unitCost === null ? '미입력' : `${money(Math.round(selected.unitCost * 100) * received / 100)}원`}</strong></span></div>
             <p className="ledger-help">본사 요청 납기 {selected.expectedDue || '미입력'} · {selected.poId ? 'PO 연결됨' : 'PO 미연결'}{selected.closedAt ? ` · ${time(selected.closedAt)} 마감 확정` : ' · 마감 전'}</p>
             {!selected.closedAt && !started && <p className="ledger-help">생산 조건 협의·승인에서 업체의 납기·단가 회신을 검토하고 본사가 최종 승인하면 실입고와 마감을 기록할 수 있습니다.</p>}
@@ -132,13 +152,13 @@ export default function ProductionLedgerPanel({ workspace, style, actor, onChang
             <SizeInputs label="차수 오더" value={selected.order} disabled onChange={() => undefined}/>
             <ProductionRunPriceEditor key={selected.id} workspace={workspace} run={selected} profile={actor} blocked={busy || !!receiptDraft} onChanged={onChanged} onDirtyChange={setPriceDirty}/>
           </section>
-          <section className="ledger-card" aria-label="생산 차수 실입고"><div className="section-heading"><div><h3>차수별 실제 입고</h3><p className="muted">단가와 실제 입고일·수량을 입고 건마다 보존합니다.</p></div>{person?.role === 'admin' && !selected.closedAt && !receiptDraft && <button type="button" className="button" disabled={busy || !started} onClick={() => { setReceiptDraft({ receivedAt: today(), quantities: emptyQuantities(), runVersion: selected.version }); clearMessages() }}><Plus size={13}/>실입고 추가</button>}</div>
+          <section className="ledger-card" aria-label="생산 차수 실입고"><div className="section-heading"><div><h3>차수별 실제 입고</h3><p className="muted">단가와 실제 입고일·수량을 입고 건마다 보존합니다.</p></div>{person?.role === 'admin' && !selected.closedAt && !receiptDraft && <button type="button" className="button" disabled={busy || selectionBlocked || !started} onClick={() => { if (selectionBlocked) return; if (workspace.mainProductionSyncAvailable && onOpenMainProduction) { onSelectContext?.({ lineId: selected.lineId, projectId: selected.projectId, runId: selected.id }); onOpenMainProduction(); return }; setReceiptDraft({ receivedAt: today(), quantities: emptyQuantities(), runVersion: selected.version }); clearMessages() }}><Plus size={13}/>{workspace.mainProductionSyncAvailable && onOpenMainProduction ? '메인 생산에서 입고 확정' : '실입고 추가'}</button>}</div>
             {receiptDraft && <div className="ledger-receipt-editor"><label className="field"><span className="field-label">실입고일</span><input className="input" aria-label="차수 실입고일" type="date" value={receiptDraft.receivedAt} disabled={busy} onChange={event => setReceiptDraft(current => current ? { ...current, receivedAt: event.target.value } : null)}/></label>{receiptStale && <div className="error-message" role="alert">생산 차수가 변경되었습니다. 입고 입력을 취소하고 최신 단가·수량을 확인해 주세요.</div>}<SizeInputs label="추가 실입고" value={receiptDraft.quantities} disabled={busy} onChange={quantities => setReceiptDraft(current => current ? { ...current, quantities } : null)}/><label className="field"><span className="field-label">실입고 등록 사유</span><input className="input" aria-label="실입고 등록 사유" value={reason} maxLength={1000} disabled={busy} onChange={event => setReason(event.target.value)}/></label><div className="ledger-actions"><button type="button" className="button" disabled={busy} onClick={() => { setReceiptDraft(null); clearMessages() }}>입고 입력 취소</button><button type="button" className="button button-primary" disabled={busy || receiptStale || reason.trim().length < 2 || !receiptDraft.receivedAt || quantityTotal(receiptDraft.quantities) <= 0} onClick={() => void perform(() => allocateProductionReceipt(crypto.randomUUID(), selected.id, { receivedAt: receiptDraft.receivedAt, quantities: receiptDraft.quantities }, receiptDraft.runVersion, reason, actor), '차수 실제 입고를 기록했습니다.', () => setReceiptDraft(null))}><Save size={13}/>실입고 저장</button></div></div>}
             {!receipts.length ? <p className="ledger-empty">기록된 실제 입고가 없습니다.</p> : <div className="ledger-quantity-table"><table><thead><tr><th>실입고일</th>{SIZES.map(size => <th key={size}>{size}</th>)}<th>합계</th><th>기록 단가</th><th>부가세 제외</th><th>상태</th></tr></thead><tbody>{receipts.map(receipt => <tr key={receipt.id} className={receipt.voided ? 'ledger-voided' : ''}><td>{receipt.receivedAt}</td>{SIZES.map(size => <td key={size}>{money(receipt.quantities[size])}</td>)}<td>{money(quantityTotal(receipt.quantities))}</td><td>{money(receipt.unitCost)}</td><td>{money(receipt.netAmount)}</td><td>{receipt.voided ? '무효' : '유효'}{person?.role === 'admin' && !selected.closedAt && !receipt.voided && <button type="button" className="button" disabled={changing || reason.trim().length < 2} onClick={() => void perform(() => voidProductionReceipt(receipt.id, selected.id, receipt.version, selected.version, reason, actor), '실입고 기록을 무효 처리했습니다. 이력은 보존됩니다.')}>입고 무효</button>}</td></tr>)}</tbody></table></div>}
           </section>
           {!selected.closedAt && !receiptDraft && <section className="ledger-card" aria-label="생산 마감 확정"><h3>마감 확정</h3><p className="ledger-help">확정 시 단가·실입고·프로젝트·업체·담당자와 금액을 보관합니다. 이후 단가를 변경하거나 새 프로젝트로 재생산해도 이 금액은 유지됩니다. 입고 기록을 무효 처리할 때도 아래 사유를 입력해 주세요.</p><label className="field"><span className="field-label">마감·입고 무효 사유</span><input className="input" aria-label="생산 마감 사유" value={reason} maxLength={1000} disabled={busy} onChange={event => setReason(event.target.value)}/></label><label className="ledger-confirm"><input type="checkbox" aria-label="생산 마감 확정 확인" checked={confirmClose} disabled={busy} onChange={event => { setConfirmClose(event.target.checked); setClosingVersion(selected.version) }}/>입고 수량과 단가를 확인했으며 이 차수를 확정합니다.</label>{closingStale && <div className="error-message" role="alert">생산 차수가 변경되었습니다. 최신 내용을 확인한 뒤 마감 확인을 다시 체크해 주세요.</div>}<div className="ledger-actions"><button type="button" className="button button-primary" disabled={busy || !started || closingStale || !confirmClose || reason.trim().length < 2 || !activeReceipts.length || selected.unitCost === null} onClick={() => void perform(() => finalizeProductionRun(selected.id, closingVersion, reason, actor), '생산 차수의 마감 금액을 확정했습니다.')}><LockKeyhole size={13}/>마감 확정</button></div></section>}
           {!!audits.length && <details className="ledger-history"><summary><History size={13}/>생산 차수 변경 이력 ({audits.length})</summary>{audits.slice(0, 50).map(audit => <div key={audit.id}><strong>{audit.action} · {audit.actorName} · {time(audit.createdAt)}</strong><p>{audit.reason}</p></div>)}</details>}
-        </> : <div className="ledger-card ledger-empty">생산 차수를 추가해 프로젝트와 차수별로 관리하세요.</div>}
+        </> : <div className="ledger-card ledger-empty">선택한 컬러·프로젝트에 연결된 생산 차수가 없습니다. 왼쪽 목록에서 차수를 선택하거나 새 차수를 등록하세요.</div>}
       </div></div>
     </>}
   </section>
