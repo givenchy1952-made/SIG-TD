@@ -20,6 +20,7 @@ const EXCESS_HEADERS = ['년도/시즌', '프로젝트코드', '발주날짜', '
 const UNCLOSED_HEADERS = ['년도/시즌', '프로젝트 명칭', '프로젝트코드', '스타일코드', '업체', '생산 예산', '지출현황', '확정 미결제', '확인 사항', '미종결 사유']
 const MONEY = '#,##0.00;[Red]-#,##0.00'
 const COST_MONEY = '#,##0.00####;[Red]-#,##0.00####'
+const WON_MONEY = '#,##0;[Red]-#,##0'
 const PERCENT = '0.0%'
 const MAX_ROWS = 10000
 
@@ -122,7 +123,7 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
     orderSheet.getCell(row, 2).value = { formula: whitespaceFormula(row), result: budgetCode(order.projectCode, order.styleCode) }
     orderSheet.getCell(row, 13).value = { formula: `IF(O${row}="","",O${row}*J${row})`, result: blankIfUnknown(order.productionBudget) }
   })
-  money(orderSheet, [13, 15], 2, report.orders.length + 1)
+  money(orderSheet, [13, 15], 2, report.orders.length + 1, WON_MONEY)
   const costSheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!
   const importedCostIds = new Set(report.budgetCostImportRecordIds || [])
   report.costs.forEach((record, index) => {
@@ -143,7 +144,6 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
     costSheet.getCell(row, 19).numFmt = '#,##0.####'
     costSheet.getCell(row, 21).numFmt = COST_MONEY
   }
-  for (let row = 2; row <= report.orders.length + 1; row++) for (const column of [13, 15]) orderSheet.getCell(row, column).numFmt = COST_MONEY
   const fa = workbook.getWorksheet(BUDGET_SHEET_NAMES.fa)!, lastFA = Math.max(4, report.settlements.length + 3)
   fa.getCell('A1').value = 'FA 을지 누적 · 공급가액 / VAT 별도'; fa.getCell('A1').font = { bold: true, size: 12 }
   fa.getCell('O2').value = { formula: `SUM(O4:O${lastFA})`, result: report.settlements.reduce((sum, row) => sum + row.netAmount, 0) }
@@ -177,11 +177,11 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
   dashboard.getCell('A4').value = report.totals.annualLimit; dashboard.getCell('B4').value = report.totals.unallocated; dashboard.getCell('C4').value = '공급가액 KRW · VAT 별도'
   dashboard.getCell('A5').value = report.totals.missingCostCount ? `원가 미등록 ${report.totals.missingCostCount}건은 0원이 아닙니다. 예산 합계는 등록된 금액만 포함합니다.` : '예산과 지출은 공급가액 기준입니다. 미지급 계획 잔액과 확정 미결제 을지는 별도입니다.'
   dashboard.mergeCells('A5:H5'); dashboard.getCell('A5').alignment = { wrapText: true }; dashboard.getRow(5).height = 32
-  money(dashboard, [1, 2, 3, 5, 6, 7], 2, 2, COST_MONEY); money(dashboard, [1, 2], 4, 4, COST_MONEY); dashboard.getCell('D2').numFmt = PERCENT
+  money(dashboard, [1, 2, 3, 5, 6, 7], 2, 2, WON_MONEY); money(dashboard, [1, 2], 4, 4, WON_MONEY); dashboard.getCell('D2').numFmt = PERCENT
   const projectGroups = groupBudgetReport(report, 'project'), factoryGroups = groupBudgetReport(report, 'factory')
   header(dashboard, 7, FACTORY_HEADERS, 12)
   factoryGroups.forEach((group, index) => factoryCells(report, group).forEach((value, column) => { dashboard.getCell(index + 8, column + 12).value = literal(value) }))
-  money(dashboard, [5, 6], 8, projectGroups.length + 7, COST_MONEY); money(dashboard, [18, 20, 23], 8, factoryGroups.length + 7, COST_MONEY)
+  money(dashboard, [5, 6], 8, projectGroups.length + 7, WON_MONEY); money(dashboard, [18, 20, 23], 8, factoryGroups.length + 7, WON_MONEY)
   for (let row = 8; row < projectGroups.length + 8; row++) dashboard.getCell(row, 7).numFmt = PERCENT
   for (let row = 8; row < factoryGroups.length + 8; row++) dashboard.getCell(row, 21).numFmt = PERCENT
   const warningRow = Math.max(8 + projectGroups.length, 8 + factoryGroups.length) + 2
@@ -189,9 +189,10 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
   report.warnings.forEach((warning, index) => { dashboard.getCell(warningRow + index + 1, 1).value = warning.slice(0, 32767) })
   const excess = workbook.getWorksheet(BUDGET_SHEET_NAMES.excess)!, lastExcess = Math.max(3, report.excess.length + 2)
   excess.getCell('K1').value = '초과 합계'; excess.getCell('L1').value = { formula: `SUM(L3:L${lastExcess})`, result: report.excess.reduce((sum, row) => sum + row.overage, 0) }
-  money(excess, [7, 9, 12], 3, lastExcess, COST_MONEY); excess.getColumn(13).width = 44; excess.getColumn(16).width = 44
+  excess.getCell('L1').numFmt = WON_MONEY
+  money(excess, [7, 9, 12], 3, lastExcess, WON_MONEY); excess.getColumn(13).width = 44; excess.getColumn(16).width = 44
   for (let row = 3; row <= lastExcess; row++) excess.getCell(row, 10).numFmt = PERCENT
   const unclosed = workbook.getWorksheet(BUDGET_SHEET_NAMES.unclosed)!
-  money(unclosed, [6, 7, 8], 2, report.unclosed.length + 1, COST_MONEY); unclosed.getColumn(9).width = 44; unclosed.getColumn(10).width = 44
+  money(unclosed, [6, 7, 8], 2, report.unclosed.length + 1, WON_MONEY); unclosed.getColumn(9).width = 44; unclosed.getColumn(10).width = 44
   return new Uint8Array(await workbook.xlsx.writeBuffer())
 }

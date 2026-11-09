@@ -14,11 +14,11 @@ const SUPPLIER = '20000000-0000-4000-8000-000000000001', SUPPLIER_NAME = 'QA 원
 const MANUAL = '99114000-0000-4000-8000-000000000001'
 const stamp = { version: 1, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z', updatedBy: ADMIN }
 const HEADERS = ['프로젝트코드', 'SKU NO.', '종류', '업체', '내역', '위치', '규격', '품명', '혼용율', '컬러', '단가', '변동단가', '요척량', '단위']
-type SourceRow = { project: number; description: string; price: ExcelJS.CellValue; consumption: ExcelJS.CellValue; sku?: string; code?: string; supplierName?: string }
+type SourceRow = { project: number; description: string; price: ExcelJS.CellValue; consumption: ExcelJS.CellValue; sku?: string; code?: string; supplierName?: string; category?: string }
 const defaultRows = (): SourceRow[] => [
   { project: 0, description: 'QA 주원단', price: 12.34, consumption: 0.125 },
   { project: 0, description: 'QA 봉제', price: 8.7, consumption: 2 },
-  { project: 1, description: 'QA 부자재', price: 100, consumption: 3, supplierName: 'QA 미등록 원단사' },
+  { project: 1, description: 'QA 부자재', price: 100, consumption: 3, supplierName: 'QA 미등록 원단사', category: '공용비용' },
 ]
 function order(index: number): BudgetOrderSource {
   const mapped = index === 2 ? 0 : index
@@ -37,7 +37,7 @@ async function workbook(rows: SourceRow[] = defaultRows()) {
     const row = index + 16, mapped = source.project
     sheet.getCell(row, 2).value = { formula: '$C$8', result: ` ${source.code || CODES[mapped]} ` }
     sheet.getCell(row, 3).value = { formula: '$C$4', result: source.sku || SKUS[mapped] }
-    ;['원자재', source.supplierName || SUPPLIER_NAME, source.description, '몸판', 'QA 40mm', 123, 'COTTON 100%', mapped ? 'NV' : 'BK', source.price, 99.99, source.consumption, 'YDS'].forEach((value, column) => { sheet.getCell(row, column + 4).value = value })
+    ;[source.category || '원자재', source.supplierName || SUPPLIER_NAME, source.description, '몸판', 'QA 40mm', 123, 'COTTON 100%', mapped ? 'NV' : 'BK', source.price, 99.99, source.consumption, 'YDS'].forEach((value, column) => { sheet.getCell(row, column + 4).value = value })
   })
   // Blank template formulas have no cached values and must not turn into errors.
   sheet.getCell(rows.length + 16, 2).value = { formula: '$C$8' }
@@ -100,13 +100,19 @@ test('15행 제목 아래 원가를 프로젝트 코드·SKU에 연결하고 I~T
   expect(after.styles).toEqual(before.styles); expect(after.productionRuns).toEqual(before.productionRuns); expect(after.operations).toEqual(before.operations)
   await tab(page, '발주요청세부')
   const orderRow = page.getByRole('table', { name: '발주요청세부', exact: true }).locator('tbody tr').filter({ hasText: SKUS[0] })
-  await expect(orderRow.locator('td').nth(12)).toHaveText('2,129.7875')
-  await expect(orderRow.locator('td').nth(13)).toHaveText('212.97875')
+  await expect(orderRow.locator('td').nth(12)).toHaveText('2,130')
+  await expect(orderRow.locator('td').nth(13)).toHaveText('213')
+  const commonOrder = page.getByRole('table', { name: '발주요청세부', exact: true }).locator('tbody tr').filter({ hasText: SKUS[1] })
+  await expect(commonOrder.locator('td').nth(12)).toHaveText('5,999')
+  await expect(commonOrder.locator('td').nth(13)).toHaveText('300')
   await expect(page.getByRole('table', { name: '발주요청세부', exact: true }).getByRole('columnheader', { name: /사후원가/ })).toHaveCount(0)
   await page.screenshot({ path: '/tmp/sig-budget-quantity-orders-desktop.png', fullPage: true })
   const book = await downloaded(page), sheet = book.worksheets[1]
   expect(book.worksheets[0].getCell('M2').value).toEqual({ formula: 'IF(O2="","",O2*J2)', result: 2129.7875 })
   expect(book.worksheets[0].getCell('O2').value).toBe(212.97875)
+  expect(book.worksheets[0].getCell('M3').result).toBe(5999.4)
+  expect(book.worksheets[0].getCell('O3').value).toBe(299.97)
+  expect(book.worksheets[0].getCell('O2').numFmt).toBe('#,##0;[Red]-#,##0')
   expect(book.worksheets[0].getColumn(14).hidden).toBe(true)
   expect(book.worksheets[0].getCell('N2').value).toBeNull()
   let sourceRow = 0
@@ -188,8 +194,8 @@ test('모바일에서도 업로드를 확인하며 FA·공장과 미설정 계�
   const orderTable = page.getByRole('table', { name: '발주요청세부', exact: true })
   await expect(orderTable.getByRole('columnheader', { name: /사후원가/ })).toHaveCount(0)
   const firstOrder = orderTable.locator('tbody tr').filter({ hasText: SKUS[0] })
-  await expect(firstOrder.locator('td').nth(12)).toHaveText('2,129.7875')
-  await expect(firstOrder.locator('td').nth(13)).toHaveText('212.97875')
+  await expect(firstOrder.locator('td').nth(12)).toHaveText('2,130')
+  await expect(firstOrder.locator('td').nth(13)).toHaveText('213')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
   await page.screenshot({ path: '/tmp/sig-budget-quantity-orders-mobile.png', fullPage: true })
   await page.getByLabel('체험 역할', { exact: true }).selectOption(FINANCE)

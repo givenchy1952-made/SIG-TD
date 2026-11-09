@@ -88,16 +88,16 @@ describe('예산·FA 누적 도메인', () => {
       expect(w.budgetRecords?.[0].data).toEqual(data)
     }
   })
-  it('공용비용과 기존 수동 총액은 수량을 중복 곱하지 않고 장당 금액에는 생산 수량으로 배분한다', () => {
+  it('업로드 공용비용도 장당 원가에 포함하며 기존 수동 총액은 한 번만 배분한다', () => {
     const source = { ...order(), quantity: 350, receivedQuantity: 0 }
     let w = workspace({ orders: [source], settlements: [], warnings: [] })
     w = uploaded(w, { ...cost(1, 50), unitCost: 25, consumption: 2 })
     w = uploaded(w, { ...cost(1, 1000), category: '공용비용', unitCost: 1000, consumption: 1 }, 61)
     w = saved(w, 'cost', cost(1, 500), 62)
     const before = structuredClone(w), report = buildBudgetReport(w, admin)
-    expect(report.orders[0].productionBudget).toBe(19000)
-    expect(report.orders[0].productionUnitCost).toBe(19000 / 350)
-    expect(report.totals.budget).toBe(19000)
+    expect(report.orders[0].productionBudget).toBe(368000)
+    expect(report.orders[0].productionUnitCost).toBe(368000 / 350)
+    expect(report.totals.budget).toBe(368000)
     expect(w).toEqual(before)
   })
   it('수량 0의 장당 원가와 명시적 0원을 유지하고 누락된 원가는 미등록으로 표시한다', () => {
@@ -123,12 +123,12 @@ describe('예산·FA 누적 도메인', () => {
     w = saved(w, 'cost', cost(2, 500), 63); w = saved(w, 'limit', { season: '2027FY', amount: 100000 }, 64)
     const full = buildBudgetReport(w, admin)
     expect(full.orders).toHaveLength(2)
-    expect(full.orders.find(row => row.projectId === first.projectId)).toMatchObject({ quantity: 350, productionBudget: 18500, productionUnitCost: 18500 / 350 })
-    expect(full.totals).toMatchObject({ budget: 21000, annualLimit: 100000, unallocated: 79000 })
+    expect(full.orders.find(row => row.projectId === first.projectId)).toMatchObject({ quantity: 350, productionBudget: 367500, productionUnitCost: 1050 })
+    expect(full.totals).toMatchObject({ budget: 370000, annualLimit: 100000, unallocated: -270000 })
     const narrowed = buildBudgetReport(w, admin, { projectIds: [first.projectId], seasons: ['2027FY'] })
-    expect(narrowed.totals).toMatchObject({ budget: 18500, annualLimit: 100000, unallocated: 79000 })
+    expect(narrowed.totals).toMatchObject({ budget: 367500, annualLimit: 100000, unallocated: -270000 })
   })
-  it('업체 그룹과 필터도 장당 원가에 전체 수량을 곱하고 공용비용·수동 금액은 한 번 배분한다', () => {
+  it('업체 그룹과 필터는 업로드 공용비용까지 장당으로 곱하고 기존 수동 금액을 보존한다', () => {
     const source = { ...order(), quantity: 350, receivedQuantity: 0 }
     let w = workspace({ orders: [source], settlements: [], warnings: [] })
     w = uploaded(w, { ...cost(1, 20), unitCost: 20, consumption: 1 })
@@ -136,14 +136,25 @@ describe('예산·FA 누적 도메인', () => {
     w = uploaded(w, { ...cost(1, 1000, 'pre', id(22)), category: '공용비용', unitCost: 1000, consumption: 1 }, 62)
     w = saved(w, 'cost', cost(1, 500), 63)
     const report = buildBudgetReport(w, admin), groups = groupBudgetReport(report, 'factory')
-    expect(report.orders[0].productionBudget).toBe(19000)
+    expect(report.orders[0].productionBudget).toBe(368000)
     expect(groups.find(row => row.key === id(21))?.totals).toMatchObject({ budget: 7500, orderQuantity: 350 })
-    expect(groups.find(row => row.key === id(22))?.totals).toMatchObject({ budget: 11500, orderQuantity: 0 })
-    expect(groups.reduce((sum, group) => sum + group.totals.budget, 0)).toBe(19000)
+    expect(groups.find(row => row.key === id(22))?.totals).toMatchObject({ budget: 360500, orderQuantity: 0 })
+    expect(groups.reduce((sum, group) => sum + group.totals.budget, 0)).toBe(368000)
     const filtered = buildBudgetReport(w, admin, { factoryIds: [id(22)] })
-    expect(filtered.orders[0]).toMatchObject({ quantity: 350, productionBudget: 11500, productionUnitCost: 11500 / 350 })
-    expect(filtered.totals.budget).toBe(11500)
-    expect(groupBudgetReport(filtered, 'factory').find(group => group.key === id(22))?.totals.budget).toBe(11500)
+    expect(filtered.orders[0]).toMatchObject({ quantity: 350, productionBudget: 360500, productionUnitCost: 1030 })
+    expect(filtered.totals.budget).toBe(360500)
+    expect(groupBudgetReport(filtered, 'factory').find(group => group.key === id(22))?.totals.budget).toBe(360500)
+  })
+  it('최종 장당 원가는 업로드 공용비용이 있는 경우에도 생산 수량에 따라 줄어들지 않는다', () => {
+    for (const quantity of [25, 35, 0]) {
+      const source = { ...order(), quantity, receivedQuantity: 0 }
+      let w = uploaded(workspace({ orders: [source], settlements: [], warnings: [] }), { ...cost(1, 109.75), unitCost: 109.75, consumption: 1 })
+      w = uploaded(w, { ...cost(1, 1200), category: '공용비용', unitCost: 1200, consumption: 1 }, 61)
+      const report = buildBudgetReport(w, admin)
+      expect(report.orders[0]).toMatchObject({ productionUnitCost: 1309.75, productionBudget: 1309.75 * quantity })
+      expect(report.totals.budget).toBe(1309.75 * quantity)
+      expect(report.groups[0].totals.budget).toBe(1309.75 * quantity)
+    }
   })
   it('동일한 프로젝트 코드·품번의 다른 프로젝트 ID는 장당 원가와 수량을 별도 계산한다', () => {
     const first = { ...order(), quantity: 350 }, second = { ...order(), projectId: id(12), sourceKey: 'production:another-project', quantity: 200 }
