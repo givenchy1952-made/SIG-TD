@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { isBudgetAmount, multiplyBudgetCost, roundBudgetMoney, sumBudgetMoney } from '../src/lib/budget-money'
+import { isBudgetAmount, multiplyBudgetCost, multiplyBudgetQuantity, roundBudgetMoney, sumBudgetMoney } from '../src/lib/budget-money'
 
 describe('원가 단가 × 요척의 소수 6자리 계산', () => {
+  it('장당 원가의 소수 6자리를 생산 수량으로 정확하게 확장한다', () => {
+    expect(multiplyBudgetQuantity(0.099999, 350)).toBe(34.99965)
+    expect(multiplyBudgetQuantity(1.5425, 350)).toBe(539.875)
+    expect(multiplyBudgetQuantity(0.1, 3)).toBe(0.3)
+    expect(multiplyBudgetQuantity(1.001, 2)).toBe(2.002)
+    expect(multiplyBudgetQuantity(9999999999.99, 100)).toBe(999999999999)
+    expect(multiplyBudgetQuantity(123.45, 0)).toBe(0)
+    for (const quantity of [-1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) expect(() => multiplyBudgetQuantity(1, quantity)).toThrow()
+    expect(() => multiplyBudgetQuantity(0.0000001, 1)).toThrow('소수 자릿수')
+    expect(() => multiplyBudgetQuantity(Number.MAX_SAFE_INTEGER, 2)).toThrow('정확한 계산 범위')
+  })
   it('단가 2자리와 요척 4자리의 곱을 추가 수량 없이 정확하게 유지한다', () => {
     expect(multiplyBudgetCost(333.33, 0.0003)).toBe(0.099999)
     expect(multiplyBudgetCost(0.29, 0.1)).toBe(0.029)
