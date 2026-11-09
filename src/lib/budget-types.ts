@@ -45,6 +45,7 @@ export interface BudgetSummary {
 export interface BudgetGroup { key: string; label: string; projectCode: string; season: string; budgetCodes: string[]; totals: BudgetSummary; closed: boolean }
 export interface BudgetException { key: string; kind: 'excess' | 'unclosed'; projectName: string; projectCode: string; styleCode: string; season: string; factoryName: string; budget: number | null; paid: number; unpaid: number; overage: number; explanation: string; reason: string; noteRecord: Extract<BudgetRecord, { kind: 'note' }> | null }
 export interface BudgetReport {
+  budgetCostImportRecordIds?: string[];
   authorized: boolean; readOnly: boolean; orders: BudgetOrderRow[]; settlements: BudgetFARow[];
   costs: Extract<BudgetRecord, { kind: 'cost' }>[]; limits: Extract<BudgetRecord, { kind: 'limit' }>[];
   groups: BudgetGroup[]; totals: BudgetSummary; excess: BudgetException[]; unclosed: BudgetException[]; warnings: string[];

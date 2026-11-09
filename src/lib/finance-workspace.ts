@@ -11,6 +11,9 @@ export function financeOnlyWorkspace(workspace: Workspace, supplied: Profile): W
     budgetRecords: allowed ? workspace.budgetRecords || [] : [],
     budgetAudits: allowed ? workspace.budgetAudits || [] : [],
     budgetAvailable: allowed && workspace.budgetAvailable === true,
+    budgetCostImports: allowed ? workspace.budgetCostImports || [] : [],
+    budgetCostImportAliases: allowed ? workspace.budgetCostImportAliases || [] : [],
+    budgetCostImportAvailable: allowed && workspace.budgetCostImportAvailable === true,
     financeRoleAvailable: workspace.financeRoleAvailable,
   }
 }

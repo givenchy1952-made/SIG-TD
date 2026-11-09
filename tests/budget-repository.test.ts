@@ -10,7 +10,7 @@ const own = { id: 'finance', name: 'FA 담당자', email: 'finance@example.test'
 const input = { styles: [], profiles: [], projects: [], factories: [], comments: [], attachments: [], audits: [] }
 function client(profile = own, capability: { data: unknown; error: unknown } = { data: true, error: null }, response: { data: unknown; error: unknown } = { data: { records: [], audits: [], sourceInput: input }, error: null }) {
   const tables: string[] = []
-  const rpc = vi.fn(async (name: string) => name === 'get_budget_capability' ? capability : response)
+  const rpc = vi.fn(async (name: string) => name === 'get_budget_capability' ? capability : name === 'get_budget_cost_import_capability' ? { data: true, error: null } : name === 'get_budget_cost_imports' ? { data: { imports: [], aliases: [] }, error: null } : response)
   const value = { auth: { getSession: async () => ({ data: { session: { user: { id: own.id } } }, error: null }) }, rpc,
     from: (table: string) => { tables.push(table); const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: profile, error: null }) }; return query },
   } as unknown as SupabaseClient
@@ -22,7 +22,7 @@ describe('예산 전용 클라우드 조회와 저장 경계', () => {
   it('FA 계정을 발견한 뒤 일반 생산 테이블을 요청하지 않고 전용 조회만 사용한다', async () => {
     const fixture = client(), result = await loadFinanceOnlyWorkspace(fixture.value)
     expect(fixture.tables).toEqual(['profiles'])
-    expect(fixture.rpc.mock.calls.map(args => args[0])).toEqual(['get_budget_capability', 'get_budget_workspace'])
+    expect(fixture.rpc.mock.calls.map(args => args[0])).toEqual(['get_budget_capability', 'get_budget_workspace', 'get_budget_cost_import_capability', 'get_budget_cost_imports'])
     expect(result?.profiles).toHaveLength(1)
     expect(result?.profiles[0]).toMatchObject({ id: own.id, role: 'finance' })
     expect(result?.styles).toEqual([]); expect(result?.projects).toEqual([]); expect(result?.factories).toEqual([])

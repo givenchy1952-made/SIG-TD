@@ -2,6 +2,7 @@ import { SIZES, quantityTotal, type Profile, type Workspace } from './types'
 import { getProjectIdentity } from './project-identity'
 import { fullStyleSku } from './style-identity'
 import { sigEuljiNetAmount } from './sig-eulji'
+import { isBudgetAmount, multiplyBudgetCost, roundBudgetMoney, sumBudgetMoney } from './budget-money'
 import type { BudgetAudit, BudgetCostData, BudgetDataByKind, BudgetException, BudgetFAEntry, BudgetFARow, BudgetFilters, BudgetGroup, BudgetGroupBy, BudgetIdentity, BudgetOrderRow, BudgetOrderSource, BudgetPaymentData, BudgetRecord, BudgetRecordKind, BudgetReport, BudgetSources, BudgetSummary, BudgetWorkspaceFields } from './budget-types'
 
 type BudgetWorkspace = Workspace & BudgetWorkspaceFields
@@ -53,13 +54,8 @@ function sameBudgetSource(left: unknown, right: unknown): boolean {
   const a = left as Record<string, unknown>, b = right as Record<string, unknown>, fields = Object.keys(a)
   return fields.length === Object.keys(b).length && fields.every(field => Object.hasOwn(b, field) && a[field] === b[field])
 }
-const moneySum = (values: readonly number[]) => {
-  const mills = values.reduce((sum, value) => sum + BigInt(Math.round(value * 1000)), 0n)
-  if (mills > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('예산 집계 금액이 안전한 계산 범위를 초과했습니다. 조회 범위를 나누어 주세요.')
-  return Number(mills) / 1000
-}
-const safeMoney = (value: unknown, precision = 2): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000_000 && Math.abs(value * 10 ** precision - Math.round(value * 10 ** precision)) < 0.01
-const numberText = (value: number) => Math.round((value + Number.EPSILON) * 1_000) / 1_000
+const moneySum = sumBudgetMoney
+const safeMoney = isBudgetAmount
 
 /** Derive only explicit order identities, quantities and financial snapshots. The
  * cloud finance loader calls this on a narrowly projected private source input. */
@@ -144,8 +140,8 @@ export function buildBudgetSources(workspace: Workspace): BudgetSources {
       const quantity = quantityTotal(kind === 'label' ? line.shipped : line.received)
       if (!quantity) return
       try {
-        const sourceKey = `processing:${kind}:${style.id}:${line.id}:${itemKey}`, net = sigEuljiNetAmount(quote.unitCost, quantity), vat = numberText(net / 10)
-        result.settlements.push({ ...identity(style.projectId, project.code, supplierId, quote.supplierNameSnapshot || supplierName), sourceKey, sourceVersion: quote.version, sourceFingerprint: `${sourceKey}@${style.version}:${workVersion}:${quote.version}:${assignmentVersion}:${supplierId}`, orderDate: metadata(project.code, quantityTotal(line.order), false).orderDate, receivedAt: line.receivedAt, unitCost: quote.unitCost, consumption: null, orderQuantity: quantityTotal(line.order), receivedQuantity: quantity, unit: 'EA', netAmount: net, vatAmount: vat, grossAmount: numberText(net + vat), owner: workspace.profiles.find(person => person.id === (line.ownerId ?? style.ownerId))?.name || '', item, evidence: note })
+        const sourceKey = `processing:${kind}:${style.id}:${line.id}:${itemKey}`, net = sigEuljiNetAmount(quote.unitCost, quantity), vat = roundBudgetMoney(net / 10, 3)
+        result.settlements.push({ ...identity(style.projectId, project.code, supplierId, quote.supplierNameSnapshot || supplierName), sourceKey, sourceVersion: quote.version, sourceFingerprint: `${sourceKey}@${style.version}:${workVersion}:${quote.version}:${assignmentVersion}:${supplierId}`, orderDate: metadata(project.code, quantityTotal(line.order), false).orderDate, receivedAt: line.receivedAt, unitCost: quote.unitCost, consumption: null, orderQuantity: quantityTotal(line.order), receivedQuantity: quantity, unit: 'EA', netAmount: net, vatAmount: vat, grossAmount: moneySum([net, vat]), owner: workspace.profiles.find(person => person.id === (line.ownerId ?? style.ownerId))?.name || '', item, evidence: note })
       } catch { warnings.add(`${fullStyleSku(style.code, line.color)} ${item}: 가공 금액을 확인해 주세요.`) }
     }
     for (const record of workspace.operations?.styleOperations.filter(record => record.styleId === style.id && !record.voided) || []) for (const item of record.rows) {
@@ -175,14 +171,18 @@ function sumCost(costs: Extract<BudgetRecord, { kind: 'cost' }>[], stage: 'pre' 
 function summarize(orders: BudgetOrderRow[], settlements: BudgetFARow[], limits: Extract<BudgetRecord, { kind: 'limit' }>[], selectedSeasons?: readonly string[] | null): BudgetSummary {
   const summary = emptySummary()
   summary.budget = moneySum(orders.map(order => order.productionBudget ?? 0)); summary.missingCostCount = orders.filter(order => order.productionBudget === null).length
-  summary.paid = moneySum(settlements.filter(entry => entry.payment.status === 'paid').map(entry => entry.netAmount)); summary.unpaid = moneySum(settlements.filter(entry => entry.payment.status !== 'paid').map(entry => entry.netAmount)); summary.confirmed = summary.paid + summary.unpaid
+  summary.paid = moneySum(settlements.filter(entry => entry.payment.status === 'paid').map(entry => entry.netAmount)); summary.unpaid = moneySum(settlements.filter(entry => entry.payment.status !== 'paid').map(entry => entry.netAmount)); summary.confirmed = moneySum([summary.paid, summary.unpaid])
   summary.paidVat = moneySum(settlements.filter(entry => entry.payment.status === 'paid').map(entry => entry.vatAmount)); summary.paidGross = moneySum(settlements.filter(entry => entry.payment.status === 'paid').map(entry => entry.grossAmount))
-  summary.remaining = Math.max(0, numberText(summary.budget - summary.paid)); summary.overage = moneySum(orders.filter(order => order.productionBudget !== null).map(order => Math.max(0, numberText(moneySum(settlements.filter(entry => entry.payment.status === 'paid' && costKey(entry) === costKey(order)).map(entry => entry.netAmount)) - order.productionBudget!)))); summary.progress = summary.budget > 0 ? summary.paid / summary.budget : null
+  summary.remaining = Math.max(0, moneySum([summary.budget, -summary.paid])); summary.overage = moneySum(orders.filter(order => order.productionBudget !== null).map(order => Math.max(0, moneySum([moneySum(settlements.filter(entry => entry.payment.status === 'paid' && costKey(entry) === costKey(order)).map(entry => entry.netAmount)), -order.productionBudget!])))); summary.progress = summary.budget > 0 ? summary.paid / summary.budget : null
   summary.orderQuantity = moneySum(orders.map(order => order.quantity)); summary.receivedQuantity = moneySum(orders.map(order => order.receivedQuantity))
   const seasons = selectedSeasons == null ? [...new Set(orders.map(order => order.season))] : [...selectedSeasons]
   const selectedLimits = seasons.map(season => limits.find(record => record.data.season === season))
-  if (seasons.length && selectedLimits.every(record => record?.data.amount !== null && record?.data.amount !== undefined)) { summary.annualLimit = moneySum(selectedLimits.map(record => record!.data.amount!)); summary.unallocated = numberText(summary.annualLimit - summary.budget) }
+  if (seasons.length && selectedLimits.every(record => record?.data.amount !== null && record?.data.amount !== undefined)) { summary.annualLimit = moneySum(selectedLimits.map(record => record!.data.amount!)); summary.unallocated = moneySum([summary.annualLimit, -summary.budget]) }
   return summary
+}
+/** Financial vendors can be named in a cost sheet before a site account exists. */
+export function budgetCostSupplierKey(cost: Pick<BudgetCostData, 'supplierId' | 'supplierName'>): string {
+  return cost.supplierId || (cost.supplierName.trim() ? `unlinked:${cost.supplierName.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ko-KR')}` : 'unassigned')
 }
 function groupIdentity(row: BudgetIdentity, groupBy: BudgetGroupBy): [string, string] {
   if (groupBy === 'project') return [row.projectId, row.projectName]
@@ -196,9 +196,9 @@ export function groupBudgetReport(report: Pick<BudgetReport, 'orders' | 'settlem
   if (groupBy === 'factory') {
     orders = report.orders.flatMap(order => {
       const costs = report.costs.filter(record => !record.data.voided && costKey(record.data) === costKey(order) && record.data.stage === 'pre')
-      const supplierIds = [...new Set([order.factoryId, ...costs.map(record => record.data.supplierId || order.factoryId)])]
+      const supplierIds = [...new Set([order.factoryId, ...costs.map(record => budgetCostSupplierKey(record.data))])]
       return supplierIds.map(factoryId => {
-        const allocated = costs.filter(record => (record.data.supplierId || order.factoryId) === factoryId)
+        const allocated = costs.filter(record => budgetCostSupplierKey(record.data) === factoryId)
         return { ...order, factoryId, factoryName: factoryId === order.factoryId ? order.factoryName : allocated[0]?.data.supplierName || '업체 미등록', productionBudget: allocated.length ? sumCost(allocated, 'pre') : costs.length ? 0 : null, quantity: factoryId === order.factoryId ? order.quantity : 0, receivedQuantity: factoryId === order.factoryId ? order.receivedQuantity : 0 }
       })
     })
@@ -227,7 +227,7 @@ export function buildBudgetReport(workspace: BudgetWorkspace, supplied: Profile,
   const allCosts = records.filter((record): record is Extract<BudgetRecord, { kind: 'cost' }> => record.kind === 'cost')
   const limits = records.filter((record): record is Extract<BudgetRecord, { kind: 'limit' }> => record.kind === 'limit')
   const groupedOrders = new Map<string, BudgetOrderSource>()
-  for (const source of sources.orders.filter(row => selected(row, { ...filters, factoryIds: null }) && (match(row.factoryId, filters.factoryIds) || allCosts.some(cost => !cost.data.voided && costKey(cost.data) === costKey(row) && match(cost.data.supplierId, filters.factoryIds)) || sources.settlements.some(entry => costKey(entry) === costKey(row) && match(entry.factoryId, filters.factoryIds))))) {
+  for (const source of sources.orders.filter(row => selected(row, { ...filters, factoryIds: null }) && (match(row.factoryId, filters.factoryIds) || allCosts.some(cost => !cost.data.voided && costKey(cost.data) === costKey(row) && match(budgetCostSupplierKey(cost.data), filters.factoryIds)) || sources.settlements.some(entry => costKey(entry) === costKey(row) && match(entry.factoryId, filters.factoryIds))))) {
     const key = costKey(source), previous = groupedOrders.get(key)
     if (!previous) groupedOrders.set(key, { ...source })
     else {
@@ -238,7 +238,7 @@ export function buildBudgetReport(workspace: BudgetWorkspace, supplied: Profile,
       if (previous.orderDate !== source.orderDate) previous.orderDate = ''
     }
   }
-  const costs = allCosts.filter(record => !record.data.voided && [...groupedOrders.values()].some(order => costKey(order) === costKey(record.data)) && match(record.data.supplierId, filters.factoryIds))
+  const costs = allCosts.filter(record => !record.data.voided && [...groupedOrders.values()].some(order => costKey(order) === costKey(record.data)) && match(budgetCostSupplierKey(record.data), filters.factoryIds))
   const orders: BudgetOrderRow[] = [...groupedOrders.values()].map(order => {
     const linked = costs.filter(record => costKey(record.data) === costKey(order)), pre = sumCost(linked, 'pre'), post = sumCost(linked, 'post')
     return { ...order, productionBudget: pre, costMatched: post === null ? '' : order.budgetCode, productionUnitCost: pre !== null && order.quantity > 0 ? pre / order.quantity : null, postCost: post }
@@ -259,12 +259,12 @@ export function buildBudgetReport(workspace: BudgetWorkspace, supplied: Profile,
   const capSeasons = filters.seasons == null ? [...new Set([...orders, ...settlements].map(row => row.season))] : [...filters.seasons]
   const seasonOrders = new Map(sources.orders.filter(order => capSeasons.includes(order.season)).map(order => [costKey(order), order]))
   const seasonAllocation = moneySum([...seasonOrders.keys()].map(key => sumCost(allCosts.filter(record => costKey(record.data) === key), 'pre') ?? 0))
-  if (report.totals.annualLimit !== null) report.totals.unallocated = numberText(report.totals.annualLimit - seasonAllocation)
+  if (report.totals.annualLimit !== null) report.totals.unallocated = moneySum([report.totals.annualLimit, -seasonAllocation])
   if (report.totals.annualLimit !== null && [...seasonOrders.keys()].some(key => sumCost(allCosts.filter(record => costKey(record.data) === key), 'pre') === null)) report.warnings.push('원가 미등록 항목이 있어 시즌 예산 잔액은 현재 등록된 생산 예산을 차감한 금액입니다.')
   report.groups = groupBudgetReport(report, filters.groupBy || 'project')
   for (const order of orders) {
     const entries = settlements.filter(entry => costKey(entry) === costKey(order)), paid = moneySum(entries.filter(entry => entry.payment.status === 'paid').map(entry => entry.netAmount)), unpaid = moneySum(entries.filter(entry => entry.payment.status !== 'paid').map(entry => entry.netAmount))
-    const overage = order.productionBudget === null ? 0 : Math.max(0, numberText(paid - order.productionBudget))
+    const overage = order.productionBudget === null ? 0 : Math.max(0, moneySum([paid, -order.productionBudget]))
     const explanations = [order.productionBudget === null ? '사전 원가 미등록' : '', order.postCost === null ? '사후 원가 미등록' : '', order.receivedQuantity < order.quantity ? `미입고 ${order.quantity - order.receivedQuantity}장` : '', !entries.length ? 'FA 마감 누적 대기' : '', unpaid > 0 || entries.some(entry => entry.payment.status !== 'paid') ? '미결제 을지' : '', entries.some(entry => entry.paymentStale) ? '결제 원본 재확인' : ''].filter(Boolean)
     const createException = (kind: 'excess' | 'unclosed', explanation: string): BudgetException => {
       const key = costKey(order), noteRecord = records.find((record): record is Extract<BudgetRecord, { kind: 'note' }> => record.kind === 'note' && record.data.key === key && record.data.kind === kind) || null
@@ -275,6 +275,7 @@ export function buildBudgetReport(workspace: BudgetWorkspace, supplied: Profile,
   }
   if (orders.some(order => !order.projectCode)) report.warnings.push('본사 프로젝트 코드 미등록 오더는 코드를 확인한 뒤 원가를 연결해 주세요.')
   if (orders.some(order => order.joorQuantity === null || order.aderQuantity === null)) report.warnings.push('JOOR GB·ADER KOR 배분은 저장된 원본에 확인 가능한 열이 있을 때만 표시합니다. 현재 저장되지 않은 원본 열은 추정하지 않습니다.')
+  report.budgetCostImportRecordIds = (workspace.budgetCostImports || []).filter(source => costs.some(record => record.id === source.recordId)).map(source => source.recordId)
   return report
 }
 
@@ -287,7 +288,7 @@ export function validateBudgetRecordData<K extends BudgetRecordKind>(workspace: 
     const cost = data as unknown as BudgetCostData
     if (!uuid.test(cost.projectId) || !validateText(cost.budgetCode, 240, true) || !validateText(cost.styleCode, 80, true) || cost.supplierId !== '' && !uuid.test(cost.supplierId) || !validateText(cost.supplierName, 160) || !['pre', 'post'].includes(cost.stage) || typeof cost.voided !== 'boolean') throw new Error('원가의 프로젝트·스타일·업체를 확인해 주세요.')
     for (const field of ['category', 'description', 'position', 'specification', 'itemName', 'composition', 'color', 'unit'] as const) if (!validateText(cost[field], 1000)) throw new Error('원가 설명은 제어 문자 없이 1,000자 이내로 입력해 주세요.')
-    if ([cost.unitCost, cost.variableUnitCost, cost.amount].some(value => value !== null && !safeMoney(value)) || cost.consumption !== null && !safeMoney(cost.consumption, 4)) throw new Error('원가 금액은 미등록 또는 0~1조 원의 소수 둘째 자리까지 입력해 주세요.')
+    if ([cost.unitCost, cost.variableUnitCost].some(value => value !== null && !safeMoney(value)) || cost.amount !== null && !safeMoney(cost.amount, 6) || cost.consumption !== null && !safeMoney(cost.consumption, 4)) throw new Error('원가 단가는 소수 2자리, 요척량은 4자리, 원가 금액은 6자리까지 0~1조 원으로 입력해 주세요.')
     const source = workspace.budgetSources || buildBudgetSources(workspace)
     if (!source.orders.some(order => order.projectId === cost.projectId && order.budgetCode === cost.budgetCode && order.styleCode === cost.styleCode)) throw new Error('현재 발주 오더와 예산 코드가 일치하는 원가만 등록할 수 있습니다.')
     if (cost.supplierId && !workspace.factories.some(factory => factory.id === cost.supplierId)) throw new Error('등록된 업체를 선택해 주세요.')
@@ -322,6 +323,11 @@ export function saveBudgetRecordInWorkspace<K extends BudgetRecordKind>(workspac
   const before = workspace.budgetRecords?.find(record => record.id === id)
   if ((before?.version || 0) !== expectedVersion) throw new Error('VERSION_CONFLICT')
   if (before && before.kind !== kind) throw new Error('원가·예산·결제 기록 종류는 변경할 수 없습니다.')
+  if (kind === 'cost' && workspace.budgetCostImports?.some(source => source.recordId === id)) {
+    const cost = data as BudgetCostData
+    const amount = cost.unitCost === null || cost.consumption === null ? null : multiplyBudgetCost(cost.unitCost, cost.consumption)
+    if (cost.amount !== amount) throw new Error('원가 금액은 단가(Q열) × 요척량(S열)과 같아야 합니다.')
+  }
   if (before?.kind === 'payment' && kind === 'payment' && before.data.status === 'paid') {
     const payment = data as BudgetPaymentData
     if (payment.status === 'paid' && (payment.sourceFingerprint !== before.data.sourceFingerprint || !sameBudgetSource(payment.sourceSnapshot, before.data.sourceSnapshot))) throw new Error('이미 결제한 금액은 미결제 정정을 먼저 기록한 뒤 새 금액으로 결제해 주세요.')

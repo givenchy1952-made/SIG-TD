@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetCode, buildBudgetReport, buildBudgetSources, defaultBudgetPayment, groupBudgetReport, saveBudgetRecordInWorkspace } from '../src/lib/budget-domain'
+import { budgetCode, budgetCostSupplierKey, buildBudgetReport, buildBudgetSources, defaultBudgetPayment, groupBudgetReport, saveBudgetRecordInWorkspace } from '../src/lib/budget-domain'
 import type { BudgetCostData, BudgetFAEntry, BudgetOrderSource, BudgetRecord, BudgetSources } from '../src/lib/budget-types'
 import { createSeed } from '../src/lib/seed'
 import { emptyQuantities, type Profile, type Workspace } from '../src/lib/types'
@@ -19,6 +19,27 @@ function saved(workspace: Workspace, kind: BudgetRecord['kind'], data: BudgetRec
 function paid(workspace: Workspace, value = entry(), n = 70): Workspace { return saved(workspace, 'payment', { ...defaultBudgetPayment(value), status: 'paid', paidAt: '2026-11-07' }, n) }
 
 describe('예산·FA 누적 도메인', () => {
+  it('업로드 원가를 직접 수정해도 Q×S 금액을 유지하고 수동 금액은 별도로 보존한다', () => {
+    const original = { ...cost(), unitCost: 12.34, consumption: 0.125, amount: 1.5425 }
+    const w = saved(workspace(), 'cost', original)
+    w.budgetCostImports = [{ recordId: id(60), projectId: original.projectId, styleCode: original.styleCode, fileName: 'QA.xlsx', sheetName: '원가', rowNumber: 16, sourceKey: 'source', rowFingerprint: 'hash', contentHash: 'hash', updatedAt: '', updatedBy: admin.id }]
+    expect(() => saved(w, 'cost', { ...original, unitCost: 20 }, 60, 1)).toThrow('단가(Q열)')
+    expect(saved(w, 'cost', { ...original, unitCost: 20, amount: 2.5 }, 60, 1).budgetRecords?.[0].data).toMatchObject({ amount: 2.5 })
+    expect(() => saved(w, 'cost', { ...original, unitCost: null }, 60, 1)).toThrow('단가(Q열)')
+    expect(saved(w, 'cost', { ...original, unitCost: null, amount: null }, 60, 1).budgetRecords?.[0].data).toMatchObject({ amount: null })
+    expect(saved(workspace(), 'cost', { ...original, amount: 999 }).budgetRecords?.[0].data).toMatchObject({ amount: 999 })
+  })
+  it('미연결 원가 업체의 예산을 생산 공장에 대신 배정하지 않고 해당 업체로 조회한다', () => {
+    const data = { ...cost(1, 2000), supplierId: '', supplierName: '신규 원단 업체' }
+    const w = saved(workspace(), 'cost', data)
+    const groups = groupBudgetReport(buildBudgetReport(w, admin), 'factory')
+    expect(groups.find(group => group.key === budgetCostSupplierKey(data))?.totals.budget).toBe(2000)
+    expect(groups.find(group => group.key === order().factoryId)?.totals.budget).toBe(0)
+    const filtered = buildBudgetReport(w, admin, { factoryIds: [budgetCostSupplierKey(data)] })
+    expect(filtered.orders).toHaveLength(1)
+    expect(filtered.totals.budget).toBe(2000)
+    expect(filtered.costs[0].data.supplierName).toBe('신규 원단 업체')
+  })
   it('예산 코드는 A열과 컬러 포함 D열을 공백 없이 연결한다', () => {
     expect(budgetCode(' SIGNIFICANT-2026FY-RPQ-46024 ', ' BP06FYKT0703OT ')).toBe('SIGNIFICANT-2026FY-RPQ-46024BP06FYKT0703OT')
   })
@@ -99,7 +120,7 @@ describe('예산·FA 누적 도메인', () => {
     const w = workspace()
     expect(() => saved(w, 'cost', { ...cost(), budgetCode: '임의 코드' })).toThrow('일치')
     expect(() => saved(w, 'cost', { ...cost(), amount: -1 })).toThrow('금액')
-    expect(() => saved(w, 'cost', { ...cost(), amount: 1.001 })).toThrow('금액')
+    expect(() => saved(w, 'cost', { ...cost(), amount: 1.0000001 })).toThrow('금액')
     expect(() => saved(w, 'cost', { ...cost(), arbitrary: 'x' } as BudgetCostData)).toThrow('저장 항목')
     const first = saved(w, 'cost', cost())
     expect(() => saved(first, 'cost', cost(1, 200), 60, 0)).toThrow('VERSION_CONFLICT')
@@ -182,6 +203,13 @@ describe('예산·FA 누적 도메인', () => {
   it('원가 소수 합계는 부동소수 오차를 잔액에 남기지 않는다', () => {
     let w = workspace({ orders: [order()], settlements: [], warnings: [] }); w = saved(w, 'cost', cost(1, 0.1)); w = saved(w, 'cost', cost(1, 0.2), 61)
     expect(buildBudgetReport(w, admin).totals.budget).toBe(0.3)
+  })
+  it('원가 금액의 여섯째 소수 자리까지 검증·누적하며 기존 한도와 지급 금액 정밀도는 유지한다', () => {
+    let w = workspace({ orders: [order()], settlements: [], warnings: [] })
+    w = saved(w, 'cost', cost(1, 0.099999)); w = saved(w, 'cost', cost(1, 0.000001), 61)
+    expect(buildBudgetReport(w, admin).totals).toMatchObject({ budget: 0.1, remaining: 0.1 })
+    expect(() => saved(w, 'limit', { season: '2027FY', amount: 1.001 }, 62)).toThrow('예산 한도')
+    expect(() => saved(w, 'cost', { ...cost(), unitCost: 1.001 }, 63)).toThrow('원가 단가')
   })
 })
 

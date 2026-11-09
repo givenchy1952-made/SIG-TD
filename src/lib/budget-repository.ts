@@ -1,17 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Profile, Workspace } from './types'
 import type { BudgetDataByKind, BudgetRecordKind, BudgetWorkspaceFields } from './budget-types'
+import type { BudgetCostImportsFields } from './budget-cost-import-types'
 import { buildBudgetSources, saveBudgetRecordInWorkspace } from './budget-domain'
 import { EMPTY_OPERATIONS } from './operations-types'
+import { loadBudgetCostImports } from './budget-cost-import-repository'
 import { getDemoWorkspace, locked, persist, supabase } from './repository'
 
 const missing = (code: string) => ['PGRST202', 'PGRST205', '42P01', '42883'].includes(code)
-const unavailable = (): BudgetWorkspaceFields => ({ budgetAvailable: false, budgetSources: { orders: [], settlements: [], warnings: [] }, budgetRecords: [], budgetAudits: [] })
+const unavailable = (): BudgetWorkspaceFields & BudgetCostImportsFields => ({ budgetAvailable: false, budgetCostImportAvailable: false, budgetCostImports: [], budgetCostImportAliases: [], budgetSources: { orders: [], settlements: [], warnings: [] }, budgetRecords: [], budgetAudits: [] })
 
 /** A single JSON RPC avoids the REST row cap. Its server-side projection is
  * intentionally limited to financial identities, quantities and amounts.
  * The temporary source inputs never become a general production workspace. */
-export async function loadBudgetWorkspace(client: SupabaseClient): Promise<BudgetWorkspaceFields> {
+export async function loadBudgetWorkspace(client: SupabaseClient): Promise<BudgetWorkspaceFields & BudgetCostImportsFields> {
   const capability = await client.rpc('get_budget_capability')
   if (capability.error && missing(capability.error.code)) return unavailable()
   if (capability.error) throw capability.error
@@ -29,7 +31,7 @@ export async function loadBudgetWorkspace(client: SupabaseClient): Promise<Budge
     operationsAvailable: true, processingPricesAvailable: true, productionLedgerAvailable: true,
     inspectionAssignmentsAvailable: true, refinementsAvailable: true,
   }
-  return { budgetAvailable: true, budgetSources: buildBudgetSources(financialInput), budgetRecords: value.records, budgetAudits: value.audits }
+  return { ...await loadBudgetCostImports(client), budgetAvailable: true, budgetSources: buildBudgetSources(financialInput), budgetRecords: value.records, budgetAudits: value.audits }
 }
 
 /** Discover finance before any normal order/PO/storage loaders. Even if the

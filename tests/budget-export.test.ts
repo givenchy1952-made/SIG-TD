@@ -28,6 +28,31 @@ async function formulas(bytes: Uint8Array) {
 }
 
 describe('신규 예산·FA 누적 Excel/CSV', () => {
+  it('업로드한 원가에만 Q×S 수식을 넣고 수동 금액과 소수 6자리를 보존한다', async () => {
+    const report = fixture()
+    report.budgetCostImportRecordIds = ['pre-a']
+    report.costs[0].data.unitCost = 333.33
+    report.costs[0].data.consumption = 0.0003
+    report.costs[0].data.amount = 0.099999
+    const workbook = await reopen(await buildBudgetWorkbook(report)), cost = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!
+    expect(cost.getCell('I2').value).toBe(report.costs[0].data.category)
+    expect(parseOrderCSV(budgetCSV(report, 'costs'))[1][8]).toBe(report.costs[0].data.category)
+    expect(cost.getCell('U2').value).toEqual({ formula: 'Q2*S2', result: 0.099999 })
+    expect(cost.getCell('U2').numFmt).toContain('00####')
+    expect(cost.getCell('U3').value).toBe(1300)
+    expect(cost.getCell('U3').formula).toBeUndefined()
+    expect(parseOrderCSV(budgetCSV(report, 'costs'))[1][20]).toBe('0.099999')
+    report.costs[0].data.unitCost = null; report.costs[0].data.amount = null
+    expect((await reopen(await buildBudgetWorkbook(report))).getWorksheet(BUDGET_SHEET_NAMES.costs)!.getCell('U2').value).toBeNull()
+    report.costs[0].data.unitCost = 0; report.costs[0].data.amount = 0
+    const zeroBytes = await buildBudgetWorkbook(report), zeroCell = (await reopen(zeroBytes)).getWorksheet(BUDGET_SHEET_NAMES.costs)!.getCell('U2')
+    expect(zeroCell.formula).toBe('Q2*S2'); expect(zeroCell.result).toBe(0)
+    const zeroZip = await JSZip.loadAsync(zeroBytes)
+    expect(await zeroZip.file('xl/worksheets/sheet2.xml')!.async('string')).toMatch(/<c r="U2"[^>]*><f>Q2\*S2<\/f><v>0<\/v><\/c>/)
+    report.costs[0].data.amount = 5
+    await expect(buildBudgetWorkbook(report)).rejects.toThrow('단가·요척량·금액 연결')
+  })
+
   it('6개 시트를 생성하고 제공된 발주·원가·FA 헤더와 고정 행·열을 지킨다', async () => {
     const bytes = await buildBudgetWorkbook(fixture()), workbook = await reopen(bytes)
     expect(workbook.worksheets.map(sheet => sheet.name)).toEqual(Object.values(BUDGET_SHEET_NAMES))

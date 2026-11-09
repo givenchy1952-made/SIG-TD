@@ -2,6 +2,7 @@ import type { CellValue, Worksheet } from 'exceljs'
 import type { BudgetException, BudgetGroup, BudgetOrderRow, BudgetReport } from './budget-types'
 import { groupBudgetReport } from './budget-domain'
 import { safeCSVCell } from './export'
+import { multiplyBudgetCost } from './budget-money'
 
 export type BudgetExportTab = 'dashboard' | 'orders' | 'costs' | 'fa' | 'excess' | 'unclosed'
 type Value = string | number | null
@@ -18,6 +19,7 @@ const FACTORY_HEADERS = ['년도/시즌', '프로젝트코드', '발주날짜', 
 const EXCESS_HEADERS = ['년도/시즌', '프로젝트코드', '발주날짜', '생산 구분', '생산 차수', '업체', '합계 : 예산', '프로젝트+업체', '지출현황', '진행율', '종결여부', '초과금액', '초과사유', '프로젝트 명칭', '스타일코드', '확인 사항']
 const UNCLOSED_HEADERS = ['년도/시즌', '프로젝트 명칭', '프로젝트코드', '스타일코드', '업체', '생산 예산', '지출현황', '확정 미결제', '확인 사항', '미종결 사유']
 const MONEY = '#,##0.00;[Red]-#,##0.00'
+const COST_MONEY = '#,##0.00####;[Red]-#,##0.00####'
 const PERCENT = '0.0%'
 const MAX_ROWS = 10000
 
@@ -52,7 +54,8 @@ function sheets(report: BudgetReport): SheetData[] {
     { tab: 'orders', name: BUDGET_SHEET_NAMES.orders, headerRow: 1, headers: BUDGET_ORDER_HEADERS, rows: report.orders.map(orderCells) },
     { tab: 'costs', name: BUDGET_SHEET_NAMES.costs, headerRow: 1, headers: BUDGET_COST_HEADERS, rows: report.costs.map(record => {
       const cost = record.data, identity = report.orders.find(order => order.projectId === cost.projectId && order.budgetCode === cost.budgetCode)
-      return [identity?.projectCode || '', cost.budgetCode, identity?.projectName || '', cost.styleCode, identity?.brand || '', identity?.season || '', identity?.productionType || '', identity?.orderCode || '', `${cost.stage === 'pre' ? '사전' : '사후'}${cost.category ? ` · ${cost.category}` : ''}`, cost.supplierName, cost.description, cost.position, cost.specification, cost.itemName, cost.composition, cost.color, cost.unitCost, cost.variableUnitCost, cost.consumption, cost.unit, cost.amount]
+      const category = report.budgetCostImportRecordIds?.includes(record.id) ? cost.category : `${cost.stage === 'pre' ? '사전' : '사후'}${cost.category ? ` · ${cost.category}` : ''}`
+      return [identity?.projectCode || '', cost.budgetCode, identity?.projectName || '', cost.styleCode, identity?.brand || '', identity?.season || '', identity?.productionType || '', identity?.orderCode || '', category, cost.supplierName, cost.description, cost.position, cost.specification, cost.itemName, cost.composition, cost.color, cost.unitCost, cost.variableUnitCost, cost.consumption, cost.unit, cost.amount]
     }) },
     { tab: 'fa', name: BUDGET_SHEET_NAMES.fa, headerRow: 3, headers: BUDGET_FA_HEADERS, rows: report.settlements.map(row => [paid(row) ? row.payment.paidAt : '', row.payment.voucherNo, row.factoryName, row.orderDate, row.projectCode, `${row.factoryName}${row.projectCode}`, row.styleCode, row.payment.account, row.item, row.unitCost, row.consumption, row.orderQuantity, row.receivedQuantity, row.unit, row.netAmount, row.vatAmount, row.grossAmount, row.owner, [row.evidence, row.payment.description, row.paymentStale ? '원본 변경 확인 필요 · 결제 당시 금액 보존' : ''].filter(Boolean).join(' · '), row.payment.splitPayment, paid(row) ? '결제' : '미결제']) },
     { tab: 'dashboard', name: BUDGET_SHEET_NAMES.dashboard, headerRow: 7, headers: PROJECT_HEADERS, rows: groupBudgetReport(report, 'project').map(group => projectCells(report, group)) },
@@ -88,8 +91,8 @@ function header(sheet: Worksheet, row: number, values: string[], startColumn = 1
   })
   sheet.getRow(row).height = 33
 }
-function money(sheet: Worksheet, columns: number[], start: number, end: number) {
-  for (let row = start; row <= end; row++) for (const column of columns) sheet.getCell(row, column).numFmt = MONEY
+function money(sheet: Worksheet, columns: number[], start: number, end: number, format = MONEY) {
+  for (let row = start; row <= end; row++) for (const column of columns) sheet.getCell(row, column).numFmt = format
 }
 function blankIfUnknown(value: number | null): number | string { return value === null ? '' : value }
 function whitespaceFormula(row: number) { return `SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(A${row}&D${row}," ",""),CHAR(9),""),CHAR(10),""),CHAR(13),""),CHAR(160),""),"　","")` }
@@ -119,12 +122,26 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
   })
   money(orderSheet, [13, 15], 2, report.orders.length + 1)
   const costSheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!
+  const importedCostIds = new Set(report.budgetCostImportRecordIds || [])
   report.costs.forEach((record, index) => {
     const row = index + 2, identity = report.orders.find(order => order.projectId === record.data.projectId && order.budgetCode === record.data.budgetCode)
     // A supplied identity is necessary before creating A&D; an absent identity must not fabricate an unrelated budget key.
     if (identity) costSheet.getCell(row, 2).value = { formula: whitespaceFormula(row), result: budgetCode(identity.projectCode, record.data.styleCode) }
+    if (importedCostIds.has(record.id)) {
+      if (record.data.unitCost === null || record.data.consumption === null) costSheet.getCell(row, 21).value = null
+      else {
+        const amount = multiplyBudgetCost(record.data.unitCost, record.data.consumption)
+        if (record.data.amount !== amount) throw new Error('업로드한 원가의 단가·요척량·금액 연결을 다시 확인해 주세요.')
+        costSheet.getCell(row, 21).value = { formula: `Q${row}*S${row}`, result: amount }
+      }
+    }
   })
   money(costSheet, [17, 18, 19, 21], 2, report.costs.length + 1)
+  for (let row = 2; row <= report.costs.length + 1; row++) {
+    costSheet.getCell(row, 19).numFmt = '#,##0.####'
+    costSheet.getCell(row, 21).numFmt = COST_MONEY
+  }
+  for (let row = 2; row <= report.orders.length + 1; row++) for (const column of [13, 15]) orderSheet.getCell(row, column).numFmt = COST_MONEY
   const fa = workbook.getWorksheet(BUDGET_SHEET_NAMES.fa)!, lastFA = Math.max(4, report.settlements.length + 3)
   fa.getCell('A1').value = 'FA 을지 누적 · 공급가액 / VAT 별도'; fa.getCell('A1').font = { bold: true, size: 12 }
   fa.getCell('O2').value = { formula: `SUM(O4:O${lastFA})`, result: report.settlements.reduce((sum, row) => sum + row.netAmount, 0) }
@@ -158,11 +175,11 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
   dashboard.getCell('A4').value = report.totals.annualLimit; dashboard.getCell('B4').value = report.totals.unallocated; dashboard.getCell('C4').value = '공급가액 KRW · VAT 별도'
   dashboard.getCell('A5').value = report.totals.missingCostCount ? `원가 미등록 ${report.totals.missingCostCount}건은 0원이 아닙니다. 예산 합계는 등록된 금액만 포함합니다.` : '예산과 지출은 공급가액 기준입니다. 미지급 계획 잔액과 확정 미결제 을지는 별도입니다.'
   dashboard.mergeCells('A5:H5'); dashboard.getCell('A5').alignment = { wrapText: true }; dashboard.getRow(5).height = 32
-  money(dashboard, [1, 2, 3, 5, 6, 7], 2, 2); money(dashboard, [1, 2], 4, 4); dashboard.getCell('D2').numFmt = PERCENT
+  money(dashboard, [1, 2, 3, 5, 6, 7], 2, 2, COST_MONEY); money(dashboard, [1, 2], 4, 4, COST_MONEY); dashboard.getCell('D2').numFmt = PERCENT
   const projectGroups = groupBudgetReport(report, 'project'), factoryGroups = groupBudgetReport(report, 'factory')
   header(dashboard, 7, FACTORY_HEADERS, 12)
   factoryGroups.forEach((group, index) => factoryCells(report, group).forEach((value, column) => { dashboard.getCell(index + 8, column + 12).value = literal(value) }))
-  money(dashboard, [5, 6], 8, projectGroups.length + 7); money(dashboard, [18, 20, 23], 8, factoryGroups.length + 7)
+  money(dashboard, [5, 6], 8, projectGroups.length + 7, COST_MONEY); money(dashboard, [18, 20, 23], 8, factoryGroups.length + 7, COST_MONEY)
   for (let row = 8; row < projectGroups.length + 8; row++) dashboard.getCell(row, 7).numFmt = PERCENT
   for (let row = 8; row < factoryGroups.length + 8; row++) dashboard.getCell(row, 21).numFmt = PERCENT
   const warningRow = Math.max(8 + projectGroups.length, 8 + factoryGroups.length) + 2
@@ -170,9 +187,9 @@ export async function buildBudgetWorkbook(report: BudgetReport): Promise<Uint8Ar
   report.warnings.forEach((warning, index) => { dashboard.getCell(warningRow + index + 1, 1).value = warning.slice(0, 32767) })
   const excess = workbook.getWorksheet(BUDGET_SHEET_NAMES.excess)!, lastExcess = Math.max(3, report.excess.length + 2)
   excess.getCell('K1').value = '초과 합계'; excess.getCell('L1').value = { formula: `SUM(L3:L${lastExcess})`, result: report.excess.reduce((sum, row) => sum + row.overage, 0) }
-  money(excess, [7, 9, 12], 3, lastExcess); excess.getColumn(13).width = 44; excess.getColumn(16).width = 44
+  money(excess, [7, 9, 12], 3, lastExcess, COST_MONEY); excess.getColumn(13).width = 44; excess.getColumn(16).width = 44
   for (let row = 3; row <= lastExcess; row++) excess.getCell(row, 10).numFmt = PERCENT
   const unclosed = workbook.getWorksheet(BUDGET_SHEET_NAMES.unclosed)!
-  money(unclosed, [6, 7, 8], 2, report.unclosed.length + 1); unclosed.getColumn(9).width = 44; unclosed.getColumn(10).width = 44
+  money(unclosed, [6, 7, 8], 2, report.unclosed.length + 1, COST_MONEY); unclosed.getColumn(9).width = 44; unclosed.getColumn(10).width = 44
   return new Uint8Array(await workbook.xlsx.writeBuffer())
 }
