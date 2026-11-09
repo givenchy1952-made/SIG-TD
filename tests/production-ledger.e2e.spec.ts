@@ -11,6 +11,7 @@ async function fixture(page: Page, closed = false) {
     const style = workspace.styles.find((item: { code: string }) => item.code === code), line = style.production[0]
     const actor = workspace.profiles.find((item: { role: string }) => item.role === 'admin'), factoryActor = workspace.profiles.find((item: { role: string; factoryId: string }) => item.role === 'factory' && item.factoryId === style.factoryId)
     workspace.styles = [style]; style.production = [line]; style.colors = [line.color]; style.stage = 'production'
+    workspace.mainProductionSyncAvailable = false // SQL026 적용 전의 기존 수동 입고 경로도 계속 지원한다.
     workspace.productionLedgerAvailable = true; workspace.supplierOrdersAvailable = true; workspace.productionRunAudits = []; workspace.productionReceipts = []
     const project = workspace.projects.find((item: { id: string }) => item.id === style.projectId)
     project.code = 'QA-RUN-PROJECT-2026'
@@ -47,7 +48,7 @@ async function open(page: Page) {
   return { detail, ledger: detail.getByRole('region', { name: '프로젝트별 생산 차수 및 마감', exact: true }) }
 }
 
-test('기존 프로세스로 시작한 프로젝트 차수의 실제 입고와 단가로 마감을 확정하고 과거 금액을 보존한다', async ({ page }) => {
+test('SQL026 적용 전 기존 입고 경로로 마감을 확정하고 과거 금액을 보존한다', async ({ page }) => {
   await fixture(page)
   const { ledger } = await open(page)
   await expect(ledger.locator('.ledger-summary')).toContainText('100원')
@@ -98,6 +99,7 @@ test('전체 을지에서 같은 품번의 차수별 과거 단가를 보존하�
   await expect(detail.getByRole('tab', { name: /을지·단가/ })).toHaveCount(0)
   await expect(detail.getByRole('tab', { name: /생산 조건 협의·승인/ })).toBeVisible()
   await detail.getByRole('tab', { name: /생산 조건 협의·승인/ }).click()
+  await detail.getByRole('table', { name: '생산 오더 목록', exact: true }).getByRole('radio').first().check()
   await expect(detail.getByRole('region', { name: '생산 조건 협의·승인', exact: true })).toContainText('기존 프로세스 승인 기록')
 })
 

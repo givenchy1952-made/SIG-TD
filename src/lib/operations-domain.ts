@@ -1,3 +1,4 @@
+import { syncFactoryOwnerStylesInWorkspace } from './factory-owner-defaults'
 import { SIZES, emptyQuantities, quantityTotal, type Profile, type Quantities, type Style, type Workspace } from './types'
 import { assertProductionAccess, assertStyleSave, canViewStyle } from './permissions'
 import type { CalendarEvent, CalendarEventInput, OperationRow, OperationsWorkspace, OrderImportChange, OrderSourceData, OrderSourceRecord, PoDispatchInput, ShipmentBatchInput, StyleOperationInput, StyleOperationKind } from './operations-types'
@@ -84,8 +85,11 @@ export function savePoInWorkspace(workspace: Workspace, profile: Profile, id: st
 export function shipmentTotals(workspace: Workspace, styleId: string, lineId: string): { quantities: Quantities; date: string } | null {
   const ops = freshOperations(workspace.operations), ledger = ops.shipmentLedgers.find(item => item.styleId === styleId && item.lineId === lineId)
   if (!ledger) return null
-  const quantities = { ...ledger.baselineQuantities }, dates = [ledger.baselineDate]
-  for (const batch of ops.shipmentBatches.filter(item => item.styleId === styleId && item.lineId === lineId && !item.voided)) { for (const size of SIZES) quantities[size] += batch.quantities[size]; dates.push(batch.shippedAt) }
+  const adjustments = (workspace.shipmentAdjustments || []).filter(item => item.styleId === styleId && item.lineId === lineId).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  const last = adjustments.at(-1)
+  const quantities = { ...ledger.baselineQuantities }, dates = [last ? last.shippedAt : ledger.baselineDate]
+  for (const batch of ops.shipmentBatches.filter(item => item.styleId === styleId && item.lineId === lineId && !item.voided)) { for (const size of SIZES) quantities[size] += batch.quantities[size]; if (!last || batch.updatedAt > last.createdAt) dates.push(batch.shippedAt) }
+  for (const adjustment of adjustments) for (const size of SIZES) quantities[size] += adjustment.delta[size]
   validateOperationQuantities(quantities); return { quantities, date: dates.filter(Boolean).sort().at(-1) || '' }
 }
 export function assertManagedShipmentTotals(workspace: Workspace, style: Style): void {
@@ -159,7 +163,7 @@ export function saveAssignmentInWorkspace(workspace: Workspace, profile: Profile
   if (!employee || new Set(factoryIds).size !== factoryIds.length || factoryIds.some(id => !workspace.factories.some(item => item.id === id))) throw new Error('활성 본사 담당자와 등록된 공장을 선택해 주세요.')
   const next = start(workspace, reason), ops = next.operations!, before = ops.employeeFactoryAssignments.find(item => item.employeeId === employeeId); checkVersion(before, expected)
   const after = { employeeId, factoryIds: [...factoryIds].sort(), ...stamp(before, actor) }
-  ops.employeeFactoryAssignments = replace(ops.employeeFactoryAssignments, after, item => item.employeeId === employeeId); audit(next, null, actor, '본사 담당 공장 배정', reason, before, after); return next
+  ops.employeeFactoryAssignments = replace(ops.employeeFactoryAssignments, after, item => item.employeeId === employeeId); audit(next, null, actor, '본사 담당 공장 배정', reason, before, after); return syncFactoryOwnerStylesInWorkspace(next, actor, [...(before?.factoryIds || []), ...factoryIds], reason)
 }
 export function saveCatalogInWorkspace(workspace: Workspace, profile: Profile, id: string, kind: StyleOperationKind, name: string, active: boolean, expected: number, reason: string): Workspace {
   const actor = hqActor(workspace, profile); if (actor.role !== 'admin') throw new Error('작업 종류는 관리자만 관리할 수 있습니다.')

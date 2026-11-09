@@ -16,7 +16,7 @@ const includes = (values: Selection, value: string) => values === null || values
 
 /** Nonfinancial view: safe for both headquarters and its assigned supplier.
  * Every row is an immutable project/production-round identity, never a SKU sum. */
-export default function ProductionRoundBoard({ workspace, onOpenStyle }: { workspace: Workspace & SupplierOrderFields; onOpenStyle: (id: string) => void }) {
+export default function ProductionRoundBoard({ workspace, onOpenStyle }: { workspace: Workspace & SupplierOrderFields; onOpenStyle: (id: string, color?: string, projectId?: string, runId?: string) => void }) {
   const [project, setProject] = useState<Selection>(null), [style, setStyle] = useState<Selection>(null), [status, setStatus] = useState<Selection>(null)
   const orders = workspace.supplierProductionOrders || []
   const conditions = new Map((workspace.productionConditions || []).map(condition => [condition.runId, condition]))
@@ -37,7 +37,7 @@ export default function ProductionRoundBoard({ workspace, onOpenStyle }: { works
       <MultiSelectFilter label="생산 차수 상태" options={Object.entries(stateLabels).map(([value, label]) => ({ value, label }))} value={status} onChange={setStatus} allLabel="전체 상태"/>
     </div>
     {filtered.length ? <div className="table-wrap"><table><thead><tr><th>프로젝트 명칭</th><th>시즌</th><th>품번</th><th>생산 차수</th><th>담당 공장</th><th>오더 수량</th><th>PO 요청 납기</th><th>업체 예상 납기</th><th>진행 상태</th><th><span className="sr-only">상세</span></th></tr></thead><tbody>{filtered.map(order => <tr key={order.runId}>
-      <td><strong>{projectIdentity(order).name}</strong></td><td>{projectIdentity(order).season || '—'}</td><td>{order.styleCode}</td><td><strong>{order.round}차</strong><small>{order.name}</small></td><td>{order.factoryName}</td><td>{quantityTotal(order.order).toLocaleString('ko-KR')} pcs</td><td>{order.requestedDue || '—'}</td><td>{conditions.get(order.runId)?.proposal?.expectedDeliveryDate || order.acceptance?.expectedDeliveryDate || '—'}</td><td><span className={`pill production-order-${statusFor(order)}`}>{stateLabels[statusFor(order)]}</span>{conditions.get(order.runId)?.legacy && <small>기존 프로세스 승인 기록</small>}</td><td><button className="button button-ghost" aria-label={`${order.styleCode} ${projectIdentity(order).name} ${order.round}차 상세`} onClick={() => onOpenStyle(order.styleId)}>상세<ArrowUpRight size={13}/></button></td>
+      <td><strong>{projectIdentity(order).name}</strong></td><td>{projectIdentity(order).season || '—'}</td><td>{order.styleCode}</td><td><strong>{order.round}차</strong><small>{order.name}</small></td><td>{order.factoryName}</td><td>{quantityTotal(order.order).toLocaleString('ko-KR')} pcs</td><td>{order.requestedDue || '—'}</td><td>{conditions.get(order.runId)?.proposal?.expectedDeliveryDate || order.acceptance?.expectedDeliveryDate || '—'}</td><td><span className={`pill production-order-${statusFor(order)}`}>{stateLabels[statusFor(order)]}</span>{conditions.get(order.runId)?.legacy && <small>기존 프로세스 승인 기록</small>}</td><td><button className="button button-ghost" aria-label={`${order.styleCode} ${projectIdentity(order).name} ${order.round}차 상세`} onClick={() => onOpenStyle(order.styleId, workspace.styles.find(style => style.id === order.styleId)?.production.find(line => line.id === order.lineId)?.color, order.projectId, order.runId)}>상세<ArrowUpRight size={13}/></button></td>
     </tr>)}</tbody></table></div> : <div className="empty-state"><p>{orders.length ? '선택한 조건에 해당하는 생산 차수가 없습니다.' : '등록된 생산 차수가 없습니다. 오더 엑셀을 업로드하면 프로젝트별 새 생산 차수가 만들어집니다.'}</p></div>}
   </section>
 }

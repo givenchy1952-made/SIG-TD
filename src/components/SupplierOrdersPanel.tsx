@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ClipboardCheck, FileText } from 'lucide-react'
 import type { Profile, Style, Workspace } from '../lib/types'
 import { quantityTotal, SIZES } from '../lib/types'
@@ -14,6 +14,7 @@ import { getHistoricalProjectIdentity } from '../lib/project-identity'
 import { getPublicAppUrl } from '../lib/public-app-url'
 import { validatePartialDeliveries } from '../lib/partial-deliveries'
 import { PoPanel, type PoPanelProps } from './OperationsPanel'
+import { productionContextKey, selectProductionContext, type ProductionSelectionContext } from '../lib/production-selection'
 import './supplier-orders.css'
 
 export interface SupplierOrdersPanelProps extends Pick<PoPanelProps, 'onSavePO' | 'onSendPO' | 'onDownload'> {
@@ -24,22 +25,27 @@ export interface SupplierOrdersPanelProps extends Pick<PoPanelProps, 'onSavePO' 
   onDirtyChange?: (dirty: boolean) => void
   onOpenProductionRuns?: () => void
   parentDirty?: boolean
+  activeLineId?: string
+  activeProjectId?: string
+  activeRunId?: string
+  onSelectContext?: (context: ProductionSelectionContext) => void
 }
 const STATUS_LABEL: Record<string, string> = { awaiting_po: 'PO 발송 대기', awaiting_supplier: '업체 회신 대기', awaiting_approval: '본사 최종 승인 대기', revision_requested: '업체 재협의 요청', approved: '생산 승인 완료 / 생산 진행 중', rejected: '발주 거절', closed: '마감 확정', assignment_changed: '공장 배정 변경 · 확인 필요' }
 const time = (value: string | null) => value ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short' }) : '—'
 interface PoDraft { runId: string; runVersion: number; poId: string; data: PoDispatchInput; reason: string }
 
-export default function SupplierOrdersPanel({ workspace, style, profile, onChanged, onDirtyChange, onSavePO, onSendPO, onDownload, onOpenProductionRuns, parentDirty = false }: SupplierOrdersPanelProps) {
-  const [selectedId, setSelectedId] = useState(''), [conditionsDirty, setConditionsDirty] = useState(false), [deliveryDirty, setDeliveryDirty] = useState(false)
-  const [poDraft, setPoDraft] = useState<PoDraft | null>(null)
-  const [error, setError] = useState(''), [success, setSuccess] = useState(''), [busy, setBusy] = useState(false)
-  const [refreshRequired, setRefreshRequired] = useState(false)
-  const [poPanelDirty, setPoPanelDirty] = useState(false)
+export default function SupplierOrdersPanel({ workspace, style, profile, onChanged, onDirtyChange, onSavePO, onSendPO, onDownload, onOpenProductionRuns, parentDirty = false, activeLineId, activeProjectId, activeRunId, onSelectContext }: SupplierOrdersPanelProps) {
   const actor = workspace.profiles.find(person => person.id === profile.id)
   const hq = !!actor && actor.role !== 'factory'
   const orders = (workspace.supplierProductionOrders || []).filter(order => order.styleId === style.id && (hq || !!actor?.factoryId && order.factoryId === actor.factoryId && style.factoryId === actor.factoryId))
     .sort((a, b) => getHistoricalProjectIdentity(workspace, a.projectId, { name: a.projectName, code: a.projectCode }).name.localeCompare(getHistoricalProjectIdentity(workspace, b.projectId, { name: b.projectName, code: b.projectCode }).name, 'ko-KR') || b.round - a.round || a.runId.localeCompare(b.runId))
-  const selected = orders.find(order => order.runId === selectedId) || orders[0]
+  const initialContext = { lineId: activeLineId, projectId: activeProjectId, runId: activeRunId }
+  const [selectedId, setSelectedId] = useState(() => selectProductionContext(orders, initialContext, order => order.runId)?.runId || ''), [conditionsDirty, setConditionsDirty] = useState(false), [deliveryDirty, setDeliveryDirty] = useState(false)
+  const [poDraft, setPoDraft] = useState<PoDraft | null>(null)
+  const [error, setError] = useState(''), [success, setSuccess] = useState(''), [busy, setBusy] = useState(false)
+  const [refreshRequired, setRefreshRequired] = useState(false)
+  const [poPanelDirty, setPoPanelDirty] = useState(false)
+  const selected = orders.find(order => order.runId === selectedId) || (!selectedId ? selectProductionContext(orders, initialContext, order => order.runId) : undefined)
   const projectIdentity = (order: typeof orders[number]) => getHistoricalProjectIdentity(workspace, order.projectId, { name: order.projectName, code: order.projectCode })
   const workflowDirty = conditionsDirty || deliveryDirty || !!poDraft || refreshRequired
   const dirty = workflowDirty || poPanelDirty
@@ -49,10 +55,18 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
   const duplicateSummary = (order: typeof orders[number]) => orders.filter(item => orderSummary(item) === orderSummary(order)).length > 1
   const currentCondition = selected ? getProductionCondition(workspace, selected.runId) : null
   const poStale = !!poDraft && (!selected || poDraft.runId !== selected.runId || poDraft.runVersion !== selected.runVersion || selected.poId !== null || selected.status !== 'awaiting_po')
+  const incomingContextKey = productionContextKey(initialContext), appliedContextKey = useRef(incomingContextKey)
+  useEffect(() => {
+    if (appliedContextKey.current === incomingContextKey || dirty || busy || parentDirty) return
+    appliedContextKey.current = incomingContextKey
+    setSelectedId(selectProductionContext(orders, initialContext, order => order.runId)?.runId || '')
+    setError(''); setSuccess('')
+  }, [incomingContextKey, dirty, busy, parentDirty, orders])
+  useEffect(() => { if (!selectedId && selected && !dirty && !busy && !parentDirty) setSelectedId(selected.runId) }, [selectedId, selected?.runId, dirty, busy, parentDirty])
   useEffect(() => { onDirtyChange?.(dirty || busy); return () => onDirtyChange?.(false) }, [dirty, busy, onDirtyChange])
   if (!actor?.active || !actor.approved) return null
 
-  function choose(id: string) { if (dirty || busy || parentDirty) return; setSelectedId(id); setError(''); setSuccess('') }
+  function choose(id: string) { if (dirty || busy || parentDirty) return; const order = orders.find(item => item.runId === id); if (!order) return; setSelectedId(id); onSelectContext?.({ lineId: order.lineId, projectId: order.projectId, runId: order.runId }); setError(''); setSuccess('') }
   async function refresh() {
     if (busy) return
     setBusy(true); setError('')
@@ -112,18 +126,19 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
     <div className="section-heading"><div><h2><ClipboardCheck size={18} />생산 조건 협의·승인</h2><p className="muted">업체가 회신한 납기·단가·수량을 검토하고 본사 최종 승인 후 생산을 시작합니다.</p></div></div>
     {error && <div className="error-message" role="alert">{error}</div>}{success && <div className="success-message" role="status">{success}</div>}
     {refreshRequired && <button className="button" type="button" disabled={busy} onClick={() => void refresh()}>최신 발주 다시 불러오기</button>}
-    {workspace.supplierOrdersAvailable !== true ? <div className="error-message" role="status">생산 발주 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : !orders.length ? <div className="empty-state"><ClipboardCheck size={30} /><h3>등록된 생산 발주가 없습니다.</h3><p>{hq ? '오더를 업로드하거나 생산 차수를 등록한 뒤 PO를 연결하고 발송해 주세요.' : '본사에서 담당 공장의 생산 발주와 PO를 등록하면 이곳에서 확인할 수 있습니다.'}</p>{hq && onOpenProductionRuns && <button className="button button-primary" type="button" onClick={onOpenProductionRuns}>생산 차수 등록으로 이동</button>}</div> : selected && <>
+    {workspace.supplierOrdersAvailable !== true ? <div className="error-message" role="status">생산 발주 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : !orders.length ? <div className="empty-state"><ClipboardCheck size={30} /><h3>등록된 생산 발주가 없습니다.</h3><p>{hq ? '오더를 업로드하거나 생산 차수를 등록한 뒤 PO를 연결하고 발송해 주세요.' : '본사에서 담당 공장의 생산 발주와 PO를 등록하면 이곳에서 확인할 수 있습니다.'}</p>{hq && onOpenProductionRuns && <button className="button button-primary" type="button" onClick={onOpenProductionRuns}>생산 차수 등록으로 이동</button>}</div> : <>
       <section className="supplier-order-selection" aria-label="생산 오더 선택">
         <h3>생산 오더 선택</h3>
         <div className="supplier-order-choice-wrap"><table className="supplier-order-choice-table" aria-label="생산 오더 목록"><thead><tr><th>프로젝트 명칭</th><th>품번</th><th>컬러</th><th>총수량</th></tr></thead><tbody>{orders.map(order => {
           const condition = getProductionCondition(workspace, order.runId), duplicate = duplicateSummary(order)
           const reference = `납기 ${order.requestedDue || order.expectedDue || '미정'} · ${STATUS_LABEL[condition.status] || STATUS_LABEL[order.status]}`
-          return <tr key={order.runId} className={selected.runId === order.runId ? 'selected' : ''} title={`${reference}${duplicate ? ` · 발주 기록 ${order.runId}` : ''}`}>
-            <td><label className="supplier-order-radio"><input type="radio" name={`supplier-order-${style.id}`} aria-label={`생산 오더 ${orderSummary(order)}${duplicate ? ` / 발주 기록 ${order.runId}` : ''}`} aria-describedby={duplicate ? `supplier-order-reference-${order.runId}` : undefined} data-run-id={order.runId} data-project-id={order.projectId} value={order.runId} checked={selected.runId === order.runId} disabled={dirty || busy || parentDirty} onChange={() => choose(order.runId)}/><span>{projectIdentity(order).name}</span></label>{duplicate && <small id={`supplier-order-reference-${order.runId}`} className="supplier-order-reference" title={`발주 기록 ${order.runId}`}>{reference}</small>}</td>
+          return <tr key={order.runId} className={selected?.runId === order.runId ? 'selected' : ''} title={`${reference}${duplicate ? ` · 발주 기록 ${order.runId}` : ''}`}>
+            <td><label className="supplier-order-radio"><input type="radio" name={`supplier-order-${style.id}`} aria-label={`생산 오더 ${orderSummary(order)}${duplicate ? ` / 발주 기록 ${order.runId}` : ''}`} aria-describedby={duplicate ? `supplier-order-reference-${order.runId}` : undefined} data-run-id={order.runId} data-project-id={order.projectId} value={order.runId} checked={selected?.runId === order.runId} disabled={dirty || busy || parentDirty} onChange={() => choose(order.runId)}/><span>{projectIdentity(order).name}</span></label>{duplicate && <small id={`supplier-order-reference-${order.runId}`} className="supplier-order-reference" title={`발주 기록 ${order.runId}`}>{reference}</small>}</td>
             <td>{orderCode(order)}</td><td>{orderColor(order) || '미등록'}</td><td>{quantityTotal(order.order).toLocaleString('ko-KR')} pcs</td>
           </tr>
         })}</tbody></table></div>
       </section>
+      {selected ? <>
       {poStale && <div className="error-message" role="status">생산 차수 또는 PO 연결이 변경되었습니다. 작성한 초안은 유지됩니다. 초안을 취소하고 최신 발주를 다시 확인해 주세요.</div>}
       <fieldset disabled={parentDirty || poPanelDirty || busy || refreshRequired} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><article className="panel supplier-order-card">
         <header><div><h3>선택한 생산 오더</h3><p className="muted">시즌: {projectIdentity(selected).season || '미등록'}</p></div><span className={`pill supplier-state-${currentCondition?.status}`}>{STATUS_LABEL[currentCondition?.status || selected.status]}</span></header>
@@ -146,6 +161,7 @@ export default function SupplierOrdersPanel({ workspace, style, profile, onChang
         {selected.status === 'assignment_changed' && <div className="error-message" role="status">이 발주의 공장 배정이 변경되었습니다. 본사에서 발주와 PO를 확인해야 합니다. 이전 동의 이력은 보존됩니다.</div>}
         <ProductionConditionsReviewPanel key={`conditions-${selected.runId}`} workspace={workspace} style={style} order={selected} profile={actor} onChanged={onChanged} onDirtyChange={setConditionsDirty} onOpenProductionRuns={onOpenProductionRuns}/>
       </article></fieldset>
+      </> : <div className="empty-state"><p>선택한 컬러·프로젝트의 생산 오더를 위 목록에서 선택해 주세요. 다른 컬러의 생산 내용으로 자동 전환하지 않습니다.</p></div>}
     </>}
     {workspace.operationsAvailable === false ? <div className="ops-unavailable" role="status">PO 관리 설정을 준비 중입니다. 기존 기록은 유지됩니다.</div> : <section aria-label="PO 작성·발송 및 이력"><PoPanel style={style} workspace={workspace} profile={profile} onSavePO={onSavePO} onSendPO={onSendPO} onDownload={onDownload} onDirtyChange={setPoPanelDirty} onRefresh={onChanged} featuredPoId={selected?.poId} collapsibleHistory allowCreate={!orders.length || workspace.supplierOrdersAvailable !== true || workspace.productionConditionsAvailable !== true} parentDirty={parentDirty || workflowDirty || busy}/></section>}
   </section>

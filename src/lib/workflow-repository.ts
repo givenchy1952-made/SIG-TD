@@ -1,3 +1,4 @@
+import { applyFactoryOwnerDefaults } from './factory-owner-defaults'
 import { blankProduction, type Project, type Profile, type Style, type Workspace } from './types'
 import type { ProductionDetails, ProductionDetailsInput } from './workflow-refinements'
 import { saveProductionDetailsInWorkspace } from './workflow-refinements'
@@ -60,7 +61,7 @@ export function registerOrderStyleInWorkspace(workspace: Workspace, supplied: Pr
   if (style.projectId !== project.id || style.season !== project.season || !next.factories.some(f => f.id === style.factoryId) || !validOwner(style.ownerId, before?.ownerId) || style.production.some(line => line.ownerId !== undefined && !validOwner(line.ownerId, before?.production.find(item => item.id === line.id)?.ownerId))) throw new Error('프로젝트·등록 공장·본사 담당자를 확인해 주세요.')
   if (next.styles.some(s => s.id !== style.id && s.code.toUpperCase() === style.code.toUpperCase())) throw new Error('이미 등록된 품번입니다.')
   assertStyleSave(actor, before, style, reason); assertManagedShipmentTotals(next, style); assertProductionLedgerTotals(next, style)
-  const now = new Date().toISOString(), after = { ...structuredClone(style), version: style.version + 1, updatedAt: now, updatedBy: actor.id }
+  const now = new Date().toISOString(), after = { ...applyFactoryOwnerDefaults(next, style), version: style.version + 1, updatedAt: now, updatedBy: actor.id }
   next.styles = [...next.styles.filter(s => s.id !== style.id), after]
   next.audits.unshift({ id: crypto.randomUUID(), styleId: style.id, actorId: actor.id, actorName: actor.name, action: '오더 스타일·프로젝트 등록', reason, before: before || null, after, createdAt: now }); return next
 }
