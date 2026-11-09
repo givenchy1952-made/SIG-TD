@@ -85,6 +85,42 @@ async function payFirst(page: Page) {
   await expect(faRow(page, 0).getByRole('combobox')).toHaveValue('paid')
 }
 
+test('발주·요약은 원 단위로 표시하고 Excel·CSV 원본과 상세 원가·FA 소수 근거를 보존한다', async ({ page }) => {
+  await fixture(page)
+  await page.evaluate(key => {
+    const w = JSON.parse(localStorage.getItem(key)!) as Workspace
+    const record = w.budgetRecords!.find(record => record.kind === 'cost')!
+    if (record.kind === 'cost') Object.assign(record.data, { amount: 253210.75714, unitCost: 123.45, variableUnitCost: 234.56, consumption: 0.1234 })
+    Object.assign(w.budgetSources!.settlements[0], { unitCost: 1234.56, netAmount: 12345.6, vatAmount: 1234.56, grossAmount: 13580.16 })
+    localStorage.setItem(key, JSON.stringify(w))
+  }, STORAGE)
+  const before = await snapshot(page)
+  await page.reload(); await menu(page)
+  await expect(page.getByRole('article', { name: '발주 예산 합계', exact: true }).locator('strong')).toHaveText('266,211원')
+  await expect(page.getByRole('article', { name: '미지급 합계', exact: true }).locator('strong')).toHaveText('18,346원')
+  await tab(page, '발주요청세부')
+  await expect(orderRow(page, 0).locator('td').nth(12)).toHaveText('253,211')
+  await expect(orderRow(page, 0).locator('td').nth(13)).toHaveText('25,321')
+  const pending = page.waitForEvent('download')
+  await page.getByRole('button', { name: '현재 탭 CSV', exact: true }).click()
+  const rows = parseOrderCSV(await readFile((await (await pending).path())!, 'utf8'))
+  expect(rows[1][12]).toBe('253210.75714'); expect(rows[1][14]).toBe('25321.075714')
+  const workbook = await xlsxDownload(page), order = workbook.worksheets[0]
+  expect(order.getCell('M2').result).toBe(253210.75714); expect(order.getCell('O2').value).toBe(25321.075714)
+  expect(order.getCell('M2').numFmt).toBe('#,##0;[Red]-#,##0'); expect(order.getCell('O2').numFmt).toBe('#,##0;[Red]-#,##0')
+  await tab(page, '원가계산서')
+  const costRow = page.getByRole('table', { name: '원가계산서', exact: true }).locator('tbody tr').filter({ hasText: STYLES[0] })
+  await expect(costRow.locator('td').nth(16)).toHaveText('123.45')
+  await expect(costRow.locator('td').nth(17)).toHaveText('234.56')
+  await expect(costRow.locator('td').nth(18)).toHaveText('0.1234')
+  await expect(costRow.locator('td').nth(20)).toHaveText('253,210.75714')
+  await tab(page, 'FA을지 누적')
+  await expect(faRow(page, 0).locator('td').nth(9)).toHaveText('1,234.56')
+  await expect(faRow(page, 0).locator('td').nth(14)).toHaveText('12,345.6')
+  const after = await snapshot(page)
+  expect(after.budgetRecords).toEqual(before.budgetRecords); expect(after.budgetSources).toEqual(before.budgetSources)
+})
+
 test('원가 미등록과 0원을 구분하고 사전·사후 원가를 발주 예산·코드·단가에 연결해 보존한다', async ({ page }) => {
   await fixture(page, false)
   const before = await snapshot(page)

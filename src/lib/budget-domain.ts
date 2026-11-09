@@ -168,8 +168,8 @@ function sumCost(costs: Extract<BudgetRecord, { kind: 'cost' }>[], stage: 'pre' 
   const rows = costs.filter(record => record.data.stage === stage && !record.data.voided)
   return rows.length && rows.every(record => record.data.amount !== null) ? moneySum(rows.map(record => record.data.amount!)) : null
 }
-/** Imported ordinary rows are per garment (variable price takes precedence).
- * Common expenses and legacy manually entered totals are allocated only once.
+/** Every imported row belongs to the source workbook's final per-garment cost,
+ * including common expenses. Only legacy manually entered totals are allocated.
  * No saved cost, production or payment record is rewritten by this projection. */
 function productionCosts(costs: Extract<BudgetRecord, { kind: 'cost' }>[], importedIds: ReadonlySet<string>, quantity: number): { budget: number | null; unitCost: number | null } {
   const rows = costs.filter(record => record.data.stage === 'pre' && !record.data.voided)
@@ -178,7 +178,7 @@ function productionCosts(costs: Extract<BudgetRecord, { kind: 'cost' }>[], impor
   const perUnit: number[] = [], fixed: number[] = []
   for (const record of rows) {
     const cost = record.data
-    if (!importedIds.has(record.id) || cost.category.normalize('NFKC').replace(/\s/g, '') === '공용비용') fixed.push(cost.amount!)
+    if (!importedIds.has(record.id)) fixed.push(cost.amount!)
     else {
       if (cost.unitCost === null || cost.consumption === null) return unknown
       perUnit.push(multiplyBudgetCost(cost.variableUnitCost ?? cost.unitCost, cost.consumption))

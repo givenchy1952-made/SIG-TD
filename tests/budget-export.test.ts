@@ -28,6 +28,27 @@ async function formulas(bytes: Uint8Array) {
 }
 
 describe('신규 예산·FA 누적 Excel/CSV', () => {
+  it('발주·요약 금액은 원 단위 서식으로 표시하면서 소수 원본과 상세 원가·FA 근거는 유지한다', async () => {
+    const report = fixture()
+    report.orders[0].quantity = 10; report.orders[0].productionBudget = 253210.75714; report.orders[0].productionUnitCost = 25321.075714
+    report.totals.budget = 253210.75714
+    const workbook = await reopen(await buildBudgetWorkbook(report))
+    const order = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!, dashboard = workbook.getWorksheet(BUDGET_SHEET_NAMES.dashboard)!
+    const cost = workbook.getWorksheet(BUDGET_SHEET_NAMES.costs)!, fa = workbook.getWorksheet(BUDGET_SHEET_NAMES.fa)!
+    const excess = workbook.getWorksheet(BUDGET_SHEET_NAMES.excess)!, unclosed = workbook.getWorksheet(BUDGET_SHEET_NAMES.unclosed)!
+    const wonFormat = '#,##0;[Red]-#,##0'
+    for (const cell of [order.getCell('M2'), order.getCell('O2'), dashboard.getCell('A2'), dashboard.getCell('B4'), dashboard.getCell('E8'), dashboard.getCell('R8'), excess.getCell('G3'), excess.getCell('L3'), excess.getCell('L1'), unclosed.getCell('F2')]) expect(cell.numFmt).toBe(wonFormat)
+    expect(order.getCell('M2').result).toBe(253210.75714)
+    expect(order.getCell('O2').value).toBe(25321.075714)
+    expect(dashboard.getCell('A2').result).toBe(253210.75714)
+    expect(cost.getCell('Q2').value).toBe(1.23); expect(cost.getCell('Q2').numFmt).toBe('#,##0.00;[Red]-#,##0.00')
+    expect(cost.getCell('S2').value).toBe(1.5); expect(cost.getCell('S2').numFmt).toBe('#,##0.####')
+    expect(cost.getCell('U2').value).toBe(1234.56); expect(cost.getCell('U2').numFmt).toBe('#,##0.00####;[Red]-#,##0.00####')
+    expect(fa.getCell('O4').result).toBe(1300.24); expect(fa.getCell('O4').numFmt).toBe('#,##0.00;[Red]-#,##0.00')
+    const rows = parseOrderCSV(budgetCSV(report, 'orders'))
+    expect(rows[1][12]).toBe('253210.75714'); expect(rows[1][14]).toBe('25321.075714')
+  })
+
   it('사후원가 확인을 제거하고 M=장당 O×수량 J와 O 주소를 Excel·CSV에서 유지한다', async () => {
     const report = fixture(), workbook = await reopen(await buildBudgetWorkbook(report))
     const sheet = workbook.getWorksheet(BUDGET_SHEET_NAMES.orders)!
