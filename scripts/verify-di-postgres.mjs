@@ -20,7 +20,7 @@ try {
   docker(['run', '-d', '--name', container, '-e', 'POSTGRES_PASSWORD=synthetic-local-only', 'postgres:17'])
   let ready = false
   for (let attempt = 0; attempt < 60; attempt++) {
-    if (spawnSync('docker', ['exec', container, 'pg_isready', '-U', 'postgres']).status === 0) { ready = true; break }
+    if (spawnSync('docker', ['exec', container, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']).status === 0) { ready = true; break }
     await new Promise(resolve => setTimeout(resolve, 500))
   }
   assert(ready, 'isolated PostgreSQL did not start')
