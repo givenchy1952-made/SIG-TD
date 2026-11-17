@@ -1,2 +1,6 @@
 # Preserve the exact Korean encoding and Windows line endings in this fixture.
 tests/fixtures/*-cp949.csv binary
+
+# Vite/Vitest cannot evaluate hashbang CLI modules checked out with CRLF.
+# Keep executable modules portable when Git for Windows uses autocrlf=true.
+scripts/*.mjs text eol=lf

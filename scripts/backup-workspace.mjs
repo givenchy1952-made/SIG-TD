@@ -3,7 +3,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
@@ -17,7 +17,7 @@ const PLATFORM_DEFINITIONS = 'db/platform-app.json'
 const SNAPSHOT = /^[A-Fa-f0-9]+-[A-Fa-f0-9]+-[0-9]+$/
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
-function required(env, key) { const value = env[key]?.trim(); if (!value) throw new Error(`${key} 설정이 필요합니다.`); return value }
+export function required(env, key) { const value = env[key]?.trim(); if (!value) throw new Error(`${key} 설정이 필요합니다.`); return value }
 export function projectEndpoint(value) {
   let url
   try { url = new URL(value) } catch { throw new Error('Supabase 기본 HTTPS 주소를 확인하세요.') }
@@ -40,8 +40,8 @@ export function storageName(value, bucket = false) {
 }
 const objectURL = (base, bucket, name) => `${base}/storage/v1/object/${encodeURIComponent(storageName(bucket, true))}/${storageName(name).split('/').map(encodeURIComponent).join('/')}`
 function passphrase(value) { if (typeof value !== 'string' || value.length < 32) throw new Error('백업 암호는 32자 이상으로 별도 보관해야 합니다.'); return value }
-function byteLimit(value) { const limit = Number(value === undefined || value === '' ? DEFAULT_MAX_BYTES : value); if (!Number.isSafeInteger(limit) || limit < 1024 || limit > 2 * 1024 ** 3) throw new Error('백업 크기 제한은 1KiB~2GiB 범위여야 합니다.'); return limit }
-async function limitedBytes(response, limit) {
+export function byteLimit(value) { const limit = Number(value === undefined || value === '' ? DEFAULT_MAX_BYTES : value); if (!Number.isSafeInteger(limit) || limit < 1024 || limit > 2 * 1024 ** 3) throw new Error('백업 크기 제한은 1KiB~2GiB 범위여야 합니다.'); return limit }
+export async function limitedBytes(response, limit) {
   if (Number(response.headers.get('content-length') || 0) > limit) throw new Error('백업 크기 제한을 초과했습니다.')
   const reader = response.body?.getReader()
   if (!reader) return Buffer.alloc(0)
@@ -98,7 +98,7 @@ export async function openDatabaseSnapshot(env, command = 'psql', secrets = []) 
     async close() { if (!ended) child.stdin.end('ROLLBACK;\n\\q\n'); await completion },
   }
 }
-async function api(fetcher, url, key, options = {}) {
+export async function api(fetcher, url, key, options = {}) {
   const response = await fetcher(url, { ...options, headers: { apikey: key, Authorization: `Bearer ${key}`, ...options.headers }, signal: AbortSignal.timeout(120_000) })
   if (!response.ok) throw new Error(`Storage 요청 실패 (${response.status}). 연결·서버 키·권한을 확인하세요.`)
   return response
@@ -134,10 +134,10 @@ export async function listStorage(base, key, fetcher = fetch) {
   }
   return { buckets, objects }
 }
-const countSQL = `select coalesce(jsonb_object_agg(c.relname,(xpath('/row/n/text()',query_to_xml(format('select count(*) n from public.%I',c.relname),false,true,'')))[1]::text::bigint),'{}'::jsonb)::text from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and not exists(select 1 from pg_depend d where d.objid=c.oid and d.deptype='e')`
+export const countSQL = `select coalesce(jsonb_object_agg(c.relname,(xpath('/row/n/text()',query_to_xml(format('select count(*) n from public.%I',c.relname),false,true,'')))[1]::text::bigint),'{}'::jsonb)::text from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and not exists(select 1 from pg_depend d where d.objid=c.oid and d.deptype='e')`
 const authCountSQL = `select jsonb_build_object('users',(select count(*) from auth.users),'identities',(select count(*) from auth.identities),'mfa_factors',(select count(*) from auth.mfa_factors))::text`
-const storageSnapshotSQL = `select jsonb_build_object('buckets',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'public',public,'file_size_limit',file_size_limit,'allowed_mime_types',allowed_mime_types)) from storage.buckets),'[]'::jsonb),'objects',coalesce((select jsonb_agg(jsonb_build_object('bucket',bucket_id,'name',name,'id',id,'updatedAt',updated_at,'metadata',metadata)) from (select * from storage.objects order by bucket_id,name limit 100001) o),'[]'::jsonb))::text as storage_snapshot`
-function storageFingerprint(storage) {
+export const storageSnapshotSQL = `select jsonb_build_object('buckets',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'public',public,'file_size_limit',file_size_limit,'allowed_mime_types',allowed_mime_types)) from storage.buckets),'[]'::jsonb),'objects',coalesce((select jsonb_agg(jsonb_build_object('bucket',bucket_id,'name',name,'id',id,'updatedAt',updated_at,'metadata',metadata)) from (select * from storage.objects order by bucket_id,name limit 100001) o),'[]'::jsonb))::text as storage_snapshot`
+export function storageFingerprint(storage) {
   return canonical({
     buckets: storage.buckets.map(bucket => ({ id: bucket.id, name: bucket.name, public: !!bucket.public, file_size_limit: bucket.file_size_limit == null ? null : Number(bucket.file_size_limit), allowed_mime_types: bucket.allowed_mime_types == null ? null : [...bucket.allowed_mime_types].sort() })).sort((a, b) => a.id.localeCompare(b.id)),
     objects: storage.objects.map(item => ({ bucket: item.bucket, name: item.name, id: item.id, updatedAt: item.updatedAt && !Number.isNaN(Date.parse(item.updatedAt)) ? new Date(item.updatedAt).toISOString() : item.updatedAt, metadata: item.metadata || {} })).sort((a, b) => `${a.bucket}/${a.name}`.localeCompare(`${b.bucket}/${b.name}`)),
@@ -146,7 +146,7 @@ function storageFingerprint(storage) {
 const freshTargetSQL = `select ((select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and not exists(select 1 from pg_depend d where d.objid=c.oid and d.deptype='e'))+(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists(select 1 from pg_depend d where d.objid=p.oid and d.deptype='e'))+(select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='public' and t.typtype in ('d','e') and not exists(select 1 from pg_depend d where d.objid=t.oid and d.deptype='e')))::text`
 // pg_dump --schema=public omits app triggers on auth.users and Storage policies.
 export const platformDefinitionsSQL = `select jsonb_build_object('authTriggers',coalesce((select jsonb_agg(pg_get_triggerdef(t.oid)||';'||case t.tgenabled when 'D' then format(' ALTER TABLE auth.users DISABLE TRIGGER %I;',t.tgname) when 'A' then format(' ALTER TABLE auth.users ENABLE ALWAYS TRIGGER %I;',t.tgname) when 'R' then format(' ALTER TABLE auth.users ENABLE REPLICA TRIGGER %I;',t.tgname) else '' end order by t.tgname) from pg_trigger t join pg_proc p on p.oid=t.tgfoid join pg_namespace n on n.oid=p.pronamespace where t.tgrelid='auth.users'::regclass and not t.tgisinternal and n.nspname='public'),'[]'::jsonb),'storagePolicies',coalesce((select jsonb_agg(format('CREATE POLICY %I ON %I.%I AS %s FOR %s TO %s%s%s;',policyname,schemaname,tablename,permissive,cmd,(select string_agg(quote_ident(role_name),', ') from unnest(roles) role_name),case when qual is null then '' else ' USING ('||qual||')' end,case when with_check is null then '' else ' WITH CHECK ('||with_check||')' end) order by tablename,policyname) from pg_policies where schemaname='storage' and tablename in ('objects','buckets')),'[]'::jsonb))::text as definitions`
-async function queryJSON(env, command, sql, snapshot) {
+export async function queryJSON(env, command, sql, snapshot) {
   if (snapshot && !SNAPSHOT.test(snapshot)) throw new Error('DB snapshot 값이 올바르지 않습니다.')
   const statement = snapshot ? `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT '${snapshot}'; ${sql}; COMMIT;` : sql
   return JSON.parse(await run(command, ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', statement], env, [env.PGPASSWORD]))
@@ -155,14 +155,16 @@ async function databaseCounts(env, command = 'psql', snapshot) {
   return { public: await queryJSON(env, command, countSQL, snapshot), auth: await queryJSON(env, command, authCountSQL, snapshot) }
 }
 export function validateManifest(manifest) {
-  if (!manifest || manifest.format !== 'sig-workspace-backup' || manifest.version !== 1 || !/^[a-z0-9]{6,64}$/.test(manifest.source?.projectRef || '') || !Array.isArray(manifest.files) || !Array.isArray(manifest.storage?.buckets) || !Array.isArray(manifest.storage?.objects) || manifest.storage.objects.length > MAX_FILES) throw new Error('지원하지 않는 백업 manifest입니다.')
+  if (!manifest || !['sig-workspace-backup', 'sig-di-backup'].includes(manifest.format) || manifest.version !== 1 || !/^[a-z0-9]{6,64}$/.test(manifest.source?.projectRef || '') || !Array.isArray(manifest.files) || !Array.isArray(manifest.storage?.buckets) || !Array.isArray(manifest.storage?.objects) || manifest.storage.objects.length > MAX_FILES) throw new Error('지원하지 않는 백업 manifest입니다.')
+  const di = manifest.format === 'sig-di-backup'
+  const requiredDumps = di ? ['db/public-schema.sql', 'db/public-data.json', 'db/catalog.json'] : DUMPS
   const paths = new Set()
   for (const file of manifest.files) {
-    if (!(DUMPS.includes(file.path) || file.path === PLATFORM_DEFINITIONS || /^storage\/[a-f0-9]{64}\.bin$/.test(file.path)) || paths.has(file.path) || !HASH.test(file.sha256) || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error('백업 파일 경로·체크섬이 올바르지 않습니다.')
+    if (!(requiredDumps.includes(file.path) || !di && file.path === PLATFORM_DEFINITIONS || /^storage\/[a-f0-9]{64}\.bin$/.test(file.path)) || paths.has(file.path) || !HASH.test(file.sha256) || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error('백업 파일 경로·체크섬이 올바르지 않습니다.')
     paths.add(file.path)
   }
-  if (DUMPS.some(path => !paths.has(path))) throw new Error('데이터베이스 덤프가 누락되었습니다.')
-  if (!paths.has(PLATFORM_DEFINITIONS)) throw new Error('가입 트리거·Storage 권한 백업이 누락되었습니다.')
+  if (requiredDumps.some(path => !paths.has(path))) throw new Error('데이터베이스 덤프가 누락되었습니다.')
+  if (!di && !paths.has(PLATFORM_DEFINITIONS)) throw new Error('가입 트리거·Storage 권한 백업이 누락되었습니다.')
   const names = new Set(), bucketIds = new Set()
   for (const bucket of manifest.storage.buckets) { storageName(bucket.id, true); if (bucketIds.has(bucket.id)) throw new Error('버킷이 중복됩니다.'); bucketIds.add(bucket.id) }
   for (const item of manifest.storage.objects) {
@@ -171,7 +173,9 @@ export function validateManifest(manifest) {
     if (names.has(key) || !bucketIds.has(item.bucket) || !paths.has(item.path) || !/^storage\/[a-f0-9]{64}\.bin$/.test(item.path)) throw new Error('Storage manifest가 올바르지 않습니다.')
     names.add(key)
   }
-  if (!manifest.counts || !manifest.counts.public || !manifest.counts.auth || typeof manifest.counts.public !== 'object' || typeof manifest.counts.auth !== 'object' || [manifest.counts.public, manifest.counts.auth].some(counts => Object.values(counts).some(count => !Number.isSafeInteger(count) || count < 0))) throw new Error('DB 검증 정보가 없습니다.')
+  if (di && (manifest.counts?.auth !== undefined || manifest.excludesAuth !== true)) throw new Error('DI 백업은 auth 데이터를 포함할 수 없습니다.')
+  const countSets = di ? [manifest.counts?.public] : [manifest.counts?.public, manifest.counts?.auth]
+  if (countSets.some(counts => !counts || typeof counts !== 'object' || Array.isArray(counts) || Object.values(counts).some(count => !Number.isSafeInteger(count) || count < 0))) throw new Error('DB 검증 정보가 없습니다.')
   return manifest
 }
 export function assertRestoreTarget(manifest, targetRef, confirmation, protectedRefs = []) {
@@ -271,7 +275,7 @@ export async function backupWorkspace(env = process.env, fetcher = fetch) {
     const outputDirectory = resolve(env.SIG_BACKUP_DIRECTORY || join(tmpdir(), 'sig-backups')); await mkdir(outputDirectory, { recursive: true, mode: 0o700 })
     const filename = join(outputDirectory, `SIG-${source.ref}-${manifest.createdAt.replace(/[:.]/g, '-')}.sigbackup`)
     await writeFile(filename, encryptBytes(bytes, password), { mode: 0o600, flag: 'wx' })
-    await writeFile(`${filename}.sha256`, `${sha256(await readFile(filename))}  ${filename.split('/').at(-1)}\n`, { mode: 0o600 })
+    await writeFile(`${filename}.sha256`, `${sha256(await readFile(filename))}  ${basename(filename)}\n`, { mode: 0o600 })
     await readArchive(filename, password, maxBytes)
     return { file: filename, objects: storage.objects.length, tables: Object.keys(before.public).length, projectRef: source.ref, sha256: sha256(await readFile(filename)) }
   } finally { if (snapshotConnection) await snapshotConnection.close().catch(() => {}); await rm(directory, { recursive: true, force: true }) }
@@ -279,6 +283,7 @@ export async function backupWorkspace(env = process.env, fetcher = fetch) {
 export async function restoreWorkspace(path, env = process.env, { apply = false, confirmTarget = '' } = {}, fetcher = fetch) {
   const maxBytes = byteLimit(env.SIG_BACKUP_MAX_BYTES)
   const { manifest, files } = await readArchive(resolve(path), required(env, 'SIG_BACKUP_PASSPHRASE'), maxBytes)
+  if (manifest.format !== 'sig-workspace-backup') throw new Error('DI 백업은 DI 마이그레이션 가이드를 사용하세요. 전체 복원 도구로 적용할 수 없습니다.')
   let platform
   try { platform = JSON.parse(files.get(PLATFORM_DEFINITIONS).toString('utf8')) } catch { throw new Error('가입 트리거·Storage 권한 정의가 올바르지 않습니다.') }
   if (!Array.isArray(platform.authTriggers) || !Array.isArray(platform.storagePolicies) || [...platform.authTriggers, ...platform.storagePolicies].some(sql => typeof sql !== 'string' || sql.length > 1024 * 1024)) throw new Error('가입 트리거·Storage 권한 정의가 올바르지 않습니다.')
@@ -330,5 +335,7 @@ export async function restoreWorkspace(path, env = process.env, { apply = false,
   } finally { await rm(directory, { recursive: true, force: true }) }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  backupWorkspace().then(result => console.log(JSON.stringify(result, null, 2))).catch(error => { console.error(redact(error.message, [process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SIG_BACKUP_PASSPHRASE])); process.exitCode = 1 })
+  const args = process.argv.slice(2)
+  const task = args.length === 0 ? backupWorkspace() : args.length === 1 && args[0] === '--mode=di' ? import('./backup-di.mjs').then(module => module.backupDI()) : Promise.reject(new Error('사용법: node scripts/backup-workspace.mjs [--mode=di]'))
+  task.then(result => console.log(JSON.stringify(result, null, 2))).catch(error => { console.error(redact(error.message, [process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SIG_BACKUP_PASSPHRASE])); process.exitCode = 1 })
 }
