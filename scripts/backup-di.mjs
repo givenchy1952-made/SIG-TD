@@ -70,14 +70,14 @@ function configuration(env) {
   const source = projectEndpoint(required(env, 'SUPABASE_URL'))
   const dbEnv = postgresEnvironment(required(env, 'SUPABASE_DB_URL'), source.ref, { PGOPTIONS: '-c default_transaction_read_only=on', ...(env.SUPABASE_DB_SSL_ROOT_CERT ? { PGSSLROOTCERT: env.SUPABASE_DB_SSL_ROOT_CERT } : {}) })
   dbEnv.PGOPTIONS = '-c default_transaction_read_only=on -c row_security=off -c DateStyle=ISO -c TimeZone=UTC -c IntervalStyle=postgres -c bytea_output=hex -c extra_float_digits=3'
-  return { source, dbEnv, psql: env.PSQL_BIN || 'psql', dump: env.PG_DUMP_BIN || 'pg_dump', secrets: [env.SUPABASE_SERVICE_ROLE_KEY, dbEnv.PGPASSWORD, env.SIG_BACKUP_PASSPHRASE] }
+  return { run, queryJSON, openDatabaseSnapshot, source, dbEnv, psql: env.PSQL_BIN || 'psql', dump: env.PG_DUMP_BIN || 'pg_dump', secrets: [env.SUPABASE_SERVICE_ROLE_KEY, dbEnv.PGPASSWORD, env.SIG_BACKUP_PASSPHRASE] }
 }
 async function schemaAndCatalog(config, directory, snapshot) {
   const path = join(directory, 'schema.sql')
-  await run(config.dump, ['--format=plain', '--schema-only', '--schema=public', '--no-owner', `--snapshot=${snapshot}`, '--file', path], config.dbEnv, config.secrets)
+  await config.run(config.dump, ['--format=plain', '--schema-only', '--schema=public', '--no-owner', `--snapshot=${snapshot}`, '--file', path], config.dbEnv, config.secrets)
   // pg_dump emits random restriction keys on recent clients; do not hash those comments/guards.
   const schema = (await readFile(path, 'utf8')).replace(/^\\(?:un)?restrict .*\r?\n/gm, '').replace(/\r\n/g, '\n')
-  const catalog = await queryJSON(config.dbEnv, config.psql, catalogSQL, snapshot)
+  const catalog = await config.queryJSON(config.dbEnv, config.psql, catalogSQL, snapshot)
   return { schema, catalog }
 }
 export function reviewPolicy(schema, catalog) {
@@ -107,7 +107,7 @@ export async function reviewDI(env = process.env) {
   let connection
   const directory = await mkdtemp(join(tmpdir(), 'sig-di-review-')); await chmod(directory, 0o700)
   try {
-    connection = await openDatabaseSnapshot(config.dbEnv, config.psql, config.secrets)
+    connection = await config.openDatabaseSnapshot(config.dbEnv, config.psql, config.secrets)
     const { schema, catalog } = await schemaAndCatalog(config, directory, connection.snapshot)
     connection.assertOpen()
     for (const [name, value] of [['public-schema.sql', schema], ['catalog.json', JSON.stringify(catalog, null, 2)], ['policy.json', JSON.stringify(reviewPolicy(schema, catalog), null, 2)]]) await writeFile(join(output, name), value, { mode: 0o600, flag: 'wx' })
@@ -120,8 +120,8 @@ export function rowQuery(table, included) {
   const values = columns.map(column => `${ident(column.name)}::text`).join(',')
   return `select coalesce(jsonb_agg(row_values),'[]'::jsonb)::text from (select jsonb_build_array(${values}) as row_values from public.${ident(table.name)}) rows`
 }
-export async function backupDI(env = process.env, fetcher = fetch) {
-  const config = configuration(env), key = required(env, 'SUPABASE_SERVICE_ROLE_KEY'), password = required(env, 'SIG_BACKUP_PASSPHRASE'), max = byteLimit(env.SIG_BACKUP_MAX_BYTES)
+export async function backupDI(env = process.env, fetcher = fetch, clients = {}) {
+  const config = { ...configuration(env), ...clients }, key = required(env, 'SUPABASE_SERVICE_ROLE_KEY'), password = required(env, 'SIG_BACKUP_PASSPHRASE'), max = byteLimit(env.SIG_BACKUP_MAX_BYTES)
   // Validate the key before opening a source connection.
   encryptBytes(Buffer.from('key validation'), password)
   const policy = JSON.parse(await readFile(resolve(required(env, 'SIG_DI_POLICY_FILE')), 'utf8'))
@@ -129,14 +129,14 @@ export async function backupDI(env = process.env, fetcher = fetch) {
   let connection
   try {
     const storage = await listStorage(config.source.url, key, fetcher)
-    connection = await openDatabaseSnapshot(config.dbEnv, config.psql, config.secrets)
+    connection = await config.openDatabaseSnapshot(config.dbEnv, config.psql, config.secrets)
     const { schema, catalog } = await schemaAndCatalog(config, directory, connection.snapshot)
     validatePolicy(policy, schema, catalog)
     const exportSchema = await readFile(join(dirname(resolve(env.SIG_DI_POLICY_FILE)), 'public-schema.sql'))
     if (sha256(exportSchema) !== policy.exportSchemaSha256) throw new Error('검토된 내보내기 스키마 체크섬이 다릅니다.')
     assertNoCredentials(exportSchema.toString('utf8'), config.secrets)
-    const counts = { public: await queryJSON(config.dbEnv, config.psql, countSQL, connection.snapshot) }
-    const snapshotStorage = await queryJSON(config.dbEnv, config.psql, diStorageSQL, connection.snapshot)
+    const counts = { public: await config.queryJSON(config.dbEnv, config.psql, countSQL, connection.snapshot) }
+    const snapshotStorage = await config.queryJSON(config.dbEnv, config.psql, diStorageSQL, connection.snapshot)
     if (storageFingerprint(storage) !== storageFingerprint(snapshotStorage)) throw new Error('DB snapshot과 Storage가 다릅니다. 업로드·삭제를 멈춘 시간에 다시 실행하세요.')
     const archive = new JSZip(), files = []; let total = 0
     function add(path, bytes) {
@@ -149,7 +149,7 @@ export async function backupDI(env = process.env, fetcher = fetch) {
     for (const table of catalog.tables) {
       const included = policy.tables[table.name].include
       const columns = table.columns.filter(column => included.includes(column.name))
-      const rows = await queryJSON(config.dbEnv, config.psql, rowQuery(table, included), connection.snapshot)
+      const rows = await config.queryJSON(config.dbEnv, config.psql, rowQuery(table, included), connection.snapshot)
       for (const row of rows) for (let index = 0; index < columns.length; index++) {
         if (row[index] !== null && ['json', 'jsonb'].includes(columns[index].type)) row[index] = sanitizeJSONText(row[index])
         if (row[index] !== null) assertNoCredentials(row[index], config.secrets)
