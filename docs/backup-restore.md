@@ -1,6 +1,6 @@
 # 데이터베이스·사진·PDF 백업과 복원
 
-이번 작업에서는 실행 도구와 자동 실행 설정을 추가했습니다. 실제 Supabase 연결 설정, 자동 백업 활성화, 운영 데이터 백업 및 별도 서버 복원 시험은 사용자의 요청에 따라 나중에 진행합니다. 현재 백업이 실행 중이거나 복원 시험이 끝났다는 뜻은 아닙니다.
+전체 백업·복원 CLI를 제공합니다. 실제 Supabase 연결 설정, 자동 백업 활성화, 운영 데이터 백업 및 별도 서버 복원 시험은 사용자의 요청에 따라 나중에 진행합니다. 현재 백업이 실행 중이거나 복원 시험이 끝났다는 뜻은 아닙니다.
 
 ## 백업에 포함되는 내용
 
@@ -15,29 +15,17 @@
 
 백업은 AES-256-GCM으로 암호화하며 매번 다른 salt와 nonce를 사용합니다. 암호 없이는 복원할 수 없습니다. `.sha256`은 다운로드한 암호화 파일의 손상을 확인할 때 사용합니다. 백업 암호는 32자 이상이어야 하며, `openssl rand -base64 48`로 만든 무작위 값을 권장합니다.
 
-## 나중에 자동 백업을 켜는 방법
+## 실행·보관 정책
 
-GitHub 저장소의 **Settings → Secrets and variables → Actions**에서 다음 **Secrets**를 등록합니다. 이 값들은 브라우저 코드나 Vercel의 `VITE_*` 환경 변수에 넣지 않습니다.
+전체 백업 CLI는 유지합니다. DI팀에 전달하는 이관 자료는 auth/전체 dump를 제외한 [DI 전용 가이드](di-backup-migration.md)를 사용하세요. 실제 업무 백업을 공개 GitHub 또는 GitHub Actions Artifact에 저장하지 않습니다.
 
-| Secret | 값 |
-| --- | --- |
-| `SUPABASE_URL` | 운영 Supabase 기본 주소. `/rest/v1` 등을 붙이지 않습니다. |
-| `SUPABASE_DB_URL` | 운영 DB의 비밀번호가 포함된 direct 연결 또는 session pooler 연결 주소 |
-| `SUPABASE_SERVICE_ROLE_KEY` | 운영 프로젝트의 서버 전용 `service_role` 키 |
-| `SIG_BACKUP_PASSPHRASE` | 별도로 보관할 무작위 백업 암호 |
-| `SUPABASE_DB_CA_CERT` | 필요한 경우 Supabase에서 내려받은 DB 루트 인증서의 PEM 내용 |
+기존 `workspace-backup.yml`의 운영 접속·정기 백업·Artifact 업로드는 제거되었으며 현재는 Linux/Windows 합성 테스트 전용입니다. `SIG_BACKUP_ENABLED`와 Actions Secrets를 등록해도 운영 백업이 실행되지 않습니다. 로컬/회사 승인 비공개 실행 환경에서 다음 수동 절차를 사용하고 암호화 파일을 승인된 비공개 보관소로 옮기세요. 별도 자동 보관 스케줄은 이 작업에서 구성하지 않습니다.
 
-DB 비밀번호에 `@`, `:`, `/` 등이 있으면 URL 인코딩합니다. transaction pooler의 `6543` 포트는 지원하지 않습니다. IPv6 direct 연결이 안 되면 session pooler의 `5432` 포트와 `postgres.프로젝트ID` 사용자 이름을 사용합니다. API 프로젝트와 DB 프로젝트가 다르면 백업을 중단합니다.
-
-Actions의 **Variables**에 `SIG_BACKUP_ENABLED=true`를 등록하면 한국 시간 매일 오전 3시에 실행됩니다. 변수 미등록 시 정기 실행은 건너뜁니다. **Actions → Encrypted database and files backup → Run workflow**로 먼저 수동 실행하고 성공 여부를 확인하세요. 수동 실행에도 위 Secrets가 필요합니다.
-
-성공한 실행의 Artifacts에서 `sig-backup-실행번호`를 내려받을 수 있습니다. 보관 기간은 31일이며, 기간이 지나면 GitHub가 삭제합니다. 월별 보관본은 암호화된 상태로 별도 보관소에 복사하세요. GitHub에 알림 이메일 수신을 설정해 실패한 workflow를 확인하고, 적어도 월 1회 최근 성공 백업과 별도 프로젝트 복원 시험을 확인하는 운영 담당자를 정합니다. 이 workflow가 별도 알림 서비스로 메시지를 발송하지는 않습니다.
-
-기본 해제 크기 제한은 manifest와 중복 dump를 포함한 256 MiB입니다. 필요하면 Actions 변수 `SIG_BACKUP_MAX_BYTES`를 늘릴 수 있으며 최대 2 GiB입니다. 한 백업은 최대 100,000개 Storage 파일을 지원합니다. 메모리에 ZIP을 만들기 때문에 큰 데이터베이스에는 별도의 스트리밍 백업 도구와 장기 보관소가 필요합니다.
+기본 해제 크기 제한은 manifest와 중복 dump를 포함한 256 MiB, 최대 2 GiB이며 한 백업은 최대 100,000개 Storage 파일을 지원합니다. 메모리에 ZIP을 구성하므로 대규모 DB는 스트리밍 백업 도구가 필요합니다.
 
 ## 수동 실행
 
-Node.js 22 이상과 원본 서버 버전 이상인 PostgreSQL client tools가 필요합니다. 자동 workflow는 PostgreSQL 17 client를 설치합니다. DB 서버가 18 이상이면 workflow의 client 버전도 함께 올리세요. TLS는 `verify-full`로 서버 인증서와 호스트 이름을 검증합니다. 인증서 검증이 실패하면 Supabase에서 DB 루트 인증서를 내려받아 `SUPABASE_DB_SSL_ROOT_CERT`에 파일 경로를 지정하세요. 인증서 검증을 끄는 방식은 지원하지 않습니다.
+Node.js 22 이상과 원본 서버 버전 이상인 PostgreSQL client tools가 필요합니다. 로컬에 서버 버전 이상인 PostgreSQL client를 설치하세요. Windows 설치는 DI 가이드의 설치 절차를 참고하세요. TLS는 `verify-full`로 서버 인증서와 호스트 이름을 검증합니다. 인증서 검증이 실패하면 Supabase에서 DB 루트 인증서를 내려받아 `SUPABASE_DB_SSL_ROOT_CERT`에 파일 경로를 지정하세요. 인증서 검증을 끄는 방식은 지원하지 않습니다.
 
 [.env.backup.example](../.env.backup.example)을 참고해 **저장소 바깥의 비공개 환경 설정 파일**을 만들고 접근 권한을 `600`으로 제한합니다. 환경 변수를 안전하게 주입한 뒤 실행합니다. 환경 파일을 읽을 때는 파일 내용이 신뢰할 수 있는지 확인하세요. 비밀값을 명령줄 인수나 채팅에 붙여 넣지 않습니다.
 

@@ -1,69 +1,36 @@
-name: Encrypted database and files backup
+name: Backup tools synthetic verification
 
 on:
   workflow_dispatch:
-  schedule:
-    # 03:00 Asia/Seoul. Scheduling stays disabled until the repository variable is set.
-    - cron: '0 18 * * *'
+  pull_request:
+    paths:
+      - 'scripts/*backup*'
+      - 'scripts/backup-di.mjs'
+      - 'scripts/verify-di-postgres.mjs'
+      - 'tests/fixtures/di-backup-postgres.sql'
+      - 'tests/backup-restore.test.ts'
+      - 'tests/backup-di.test.ts'
+      - '.github/workflows/workspace-backup.yml'
 
 permissions:
   contents: read
 
-concurrency:
-  group: sig-workspace-backup
-  cancel-in-progress: false
-
 jobs:
-  backup:
-    if: github.event_name == 'workflow_dispatch' || vars.SIG_BACKUP_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
           cache: npm
-      - name: Install dependencies without package lifecycle scripts
-        run: npm ci --ignore-scripts
-      - name: Install PostgreSQL 17 clients
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
-          source /etc/os-release
-          printf 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -q
-          sudo apt-get install -y postgresql-client-17
-      - name: Configure optional database root certificate
-        shell: bash
-        env:
-          SUPABASE_DB_CA_CERT: ${{ secrets.SUPABASE_DB_CA_CERT }}
-        run: |
-          set -euo pipefail
-          if [ -n "$SUPABASE_DB_CA_CERT" ]; then
-            umask 077
-            printf '%s\n' "$SUPABASE_DB_CA_CERT" > "$RUNNER_TEMP/supabase-db-ca.crt"
-            printf 'SUPABASE_DB_SSL_ROOT_CERT=%s\n' "$RUNNER_TEMP/supabase-db-ca.crt" >> "$GITHUB_ENV"
-          fi
-      - name: Back up database, accounts, photos and PDFs
-        run: node scripts/backup-workspace.mjs
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SIG_BACKUP_PASSPHRASE: ${{ secrets.SIG_BACKUP_PASSPHRASE }}
-          SIG_BACKUP_DIRECTORY: ${{ runner.temp }}/sig-backups
-          SIG_BACKUP_MAX_BYTES: ${{ vars.SIG_BACKUP_MAX_BYTES || '268435456' }}
-          PG_DUMP_BIN: /usr/lib/postgresql/17/bin/pg_dump
-          PSQL_BIN: /usr/lib/postgresql/17/bin/psql
-      - name: Retain encrypted backup and checksum
-        uses: actions/upload-artifact@v4
-        with:
-          name: sig-backup-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/sig-backups/*.sigbackup
-            ${{ runner.temp }}/sig-backups/*.sigbackup.sha256
-          if-no-files-found: error
-          retention-days: 31
+      - run: npm ci --ignore-scripts
+      # No production secrets, hosted DB calls or artifact uploads.
+      - run: npx vitest run tests/backup-di.test.ts
+      - if: runner.os == 'Linux'
+        run: npx vitest run tests/backup-restore.test.ts
+      - if: runner.os == 'Linux'
+        run: node scripts/verify-di-postgres.mjs

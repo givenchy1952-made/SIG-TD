@@ -12,3 +12,7 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 supabase/.temp/
+# DI review/decryption material belongs outside the checkout, even for synthetic drills.
+.sig-di*/
+SIG-DI*/
+*.dump
